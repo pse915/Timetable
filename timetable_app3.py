@@ -252,21 +252,24 @@ def load_work_data_from_gsheet():
         absences = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "결강"))
         subs = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "보강"))
         swaps = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "맞교환"))
+        part_time = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "시간강사"))
 
         if not absences.empty and "교시" in absences.columns:
             absences["교시"] = pd.to_numeric(absences["교시"], errors="coerce").fillna(0).astype(int)
         if not subs.empty and "교시" in subs.columns:
             subs["교시"] = pd.to_numeric(subs["교시"], errors="coerce").fillna(0).astype(int)
-        return absences, subs, swaps
+            
+        return absences, subs, swaps, part_time
     except Exception as e:
         st.error(f"작업 내역 로드 실패: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 def save_work_data_to_gsheet():
     try:
         df_to_worksheet(get_worksheet(WORK_SHEET_ID, "결강"), st.session_state.absences)
         df_to_worksheet(get_worksheet(WORK_SHEET_ID, "보강"), st.session_state.subs)
         df_to_worksheet(get_worksheet(WORK_SHEET_ID, "맞교환"), st.session_state.swaps)
+        df_to_worksheet(get_worksheet(WORK_SHEET_ID, "시간강사"), st.session_state.part_time)
         return True
     except Exception as e:
         st.error(f"저장 실패: {e}")
