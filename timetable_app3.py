@@ -3,6 +3,7 @@
 ==========================================================================================
  중학교 전체 시간표 관리 및 결강·보강 자동 처리 프로그램  (Streamlit Web App)
  2026 서라벌여자중학교용 – Google Sheets 연동 최종 버전
+ (df_from_worksheet 문자열 강제 변환 + cache_data 적용)
 ------------------------------------------------------------------------------------------
  실행 방법
    1) pip install streamlit pandas numpy openpyxl xlsxwriter gspread google-auth
@@ -221,6 +222,7 @@ def normalize_frames(ti: pd.DataFrame, tt: pd.DataFrame):
             ti.at[i, "주당시수"] = len(sub)
     return ti.reset_index(drop=True), tt
 
+@st.cache_data(ttl=300, show_spinner="시간표 불러오는 중...")
 def load_timetable_from_gsheet():
     try:
         ws_ti = get_worksheet(TIMETABLE_SHEET_ID, "교사정보")
@@ -232,6 +234,7 @@ def load_timetable_from_gsheet():
         st.error(f"원본 시간표 로드 실패: {e}")
         return make_empty_frames()[:2]
 
+@st.cache_data(ttl=60, show_spinner="작업 내역 불러오는 중...")
 def load_work_data_from_gsheet():
     try:
         absences = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "결강"))
@@ -812,6 +815,8 @@ with st.sidebar:
     st.header("데이터 (Google Sheets)")
     
     if st.button("🔄 원본 시간표 다시 불러오기", use_container_width=True):
+        # 캐시 클리어 후 다시 로드
+        load_timetable_from_gsheet.clear()
         ti, tt = load_timetable_from_gsheet()
         st.session_state.teachers = ti
         st.session_state.timetable = tt
@@ -819,6 +824,7 @@ with st.sidebar:
         st.rerun()
 
     if st.button("🔄 작업 내역 다시 불러오기", use_container_width=True):
+        load_work_data_from_gsheet.clear()
         absences, subs, swaps = load_work_data_from_gsheet()
         st.session_state.absences = absences
         st.session_state.subs = subs
