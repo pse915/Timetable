@@ -97,8 +97,13 @@ def df_from_worksheet(ws) -> pd.DataFrame:
     data = ws.get_all_values()
     if not data or len(data) < 2:
         return pd.DataFrame()
-    df = pd.DataFrame(data[1:], columns=data[0])
-    return df.replace("", pd.NA)
+    
+    df = pd.DataFrame(data[1:], columns=[str(c) for c in data[0]])
+    
+    # 모든 값을 문자열로 강제 변환 (0, 1 같은 숫자도 문자열로)
+    df = df.astype(str).replace({"nan": "", "None": "", "<NA>": ""})
+    
+    return df
 
 def df_to_worksheet(ws, df: pd.DataFrame):
     ws.clear()
