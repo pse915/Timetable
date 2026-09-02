@@ -99,13 +99,22 @@ def df_from_worksheet(ws) -> pd.DataFrame:
     if not data or len(data) < 2:
         return pd.DataFrame()
     
-    df = pd.DataFrame(data[1:], columns=[str(c) for c in data[0]])
+    # 헤더를 문자열로 강제
+    headers = [str(h) for h in data[0]]
     
-    # 모든 값을 문자열로 강제 변환 (0, 1 같은 숫자도 문자열로)
-    df = df.astype(str).replace({"nan": "", "None": "", "<NA>": ""})
+    # 모든 셀 값을 문자열로 변환해서 데이터프레임 생성
+    rows = []
+    for row in data[1:]:
+        # 행 길이가 헤더보다 짧을 수 있으므로 보정
+        row = list(row) + [""] * (len(headers) - len(row))
+        rows.append([str(cell) if cell is not None else "" for cell in row[:len(headers)]])
+    
+    df = pd.DataFrame(rows, columns=headers)
+    
+    # 빈 값 정리
+    df = df.replace({"nan": "", "None": "", "NaN": "", "<NA>": ""})
     
     return df
-
 def df_to_worksheet(ws, df: pd.DataFrame):
     ws.clear()
     if df is None or df.empty:
