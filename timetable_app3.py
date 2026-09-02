@@ -2,11 +2,10 @@
 """
 ==========================================================================================
  중학교 전체 시간표 관리 및 결강·보강 자동 처리 프로그램  (Streamlit Web App)
- 2026 서라벌여자중학교용 – 최종 통합 버전
- (백업 누락 수정 + Undo/Redo 지원)
+ 2026 서라벌여자중학교용 – Google Sheets 연동 최종 버전
 ------------------------------------------------------------------------------------------
  실행 방법
-   1) pip install streamlit pandas numpy openpyxl xlsxwriter
+   1) pip install streamlit pandas numpy openpyxl xlsxwriter gspread google-auth
    2) streamlit run timetable_app.py
 ==========================================================================================
 """
@@ -20,6 +19,8 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
 
 # ==========================================================================================
 # 0. 기본 설정 / 상수
@@ -34,10 +35,11 @@ PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
 MAX_PERIOD = 7
 WEEKDAY_KR = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
 
-DATA_DIR = "data"
-STATE_FILE = os.path.join(DATA_DIR, "app_state.json")
-MAX_HISTORY = 30
+# Google Sheets ID
+TIMETABLE_SHEET_ID = "1jZhTHyJ8vKXn6tkoFXfY_f52-pj6eQTdVvRCo3cCmBA"   # 원본 시간표
+WORK_SHEET_ID = "1g1B1cyZG_tfRn3AD1NZzr30YxYNYFewJeZYdos2obpU"        # 작업 내역
 
+MAX_HISTORY = 30
 ABSENCE_REASONS = ["병가", "연가", "출장", "공가", "조퇴", "외출", "연수", "특별휴가", "기타"]
 
 SUBJECT_GROUP = {
@@ -69,15 +71,51 @@ def grade_of(class_name: str) -> str:
     return ""
 
 # ==========================================================================================
+# Google Sheets 연결
+# ==========================================================================================
+@st.cache_resource(show_spinner=False)
+def get_gspread_client():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=scopes
+    )
+    return gspread.authorize(creds)
+
+def get_worksheet(spreadsheet_id: str, sheet_name: str):
+    client = get_gspread_client()
+    sh = client.open_by_key(spreadsheet_id)
+    try:
+        return sh.worksheet(sheet_name)
+    except gspread.WorksheetNotFound:
+        return sh.add_worksheet(title=sheet_name, rows=2000, cols=40)
+
+def df_from_worksheet(ws) -> pd.DataFrame:
+    data = ws.get_all_values()
+    if not data or len(data) < 2:
+        return pd.DataFrame()
+    df = pd.DataFrame(data[1:], columns=data[0])
+    return df.replace("", pd.NA)
+
+def df_to_worksheet(ws, df: pd.DataFrame):
+    ws.clear()
+    if df is None or df.empty:
+        return
+    df_clean = df.fillna("").astype(str)
+    values = [df_clean.columns.tolist()] + df_clean.values.tolist()
+    ws.update(values, value_input_option="USER_ENTERED")
+
+# ==========================================================================================
 # 1. 히스토리 (Undo / Redo)
 # ==========================================================================================
 def push_history(action_name: str = "작업"):
-    """현재 상태를 히스토리에 저장"""
     if "history" not in st.session_state:
         st.session_state.history = []
         st.session_state.history_index = -1
 
-    # 현재 인덱스 이후의 redo 스택은 버림
     st.session_state.history = st.session_state.history[:st.session_state.history_index + 1]
 
     snapshot = {
@@ -89,7 +127,6 @@ def push_history(action_name: str = "작업"):
     }
     st.session_state.history.append(snapshot)
 
-    # 최대 개수 제한
     if len(st.session_state.history) > MAX_HISTORY:
         st.session_state.history.pop(0)
     else:
@@ -121,11 +158,10 @@ def init_history_if_needed():
     if "history" not in st.session_state:
         st.session_state.history = []
         st.session_state.history_index = -1
-        # 초기 상태 한 번 저장
         push_history("초기 상태")
 
 # ==========================================================================================
-# 2. 데이터 로드 / 저장 / 백업
+# 2. 데이터 로드 / 저장 (Google Sheets)
 # ==========================================================================================
 REQUIRED_TT_COLS = ["교사명", "요일", "교시", "과목", "학급"]
 
@@ -180,161 +216,75 @@ def normalize_frames(ti: pd.DataFrame, tt: pd.DataFrame):
             ti.at[i, "주당시수"] = len(sub)
     return ti.reset_index(drop=True), tt
 
-@st.cache_data(show_spinner=False)
-def read_excel(file_bytes: bytes):
-    xls = pd.ExcelFile(io.BytesIO(file_bytes))
-    ti = pd.read_excel(xls, "교사정보") if "교사정보" in xls.sheet_names else pd.DataFrame()
-    tt_sheet = "시간표" if "시간표" in xls.sheet_names else xls.sheet_names[0]
-    tt = pd.read_excel(xls, tt_sheet)
-    return ti, tt
+def load_timetable_from_gsheet():
+    try:
+        ws_ti = get_worksheet(TIMETABLE_SHEET_ID, "교사정보")
+        ws_tt = get_worksheet(TIMETABLE_SHEET_ID, "시간표")
+        ti = df_from_worksheet(ws_ti)
+        tt = df_from_worksheet(ws_tt)
+        return normalize_frames(ti, tt)
+    except Exception as e:
+        st.error(f"원본 시간표 로드 실패: {e}")
+        return make_empty_frames()[:2]
 
-def save_state():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    payload = {
-        "teachers": st.session_state.teachers.to_dict("records"),
-        "timetable": st.session_state.timetable.to_dict("records"),
-        "part_time": st.session_state.part_time.to_dict("records"),
-        "absences": st.session_state.absences.to_dict("records"),
-        "subs": st.session_state.subs.to_dict("records"),
-        "swaps": st.session_state.swaps.to_dict("records"),
-        "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    return STATE_FILE
+def load_work_data_from_gsheet():
+    try:
+        absences = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "결강"))
+        subs = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "보강"))
+        swaps = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "맞교환"))
 
-def load_state():
-    if not os.path.exists(STATE_FILE):
+        if not absences.empty and "교시" in absences.columns:
+            absences["교시"] = pd.to_numeric(absences["교시"], errors="coerce").fillna(0).astype(int)
+        if not subs.empty and "교시" in subs.columns:
+            subs["교시"] = pd.to_numeric(subs["교시"], errors="coerce").fillna(0).astype(int)
+        return absences, subs, swaps
+    except Exception as e:
+        st.error(f"작업 내역 로드 실패: {e}")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+def save_work_data_to_gsheet():
+    try:
+        df_to_worksheet(get_worksheet(WORK_SHEET_ID, "결강"), st.session_state.absences)
+        df_to_worksheet(get_worksheet(WORK_SHEET_ID, "보강"), st.session_state.subs)
+        df_to_worksheet(get_worksheet(WORK_SHEET_ID, "맞교환"), st.session_state.swaps)
+        return True
+    except Exception as e:
+        st.error(f"저장 실패: {e}")
         return False
-    with open(STATE_FILE, encoding="utf-8") as f:
-        p = json.load(f)
-    st.session_state.teachers = pd.DataFrame(p.get("teachers", []))
-    st.session_state.timetable = pd.DataFrame(p.get("timetable", []))
-    st.session_state.part_time = pd.DataFrame(p.get("part_time", []))
-    st.session_state.absences = pd.DataFrame(p.get("absences", []))
-    st.session_state.subs = pd.DataFrame(p.get("subs", []))
-    st.session_state.swaps = pd.DataFrame(p.get("swaps", []))
-    return True
-
-def safe_read_sheet(xls, possible_names):
-    """가능한 시트 이름 중에서 존재하는 것을 읽어옴"""
-    for name in possible_names:
-        if name in xls.sheet_names:
-            try:
-                df = pd.read_excel(xls, name)
-                if not df.empty:
-                    return df, name
-            except Exception:
-                continue
-    return pd.DataFrame(), None
-
-def restore_from_backup_xlsx_list(file_list):
-    """여러 백업 파일을 안전하게 누적 적용 (누락 최소화)"""
-    if not file_list:
-        return False, "업로드된 파일이 없습니다."
-
-    push_history("백업 적용 전")
-
-    total = {"결강": 0, "보강": 0, "맞교환": 0}
-    messages = []
-
-    for uploaded_file in file_list:
-        try:
-            xls = pd.ExcelFile(io.BytesIO(uploaded_file.getvalue()))
-            file_name = uploaded_file.name
-
-            # ---------- 결강 ----------
-            df_abs, sheet_abs = safe_read_sheet(xls, ["결강", "결강현황", "absence", "Absences"])
-            if not df_abs.empty:
-                # 컬럼 정리
-                df_abs = df_abs.copy()
-                # 필수 컬럼이 없으면 최대한 맞춤
-                current = st.session_state.absences
-                if current.empty:
-                    st.session_state.absences = df_abs
-                else:
-                    # 공통 컬럼만 맞춰서 합치기
-                    common_cols = list(set(current.columns) & set(df_abs.columns))
-                    if not common_cols:
-                        common_cols = df_abs.columns.tolist()
-                    combined = pd.concat([current, df_abs[common_cols]], ignore_index=True, sort=False)
-                    # 중복 제거를 매우 느슨하게 (전체 행 기준)
-                    combined = combined.drop_duplicates(keep="last")
-                    st.session_state.absences = combined.reset_index(drop=True)
-                total["결강"] += len(df_abs)
-                messages.append(f"✔ {file_name} [{sheet_abs}] 결강 {len(df_abs)}건")
-
-            # ---------- 보강 ----------
-            df_sub, sheet_sub = safe_read_sheet(xls, ["보강", "보강배정", "substitute", "Subs", "보강현황"])
-            if not df_sub.empty:
-                df_sub = df_sub.copy()
-                current = st.session_state.subs
-                if current.empty:
-                    st.session_state.subs = df_sub
-                else:
-                    common_cols = list(set(current.columns) & set(df_sub.columns))
-                    if not common_cols:
-                        common_cols = df_sub.columns.tolist()
-                    combined = pd.concat([current, df_sub[common_cols]], ignore_index=True, sort=False)
-                    combined = combined.drop_duplicates(keep="last")
-                    st.session_state.subs = combined.reset_index(drop=True)
-                total["보강"] += len(df_sub)
-                messages.append(f"✔ {file_name} [{sheet_sub}] 보강 {len(df_sub)}건")
-
-            # ---------- 맞교환 ----------
-            df_swap, sheet_swap = safe_read_sheet(xls, ["시간표맞교환", "맞교환", "시간표변경", "swaps", "Swap"])
-            if not df_swap.empty:
-                df_swap = df_swap.copy()
-                current = st.session_state.swaps
-                if current.empty:
-                    st.session_state.swaps = df_swap
-                else:
-                    common_cols = list(set(current.columns) & set(df_swap.columns))
-                    if not common_cols:
-                        common_cols = df_swap.columns.tolist()
-                    combined = pd.concat([current, df_swap[common_cols]], ignore_index=True, sort=False)
-                    combined = combined.drop_duplicates(keep="last")
-                    st.session_state.swaps = combined.reset_index(drop=True)
-                total["맞교환"] += len(df_swap)
-                messages.append(f"✔ {file_name} [{sheet_swap}] 맞교환 {len(df_swap)}건")
-
-            if not any([not df_abs.empty, not df_sub.empty, not df_swap.empty]):
-                messages.append(f"⚠ {file_name}: 인식 가능한 시트(결강/보강/맞교환)가 없습니다. 시트명: {xls.sheet_names}")
-
-        except Exception as e:
-            messages.append(f"❌ {uploaded_file.name}: 오류 - {str(e)}")
-
-    summary = f"총 적용 결과 → 결강 {total['결강']}건 / 보강 {total['보강']}건 / 맞교환 {total['맞교환']}건"
-    push_history("백업 적용 완료")
-    return True, summary + "\n\n" + "\n".join(messages)
 
 def init_state():
     if "teachers" in st.session_state:
         return
-    ti, tt, pt = make_empty_frames()
+
+    # 원본 시간표 로드
+    ti, tt = load_timetable_from_gsheet()
     st.session_state.teachers = ti
     st.session_state.timetable = tt
-    st.session_state.part_time = pt
-    st.session_state.absences = pd.DataFrame(
-        columns=["결강ID", "일자", "요일", "교사명", "사유", "상세사유", "교시", "학급", "과목", "등록시각"])
-    st.session_state.subs = pd.DataFrame(
-        columns=["결강ID", "일자", "요일", "교시", "학급", "과목",
-                 "결강교사", "보강교사", "배정방식", "우선순위", "비고", "등록시각"])
-    st.session_state.swaps = pd.DataFrame(
-        columns=["원본일자", "교사A", "요일A", "교시A", "학급A", "과목A",
-                 "목표일자", "교사B", "요일B", "교시B", "학급B", "과목B",
-                 "유형", "시간강사구인", "등록시각"])
-    if os.path.exists(STATE_FILE):
-        try:
-            load_state()
-        except Exception:
-            pass
+    st.session_state.part_time = make_empty_frames()[2]
+
+    # 작업 내역 로드
+    absences, subs, swaps = load_work_data_from_gsheet()
+
+    if absences.empty:
+        absences = pd.DataFrame(columns=["결강ID", "일자", "요일", "교사명", "사유", "상세사유", "교시", "학급", "과목", "등록시각"])
+    if subs.empty:
+        subs = pd.DataFrame(columns=["결강ID", "일자", "요일", "교시", "학급", "과목",
+                                     "결강교사", "보강교사", "배정방식", "우선순위", "비고", "등록시각"])
+    if swaps.empty:
+        swaps = pd.DataFrame(columns=["원본일자", "교사A", "요일A", "교시A", "학급A", "과목A",
+                                      "목표일자", "교사B", "요일B", "교시B", "학급B", "과목B",
+                                      "유형", "시간강사구인", "등록시각"])
+
+    st.session_state.absences = absences
+    st.session_state.subs = subs
+    st.session_state.swaps = swaps
+
     init_history_if_needed()
 
 init_state()
 
 # ==========================================================================================
-# 3. 핵심 로직 (이전과 동일 + push_history 추가)
+# 3. 핵심 로직 (기존과 동일)
 # ==========================================================================================
 def is_teacher_available(teacher: str, day: str, period: int, is_part_time: bool = False) -> bool:
     source = st.session_state.part_time if is_part_time else st.session_state.teachers
@@ -495,6 +445,7 @@ def add_substitute(cid, on_date, day, period, class_name, subject,
         "비고": memo, "등록시각": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
     st.session_state.subs = pd.concat([s, pd.DataFrame([new])], ignore_index=True)
+    save_work_data_to_gsheet()
 
 def check_conflicts(tt: pd.DataFrame) -> pd.DataFrame:
     issues = []
@@ -659,6 +610,7 @@ def do_swap(a: dict, b: dict, date_a: str, date_b: str, is_part_time_purpose: bo
         "등록시각": datetime.now().strftime("%Y-%m-%d %H:%M")
     }
     st.session_state.swaps = pd.concat([st.session_state.swaps, pd.DataFrame([rec])], ignore_index=True)
+    save_work_data_to_gsheet()
     return True
 
 def do_linked_swap(a: dict, teacher_b: str, date_a: str, date_b: str, day_b: str, period_b: int,
@@ -674,6 +626,7 @@ def do_linked_swap(a: dict, teacher_b: str, date_a: str, date_b: str, day_b: str
         "등록시각": datetime.now().strftime("%Y-%m-%d %H:%M")
     }
     st.session_state.swaps = pd.concat([st.session_state.swaps, pd.DataFrame([rec])], ignore_index=True)
+    save_work_data_to_gsheet()
     return True
 
 def teacher_matrix() -> pd.DataFrame:
@@ -851,44 +804,40 @@ def to_excel_bytes(sheets: dict) -> bytes:
 # 5. 사이드바
 # ==========================================================================================
 with st.sidebar:
-    st.header("데이터")
-    up = st.file_uploader("시간표 엑셀 업로드 (.xlsx)", type=["xlsx"], key="main_up")
-    if up is not None and st.button("불러오기", use_container_width=True, type="primary"):
-        try:
-            ti, tt = read_excel(up.getvalue())
-            ti, tt = normalize_frames(ti, tt)
-            st.session_state.teachers, st.session_state.timetable = ti, tt
-            st.success(f"교사 {len(ti)}명 · 수업 {len(tt)}건을 불러왔습니다.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"불러오기 실패: {e}")
+    st.header("데이터 (Google Sheets)")
+    
+    if st.button("🔄 원본 시간표 다시 불러오기", use_container_width=True):
+        ti, tt = load_timetable_from_gsheet()
+        st.session_state.teachers = ti
+        st.session_state.timetable = tt
+        st.success("원본 시간표를 다시 불러왔습니다.")
+        st.rerun()
 
-    st.subheader("백업 복원 (다중 파일)")
-    backup_files = st.file_uploader(
-        "결보강 내역서 백업 파일들 (xlsx) – 여러 개 선택 가능",
-        type=["xlsx"],
-        accept_multiple_files=True,
-        key="backup_up_multi"
-    )
-    if backup_files and st.button("선택한 백업 모두 적용", use_container_width=True, type="primary"):
-        ok, msg = restore_from_backup_xlsx_list(backup_files)
-        if ok:
-            st.success(msg)
-            st.rerun()
-        else:
-            st.error(msg)
+    if st.button("🔄 작업 내역 다시 불러오기", use_container_width=True):
+        absences, subs, swaps = load_work_data_from_gsheet()
+        st.session_state.absences = absences
+        st.session_state.subs = subs
+        st.session_state.swaps = swaps
+        st.success("작업 내역을 다시 불러왔습니다.")
+        st.rerun()
+
+    if st.button("💾 현재 작업 내역 저장", use_container_width=True, type="primary"):
+        if save_work_data_to_gsheet():
+            st.success("Google Sheets에 저장 완료!")
 
     st.divider()
     st.subheader("작업 되돌리기")
     c_undo, c_redo = st.columns(2)
     if c_undo.button("↩ 되돌리기 (Undo)", use_container_width=True):
         if undo():
+            save_work_data_to_gsheet()
             st.success("이전 단계로 되돌렸습니다.")
             st.rerun()
         else:
             st.warning("더 이상 되돌릴 수 없습니다.")
     if c_redo.button("↪ 다시실행 (Redo)", use_container_width=True):
         if redo():
+            save_work_data_to_gsheet()
             st.success("다시 실행했습니다.")
             st.rerun()
         else:
@@ -900,12 +849,6 @@ with st.sidebar:
             for i, h in enumerate(reversed(st.session_state.history[-8:])):
                 st.write(f"{h['time']} - {h['action']}")
 
-    c1, c2 = st.columns(2)
-    if c1.button("상태 저장", use_container_width=True):
-        st.success(f"저장 완료: {save_state()}")
-    if c2.button("상태 복원", use_container_width=True):
-        st.success("복원 완료") if load_state() else st.warning("저장 파일이 없습니다.")
-
     st.divider()
     st.caption(f"{SCHOOL_YEAR}학년도 · {SCHOOL_NAME}")
     st.metric("등록 교사", f"{len(st.session_state.teachers)} 명")
@@ -915,13 +858,13 @@ with st.sidebar:
 
 if st.session_state.timetable.empty:
     st.title("중학교 시간표·결보강 관리 프로그램")
-    st.info("왼쪽 사이드바에서 **2026_전체교사시간표.xlsx** 파일을 업로드한 뒤 [불러오기]를 눌러 시작하세요.")
+    st.info("Google Sheets에서 시간표를 불러오는 중입니다... 잠시만 기다려 주세요.\n\n문제가 있으면 사이드바의 '원본 시간표 다시 불러오기'를 눌러보세요.")
     st.stop()
 
 # ==========================================================================================
 # 6. 메인 화면
 # ==========================================================================================
-st.title("전체 시간표 관리 · 결강/보강 자동 처리")
+st.title("전체 시간표 관리 · 결강/보강 자동 처리 (Google Sheets 연동)")
 
 tabs = st.tabs([
     "시간표 조회", "기본정보·시간표 편집", "시간강사 관리",
@@ -972,7 +915,7 @@ with tabs[1]:
         new_tt["교시"] = pd.to_numeric(new_tt["교시"], errors="coerce").fillna(0).astype(int)
         new_tt["과목군"] = new_tt["과목"].map(subject_group)
         st.session_state.timetable = new_tt.reset_index(drop=True)
-        st.success("기본 주간 템플릿이 적용되었습니다.")
+        st.success("기본 주간 템플릿이 적용되었습니다. (원본 시트는 수정되지 않습니다)")
         st.rerun()
     if b2.button("시공간 충돌 및 불가능 시간 검사", use_container_width=True):
         iss = check_conflicts(st.session_state.timetable)
@@ -1044,6 +987,7 @@ with tabs[3]:
                             })
                         if new_rows:
                             st.session_state.absences = pd.concat([a, pd.DataFrame(new_rows)], ignore_index=True)
+                            save_work_data_to_gsheet()
                             st.success(f"{who} 교사 {len(new_rows)}시간 결강 등록 완료.")
                             st.rerun()
                     except Exception as e:
