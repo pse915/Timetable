@@ -3,7 +3,7 @@
 ==========================================================================================
  중학교 전체 시간표 관리 및 결강·보강 자동 처리 프로그램  (Streamlit Web App)
  2026 서라벌여자중학교용 – Google Sheets 연동 최종 버전
- (df_from_worksheet 문자열 강제 변환 + cache_data 적용)
+ (불가/가능 지원 + 문자열 강제 변환 + cache_data)
 ------------------------------------------------------------------------------------------
  실행 방법
    1) pip install streamlit pandas numpy openpyxl xlsxwriter gspread google-auth
@@ -95,26 +95,29 @@ def get_worksheet(spreadsheet_id: str, sheet_name: str):
         return sh.add_worksheet(title=sheet_name, rows=2000, cols=40)
 
 def df_from_worksheet(ws) -> pd.DataFrame:
+    """모든 값을 안전하게 문자열로 강제 변환"""
     data = ws.get_all_values()
     if not data or len(data) < 2:
         return pd.DataFrame()
-    
-    # 헤더를 문자열로 강제
+
     headers = [str(h) for h in data[0]]
     
-    # 모든 셀 값을 문자열로 변환해서 데이터프레임 생성
-    rows = []
+    cleaned_rows = []
     for row in data[1:]:
-        # 행 길이가 헤더보다 짧을 수 있으므로 보정
-        row = list(row) + [""] * (len(headers) - len(row))
-        rows.append([str(cell) if cell is not None else "" for cell in row[:len(headers)]])
-    
-    df = pd.DataFrame(rows, columns=headers)
-    
-    # 빈 값 정리
+        cleaned_row = []
+        for i in range(len(headers)):
+            if i < len(row):
+                val = row[i]
+                cleaned_row.append("" if val is None else str(val))
+            else:
+                cleaned_row.append("")
+        cleaned_rows.append(cleaned_row)
+
+    df = pd.DataFrame(cleaned_rows, columns=headers)
     df = df.replace({"nan": "", "None": "", "NaN": "", "<NA>": ""})
     
     return df
+
 def df_to_worksheet(ws, df: pd.DataFrame):
     ws.clear()
     if df is None or df.empty:
@@ -273,13 +276,11 @@ def init_state():
     if "teachers" in st.session_state:
         return
 
-    # 원본 시간표 로드
     ti, tt = load_timetable_from_gsheet()
     st.session_state.teachers = ti
     st.session_state.timetable = tt
     st.session_state.part_time = make_empty_frames()[2]
 
-    # 작업 내역 로드
     absences, subs, swaps = load_work_data_from_gsheet()
 
     if absences.empty:
@@ -301,7 +302,7 @@ def init_state():
 init_state()
 
 # ==========================================================================================
-# 3. 핵심 로직 (기존과 동일)
+# 3. 핵심 로직
 # ==========================================================================================
 def is_teacher_available(teacher: str, day: str, period: int, is_part_time: bool = False) -> bool:
     source = st.session_state.part_time if is_part_time else st.session_state.teachers
@@ -311,21 +312,35 @@ def is_teacher_available(teacher: str, day: str, period: int, is_part_time: bool
     row = source[source[name_col] == teacher]
     if row.empty:
         return True
-    col_candidates = [f"{day}{period}", f"{day}요일{period}", f"{day}{period}교시", day, f"{day}요일"]
+
+    col_candidates = [
+        f"{day}{period}", 
+        f"{day}요일{period}", 
+        f"{day}{period}교시", 
+        f"{day}요일{period}교시",
+        day, 
+        f"{day}요일"
+    ]
+    
     for col in col_candidates:
         if col in source.columns:
             val = row[col].values[0]
             if pd.isna(val):
                 continue
+                
             str_val = str(val).strip()
-            if str_val in ['0', '0.0', 'False', 'false']:
+            
+            # 불가능으로 인식할 값들 (0, 불가 등)
+            if str_val in ['0', '0.0', 'False', 'false', '불가', '불가능', 'N', 'n', 'X', 'x', '없음']:
                 return False
+                
             try:
                 num_val = pd.to_numeric(val, errors='coerce')
                 if pd.notna(num_val) and num_val <= 0:
                     return False
             except:
                 pass
+                
     return True
 
 def lesson_of(teacher: str, day: str, period: int):
@@ -481,7 +496,7 @@ def check_conflicts(tt: pd.DataFrame) -> pd.DataFrame:
     for _, r in tt.iterrows():
         if not is_teacher_available(r["교사명"], r["요일"], int(r["교시"])):
             issues.append({"유형": "불가능 시간 배치", "요일": r["요일"], "교시": int(r["교시"]), "대상": r["교사명"],
-                           "내용": f"{r['학급']} {r['과목']} 수업이 불가능 시간(0)에 설정됨",
+                           "내용": f"{r['학급']} {r['과목']} 수업이 불가능 시간에 설정됨",
                            "해결 가이드": f"{r['교사명']} 교사의 근무 가능 상태를 확인하세요."})
     return pd.DataFrame(issues)
 
@@ -492,11 +507,11 @@ def validate_swap(a: dict, b: dict):
         errs.append("동일한 교사의 수업끼리는 맞교환할 수 없습니다.")
         guides.append("💡 다른 교사와의 수업 맞교환을 선택하세요.")
     if not is_teacher_available(a["교사명"], b["요일"], b["교시"]):
-        errs.append(f"{a['교사명']} 교사는 {b['요일']} {b['교시']}교시가 불가능 시간(0)입니다.")
-        guides.append(f"💡 {a['교사명']} 교사의 불가능 시간(0)을 1로 변경하거나 다른 시간을 선택하세요.")
+        errs.append(f"{a['교사명']} 교사는 {b['요일']} {b['교시']}교시가 불가능 시간입니다.")
+        guides.append(f"💡 {a['교사명']} 교사의 불가능 시간을 가능으로 변경하거나 다른 시간을 선택하세요.")
     if not is_teacher_available(b["교사명"], a["요일"], a["교시"]):
-        errs.append(f"{b['교사명']} 교사는 {a['요일']} {a['교시']}교시가 불가능 시간(0)입니다.")
-        guides.append(f"💡 {b['교사명']} 교사의 불가능 시간(0)을 1로 변경하거나 다른 시간을 선택하세요.")
+        errs.append(f"{b['교사명']} 교사는 {a['요일']} {a['교시']}교시가 불가능 시간입니다.")
+        guides.append(f"💡 {b['교사명']} 교사의 불가능 시간을 가능으로 변경하거나 다른 시간을 선택하세요.")
     other_a = tt[(tt["교사명"] == a["교사명"]) & (tt["요일"] == b["요일"]) & (tt["교시"] == int(b["교시"]))]
     other_a = other_a[~((other_a["요일"] == a["요일"]) & (other_a["교시"] == int(a["교시"])))]
     if not other_a.empty:
@@ -824,7 +839,6 @@ with st.sidebar:
     st.header("데이터 (Google Sheets)")
     
     if st.button("🔄 원본 시간표 다시 불러오기", use_container_width=True):
-        # 캐시 클리어 후 다시 로드
         load_timetable_from_gsheet.clear()
         ti, tt = load_timetable_from_gsheet()
         st.session_state.teachers = ti
@@ -914,7 +928,7 @@ with tabs[0]:
 
 # ------------------------------------------------------------------ 기본정보 편집
 with tabs[1]:
-    st.subheader("교사 정보 (시간표 불가능 시간: 0 / 가능: 1)")
+    st.subheader("교사 정보 (불가능: 불가 / 가능: 가능)")
     ed_t = st.data_editor(st.session_state.teachers, num_rows="dynamic", use_container_width=True, height=320, key="ed_teachers")
     st.subheader("주간 시간표 (1행 = 1수업) – 기본 템플릿")
     only = st.selectbox("교사 필터", ["(전체)"] + list(st.session_state.teachers["교사명"]))
@@ -947,7 +961,7 @@ with tabs[1]:
 
 # ------------------------------------------------------------------ 시간강사 관리
 with tabs[2]:
-    st.subheader("시간강사 등록 및 가능 시간표 (0=불가능 / 1=가능)")
+    st.subheader("시간강사 등록 및 가능 시간표 (불가 = 불가능 / 가능 = 가능)")
     ed_pt = st.data_editor(st.session_state.part_time, num_rows="dynamic", use_container_width=True, height=400, key="ed_part")
     if st.button("시간강사 정보 저장", type="primary"):
         st.session_state.part_time = ed_pt.reset_index(drop=True)
