@@ -3,7 +3,7 @@
 ==========================================================================================
  중학교 전체 시간표 관리 및 결강·보강 자동 처리 프로그램  (Streamlit Web App)
  2026 서라벌여자중학교용 – Google Sheets 연동 최종 버전
- (불가/가능 지원 + 문자열 강제 변환 + cache_data)
+ (Undo/Redo 시트 동기화 + 시간강사 + 누적보강 시트 지원)
 ------------------------------------------------------------------------------------------
  실행 방법
    1) pip install streamlit pandas numpy openpyxl xlsxwriter gspread google-auth
@@ -12,8 +12,6 @@
 """
 
 import io
-import json
-import os
 from datetime import date, datetime, timedelta
 from copy import deepcopy
 
@@ -36,9 +34,8 @@ PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
 MAX_PERIOD = 7
 WEEKDAY_KR = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
 
-# Google Sheets ID
-TIMETABLE_SHEET_ID = "1jZhTHyJ8vKXn6tkoFXfY_f52-pj6eQTdVvRCo3cCmBA"   # 원본 시간표
-WORK_SHEET_ID = "1g1B1cyZG_tfRn3AD1NZzr30YxYNYFewJeZYdos2obpU"        # 작업 내역
+TIMETABLE_SHEET_ID = "1jZhTHyJ8vKXn6tkoFXfY_f52-pj6eQTdVvRCo3cCmBA"
+WORK_SHEET_ID = "1g1B1cyZG_tfRn3AD1NZzr30YxYNYFewJeZYdos2obpU"
 
 MAX_HISTORY = 30
 ABSENCE_REASONS = ["병가", "연가", "출장", "공가", "조퇴", "외출", "연수", "특별휴가", "기타"]
@@ -61,10 +58,8 @@ SUBJECT_GROUP = {
 def subject_group(subject: str) -> str:
     if not isinstance(subject, str):
         return ""
-    s = subject.strip()
-    if s in SUBJECT_GROUP:
-        return SUBJECT_GROUP[s]
-    return s.rstrip("0123456789")
+    s = str(subject).strip()
+    return SUBJECT_GROUP.get(s, s.rstrip("0123456789"))
 
 def grade_of(class_name: str) -> str:
     if isinstance(class_name, str) and "-" in class_name:
@@ -81,8 +76,7 @@ def get_gspread_client():
         "https://www.googleapis.com/auth/drive"
     ]
     creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=scopes
+        st.secrets["gcp_service_account"], scopes=scopes
     )
     return gspread.authorize(creds)
 
@@ -95,28 +89,16 @@ def get_worksheet(spreadsheet_id: str, sheet_name: str):
         return sh.add_worksheet(title=sheet_name, rows=2000, cols=40)
 
 def df_from_worksheet(ws) -> pd.DataFrame:
-    """모든 값을 안전하게 문자열로 강제 변환"""
     data = ws.get_all_values()
     if not data or len(data) < 2:
         return pd.DataFrame()
-
     headers = [str(h) for h in data[0]]
-    
     cleaned_rows = []
     for row in data[1:]:
-        cleaned_row = []
-        for i in range(len(headers)):
-            if i < len(row):
-                val = row[i]
-                cleaned_row.append("" if val is None else str(val))
-            else:
-                cleaned_row.append("")
-        cleaned_rows.append(cleaned_row)
-
+        row = list(row) + [""] * max(0, len(headers) - len(row))
+        cleaned_rows.append(["" if c is None else str(c) for c in row[:len(headers)]])
     df = pd.DataFrame(cleaned_rows, columns=headers)
-    df = df.replace({"nan": "", "None": "", "NaN": "", "<NA>": ""})
-    
-    return df
+    return df.replace({"nan": "", "None": "", "NaN": "", "<NA>": ""})
 
 def df_to_worksheet(ws, df: pd.DataFrame):
     ws.clear()
@@ -127,7 +109,7 @@ def df_to_worksheet(ws, df: pd.DataFrame):
     ws.update(values, value_input_option="USER_ENTERED")
 
 # ==========================================================================================
-# 1. 히스토리 (Undo / Redo)
+# 1. 히스토리 (Undo / Redo) - part_time 포함
 # ==========================================================================================
 def push_history(action_name: str = "작업"):
     if "history" not in st.session_state:
@@ -142,6 +124,7 @@ def push_history(action_name: str = "작업"):
         "absences": st.session_state.absences.copy(deep=True),
         "subs": st.session_state.subs.copy(deep=True),
         "swaps": st.session_state.swaps.copy(deep=True),
+        "part_time": st.session_state.part_time.copy(deep=True),
     }
     st.session_state.history.append(snapshot)
 
@@ -158,6 +141,7 @@ def undo():
     st.session_state.absences = snap["absences"].copy(deep=True)
     st.session_state.subs = snap["subs"].copy(deep=True)
     st.session_state.swaps = snap["swaps"].copy(deep=True)
+    st.session_state.part_time = snap.get("part_time", st.session_state.part_time).copy(deep=True)
     return True
 
 def redo():
@@ -170,6 +154,7 @@ def redo():
     st.session_state.absences = snap["absences"].copy(deep=True)
     st.session_state.subs = snap["subs"].copy(deep=True)
     st.session_state.swaps = snap["swaps"].copy(deep=True)
+    st.session_state.part_time = snap.get("part_time", st.session_state.part_time).copy(deep=True)
     return True
 
 def init_history_if_needed():
@@ -179,16 +164,14 @@ def init_history_if_needed():
         push_history("초기 상태")
 
 # ==========================================================================================
-# 2. 데이터 로드 / 저장 (Google Sheets)
+# 2. 데이터 로드 / 저장
 # ==========================================================================================
 REQUIRED_TT_COLS = ["교사명", "요일", "교시", "과목", "학급"]
 
 def make_empty_frames():
-    ti = pd.DataFrame(columns=["번호", "교사명", "담당과목", "과목군", "담당학년",
-                               "주당시수", "담임학급", "비고"])
+    ti = pd.DataFrame(columns=["번호", "교사명", "담당과목", "과목군", "담당학년", "주당시수", "담임학급", "비고"])
     tt = pd.DataFrame(columns=["교사명", "요일", "교시", "과목", "학급", "과목군"])
-    pt_cols = ["번호", "시간강사명", "담당과목", "과목군", "비고"] + \
-              [f"{d}{p}" for d in DAYS for p in range(1, 8)]
+    pt_cols = ["번호", "시간강사명", "담당과목", "과목군", "비고"] + [f"{d}{p}" for d in DAYS for p in range(1, 8)]
     pt = pd.DataFrame(columns=pt_cols)
     return ti, tt, pt
 
@@ -199,11 +182,10 @@ def normalize_frames(ti: pd.DataFrame, tt: pd.DataFrame):
             raise ValueError(f"[시간표] 시트에 '{c}' 열이 없습니다.")
     tt["교시"] = pd.to_numeric(tt["교시"], errors="coerce").fillna(0).astype(int)
     for c in ["교사명", "요일", "과목", "학급"]:
-        tt[c] = tt[c].astype(str).str.strip()
-    if "과목군" not in tt.columns or tt["과목군"].isna().all():
+        tt[c] = tt[c].map(lambda x: str(x).strip() if pd.notna(x) else "")
+    if "과목군" not in tt.columns or tt["과목군"].isna().all() or (tt["과목군"] == "").all():
         tt["과목군"] = tt["과목"].map(subject_group)
-    tt["과목군"] = tt["과목군"].fillna("").astype(str)
-    tt.loc[tt["과목군"] == "", "과목군"] = tt.loc[tt["과목군"] == "", "과목"].map(subject_group)
+    tt["과목군"] = tt["과목군"].map(lambda x: str(x).strip() if pd.notna(x) else "")
     tt = tt[tt["요일"].isin(DAYS)]
     tt = tt[(tt["교시"] >= 1) & (tt["교시"] <= MAX_PERIOD)]
     tt = tt.drop_duplicates(subset=["교사명", "요일", "교시"]).reset_index(drop=True)
@@ -211,10 +193,13 @@ def normalize_frames(ti: pd.DataFrame, tt: pd.DataFrame):
     ti = ti.copy()
     if "교사명" not in ti.columns:
         ti = pd.DataFrame({"교사명": sorted(tt["교사명"].unique())})
-    ti["교사명"] = ti["교사명"].astype(str).str.strip()
+    ti["교사명"] = ti["교사명"].map(lambda x: str(x).strip() if pd.notna(x) else "")
     for c in ["번호", "담당과목", "과목군", "담당학년", "주당시수", "담임학급", "비고"]:
         if c not in ti.columns:
             ti[c] = ""
+        else:
+            ti[c] = ti[c].map(lambda x: str(x).strip() if pd.notna(x) else "")
+
     missing = sorted(set(tt["교사명"]) - set(ti["교사명"]))
     if missing:
         add = pd.DataFrame({"교사명": missing})
@@ -222,6 +207,7 @@ def normalize_frames(ti: pd.DataFrame, tt: pd.DataFrame):
             if c not in add.columns:
                 add[c] = ""
         ti = pd.concat([ti, add[ti.columns]], ignore_index=True)
+
     for i, row in ti.iterrows():
         sub = tt.loc[tt["교사명"] == row["교사명"]]
         if str(row.get("담당과목", "")).strip() in ("", "nan"):
@@ -230,17 +216,15 @@ def normalize_frames(ti: pd.DataFrame, tt: pd.DataFrame):
             ti.at[i, "과목군"] = "/".join(sorted(set(sub["과목군"])))
         if str(row.get("담당학년", "")).strip() in ("", "nan"):
             ti.at[i, "담당학년"] = "/".join(sorted({grade_of(c) for c in sub["학급"] if grade_of(c)}))
-        if str(row.get("주당시수", "")).strip() in ("", "nan"):
-            ti.at[i, "주당시수"] = len(sub)
+        if str(row.get("주당시수", "")).strip() in ("", "nan", "0"):
+            ti.at[i, "주당시수"] = str(len(sub))
     return ti.reset_index(drop=True), tt
 
 @st.cache_data(ttl=300, show_spinner="시간표 불러오는 중...")
 def load_timetable_from_gsheet():
     try:
-        ws_ti = get_worksheet(TIMETABLE_SHEET_ID, "교사정보")
-        ws_tt = get_worksheet(TIMETABLE_SHEET_ID, "시간표")
-        ti = df_from_worksheet(ws_ti)
-        tt = df_from_worksheet(ws_tt)
+        ti = df_from_worksheet(get_worksheet(TIMETABLE_SHEET_ID, "교사정보"))
+        tt = df_from_worksheet(get_worksheet(TIMETABLE_SHEET_ID, "시간표"))
         return normalize_frames(ti, tt)
     except Exception as e:
         st.error(f"원본 시간표 로드 실패: {e}")
@@ -252,24 +236,36 @@ def load_work_data_from_gsheet():
         absences = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "결강"))
         subs = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "보강"))
         swaps = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "맞교환"))
+        part_time = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "시간강사"))
+        cumulative = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "누적보강"))
 
         if not absences.empty and "교시" in absences.columns:
             absences["교시"] = pd.to_numeric(absences["교시"], errors="coerce").fillna(0).astype(int)
         if not subs.empty and "교시" in subs.columns:
             subs["교시"] = pd.to_numeric(subs["교시"], errors="coerce").fillna(0).astype(int)
-        return absences, subs, swaps
+
+        return absences, subs, swaps, part_time, cumulative
     except Exception as e:
         st.error(f"작업 내역 로드 실패: {e}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 def save_work_data_to_gsheet():
     try:
         df_to_worksheet(get_worksheet(WORK_SHEET_ID, "결강"), st.session_state.absences)
         df_to_worksheet(get_worksheet(WORK_SHEET_ID, "보강"), st.session_state.subs)
         df_to_worksheet(get_worksheet(WORK_SHEET_ID, "맞교환"), st.session_state.swaps)
+        df_to_worksheet(get_worksheet(WORK_SHEET_ID, "시간강사"), st.session_state.part_time)
         return True
     except Exception as e:
         st.error(f"저장 실패: {e}")
+        return False
+
+def save_cumulative_to_gsheet(df: pd.DataFrame):
+    try:
+        df_to_worksheet(get_worksheet(WORK_SHEET_ID, "누적보강"), df)
+        return True
+    except Exception as e:
+        st.error(f"누적보강 저장 실패: {e}")
         return False
 
 def init_state():
@@ -279,23 +275,26 @@ def init_state():
     ti, tt = load_timetable_from_gsheet()
     st.session_state.teachers = ti
     st.session_state.timetable = tt
-    st.session_state.part_time = make_empty_frames()[2]
 
-    absences, subs, swaps = load_work_data_from_gsheet()
+    absences, subs, swaps, part_time, cumulative = load_work_data_from_gsheet()
 
     if absences.empty:
         absences = pd.DataFrame(columns=["결강ID", "일자", "요일", "교사명", "사유", "상세사유", "교시", "학급", "과목", "등록시각"])
     if subs.empty:
-        subs = pd.DataFrame(columns=["결강ID", "일자", "요일", "교시", "학급", "과목",
-                                     "결강교사", "보강교사", "배정방식", "우선순위", "비고", "등록시각"])
+        subs = pd.DataFrame(columns=["결강ID", "일자", "요일", "교시", "학급", "과목", "결강교사", "보강교사", "배정방식", "우선순위", "비고", "등록시각"])
     if swaps.empty:
         swaps = pd.DataFrame(columns=["원본일자", "교사A", "요일A", "교시A", "학급A", "과목A",
                                       "목표일자", "교사B", "요일B", "교시B", "학급B", "과목B",
                                       "유형", "시간강사구인", "등록시각"])
+    if part_time.empty:
+        pt_cols = ["번호", "시간강사명", "담당과목", "과목군", "비고"] + [f"{d}{p}" for d in DAYS for p in range(1, 8)]
+        part_time = pd.DataFrame(columns=pt_cols)
 
     st.session_state.absences = absences
     st.session_state.subs = subs
     st.session_state.swaps = swaps
+    st.session_state.part_time = part_time
+    st.session_state.cumulative = cumulative
 
     init_history_if_needed()
 
@@ -312,35 +311,21 @@ def is_teacher_available(teacher: str, day: str, period: int, is_part_time: bool
     row = source[source[name_col] == teacher]
     if row.empty:
         return True
-
-    col_candidates = [
-        f"{day}{period}", 
-        f"{day}요일{period}", 
-        f"{day}{period}교시", 
-        f"{day}요일{period}교시",
-        day, 
-        f"{day}요일"
-    ]
-    
+    col_candidates = [f"{day}{period}", f"{day}요일{period}", f"{day}{period}교시", f"{day}요일{period}교시", day, f"{day}요일"]
     for col in col_candidates:
         if col in source.columns:
             val = row[col].values[0]
             if pd.isna(val):
                 continue
-                
             str_val = str(val).strip()
-            
-            # 불가능으로 인식할 값들 (0, 불가 등)
             if str_val in ['0', '0.0', 'False', 'false', '불가', '불가능', 'N', 'n', 'X', 'x', '없음']:
                 return False
-                
             try:
                 num_val = pd.to_numeric(val, errors='coerce')
                 if pd.notna(num_val) and num_val <= 0:
                     return False
             except:
                 pass
-                
     return True
 
 def lesson_of(teacher: str, day: str, period: int):
@@ -848,10 +833,12 @@ with st.sidebar:
 
     if st.button("🔄 작업 내역 다시 불러오기", use_container_width=True):
         load_work_data_from_gsheet.clear()
-        absences, subs, swaps = load_work_data_from_gsheet()
+        absences, subs, swaps, part_time, cumulative = load_work_data_from_gsheet()
         st.session_state.absences = absences
         st.session_state.subs = subs
         st.session_state.swaps = swaps
+        st.session_state.part_time = part_time
+        st.session_state.cumulative = cumulative
         st.success("작업 내역을 다시 불러왔습니다.")
         st.rerun()
 
@@ -864,15 +851,15 @@ with st.sidebar:
     c_undo, c_redo = st.columns(2)
     if c_undo.button("↩ 되돌리기 (Undo)", use_container_width=True):
         if undo():
-            save_work_data_to_gsheet()
-            st.success("이전 단계로 되돌렸습니다.")
+            save_work_data_to_gsheet()   # ← 시트도 함께 되돌림
+            st.success("이전 단계로 되돌렸습니다. (시트도 반영됨)")
             st.rerun()
         else:
             st.warning("더 이상 되돌릴 수 없습니다.")
     if c_redo.button("↪ 다시실행 (Redo)", use_container_width=True):
         if redo():
-            save_work_data_to_gsheet()
-            st.success("다시 실행했습니다.")
+            save_work_data_to_gsheet()   # ← 시트도 함께 반영
+            st.success("다시 실행했습니다. (시트도 반영됨)")
             st.rerun()
         else:
             st.warning("다시 실행할 단계가 없습니다.")
@@ -963,10 +950,12 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("시간강사 등록 및 가능 시간표 (불가 = 불가능 / 가능 = 가능)")
     ed_pt = st.data_editor(st.session_state.part_time, num_rows="dynamic", use_container_width=True, height=400, key="ed_part")
-    if st.button("시간강사 정보 저장", type="primary"):
+    if st.button("시간강사 정보 저장", type="primary", use_container_width=True):
         st.session_state.part_time = ed_pt.reset_index(drop=True)
-        st.success("저장되었습니다.")
-        st.rerun()
+        push_history("시간강사 정보 수정")
+        if save_work_data_to_gsheet():
+            st.success("시간강사 정보가 Google Sheets에 저장되었습니다!")
+            st.rerun()
 
 # ------------------------------------------------------------------ 결강 등록
 with tabs[3]:
@@ -1231,7 +1220,7 @@ with tabs[6]:
     st.divider()
     st.components.v1.html(html, height=900, scrolling=True)
 
-# ------------------------------------------------------------------ 통계
+# ------------------------------------------------------------------ 통계 + 누적보강 시트 저장
 with tabs[7]:
     st.subheader("보강 통계 – 기간 필터")
     col1, col2, col3 = st.columns(3)
@@ -1265,3 +1254,13 @@ with tabs[7]:
     if not df.empty:
         st.bar_chart(df.set_index("교사명")["누적보강"], height=340)
     st.dataframe(df, use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.subheader("누적보강 시트에 저장")
+    st.caption("현재 필터된 통계를 Google Sheets의 「누적보강」 시트에 저장합니다.")
+    if st.button("📊 현재 통계를 누적보강 시트에 저장", type="primary"):
+        save_df = df.copy()
+        save_df["기간"] = f"{start_str} ~ {end_str}"
+        save_df["저장시각"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        if save_cumulative_to_gsheet(save_df):
+            st.success("누적보강 시트에 저장 완료!")
