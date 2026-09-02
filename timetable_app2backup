@@ -1292,7 +1292,7 @@ with tabs[7]:
 # ------------------------------------------------------------------ 8. 시간표 변경 테스트용 (저장되지 않음)
 with tabs[8]:
     st.subheader("🧪 시간표 변경 테스트용 (Google Sheets에 저장되지 않음)")
-    st.info("이 탭은 일반 교사가 결강·보강·맞교환이 반영된 시간표를 안전하게 확인하고, 변경 시나리오(추천)를 테스트하기 위한 공간입니다. **어떤 변경도 시트에 반영되지 않습니다.**")
+    st.info("이 탭은 일반 교사가 결강·보강·맞교환이 반영된 시간표를 안전하게 확인/테스트하기 위한 공간입니다. **어떤 변경도 시트에 저장되지 않습니다.**")
 
     test_teacher = st.selectbox("테스트할 교사 선택", st.session_state.teachers["교사명"], key="test_teacher")
     test_date = st.date_input("기준 날짜", value=date.today(), key="test_date")
@@ -1301,64 +1301,6 @@ with tabs[8]:
     st.caption(f"주간: {week_dates[0].strftime('%Y-%m-%d')} ~ {week_dates[4].strftime('%Y-%m-%d')} (결강·보강·맞교환 반영)")
 
     st.dataframe(grid, use_container_width=True, height=420)
-
-    st.divider()
-    st.markdown("#### 🔄 가상 맞교환 & 변경 추천 시뮬레이션")
-    col_ta, col_tb = st.columns(2)
-    
-    with col_ta:
-        st.markdown("**1️⃣ 원본 수업 (교사 A)**")
-        test_day_str = WEEKDAY_KR[test_date.weekday()]
-        sub_test = st.session_state.timetable[
-            (st.session_state.timetable["교사명"] == test_teacher) &
-            (st.session_state.timetable["요일"] == test_day_str)
-        ].sort_values("교시")
-
-        if sub_test.empty:
-            st.warning(f"해당 요일({test_day_str})에 수업이 없습니다.")
-            pick_test_a = None
-        else:
-            opts_test = [f"{int(r['교시'])}교시 · {r['학급']} · {r['과목']}" for _, r in sub_test.iterrows()]
-            sel_test_a = st.selectbox("변경할 수업", opts_test, key="test_lesson_a")
-            row_test_a = sub_test.iloc[opts_test.index(sel_test_a)]
-            pick_test_a = {
-                "교사명": test_teacher, "일자": test_date.strftime("%Y-%m-%d"), "요일": test_day_str,
-                "교시": int(row_test_a["교시"]), "학급": row_test_a["학급"], "과목": row_test_a["과목"]
-            }
-
-    with col_tb:
-        st.markdown("**2️⃣ 이동 희망 시간**")
-        test_date_b = st.date_input("이동 희망 날짜", value=date.today(), key="test_date_b")
-        test_date_b_str = test_date_b.strftime("%Y-%m-%d")
-        test_day_b = WEEKDAY_KR[test_date_b.weekday()]
-        test_p_b = st.selectbox("희망 교시", list(range(1, PERIODS_PER_DAY.get(test_day_b, MAX_PERIOD) + 1)), key="test_period_b")
-
-    if pick_test_a:
-        st.markdown(f"##### 💡 추천 결과 (시뮬레이션: {pick_test_a['일자']} {pick_test_a['교시']}교시 → {test_date_b_str} {test_p_b}교시)")
-        df_swap_t, df_linked_t, df_sub_t = get_target_time_recommendations(
-            pick_test_a["교사명"], pick_test_a["일자"], pick_test_a["교시"], pick_test_a["학급"], pick_test_a["과목"],
-            test_date_b_str, test_p_b
-        )
-
-        t_swap_test, t_linked_test, t_sub_test = st.tabs(["🔄 1:1 맞교환 추천", "🔗 연계 교환 추천", "➕ 대리/보강 추천"])
-        
-        with t_swap_test:
-            if df_swap_t.empty:
-                st.info("추천할 1:1 맞교환 대상이 없습니다.")
-            else:
-                st.dataframe(df_swap_t.drop(columns=["b_info", "errs", "guides", "is_valid", "_score"], errors='ignore'), use_container_width=True, hide_index=True)
-                
-        with t_linked_test:
-            if df_linked_t.empty:
-                st.info("추천할 연계 교환 대상이 없습니다.")
-            else:
-                st.dataframe(df_linked_t.drop(columns=["b_info", "errs", "guides", "is_valid", "_score"], errors='ignore'), use_container_width=True, hide_index=True)
-                
-        with t_sub_test:
-            if df_sub_t.empty:
-                st.info("추천할 대리/보강 교사가 없습니다.")
-            else:
-                st.dataframe(df_sub_t.drop(columns=["_prio", "_score"], errors='ignore'), use_container_width=True, hide_index=True)
 
     st.divider()
     st.markdown("#### 임시 메모 (세션에만 유지, 저장 안 됨)")
