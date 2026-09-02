@@ -1226,15 +1226,15 @@ with tabs[7]:
     col1, col2, col3 = st.columns(3)
     start_d = col1.date_input("시작일", value=date(2026, 3, 1))
     end_d = col2.date_input("종료일", value=date.today())
-    period_label = col3.selectbox("빠른 선택", ["전체", "1학기 (3~7월)", "2학기 (9~12월)", "이번 달"])
+period_label = col3.selectbox("빠른 선택", ["전체", "1학기 (3~7월)", "2학기 (8월~다음해 2월)", "이번 달"])
 
-    if period_label == "1학기 (3~7월)":
-        start_d, end_d = date(2026, 3, 1), date(2026, 7, 31)
-    elif period_label == "2학기 (9~12월)":
-        start_d, end_d = date(2026, 9, 1), date(2026, 12, 31)
-    elif period_label == "이번 달":
-        start_d = date.today().replace(day=1)
-        end_d = date.today()
+if period_label == "1학기 (3~7월)":
+    start_d, end_d = date(2026, 3, 1), date(2026, 7, 31)
+elif period_label == "2학기 (8월~다음해 2월)":
+    start_d, end_d = date(2026, 8, 1), date(2027, 2, 28)
+elif period_label == "이번 달":
+    start_d = date.today().replace(day=1)
+    end_d = date.today()
 
     start_str = start_d.strftime("%Y-%m-%d")
     end_str = end_d.strftime("%Y-%m-%d")
