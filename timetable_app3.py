@@ -282,9 +282,8 @@ def init_state():
     ti, tt = load_timetable_from_gsheet()
     st.session_state.teachers = ti
     st.session_state.timetable = tt
-    st.session_state.part_time = make_empty_frames()[2]
 
-    absences, subs, swaps = load_work_data_from_gsheet()
+    absences, subs, swaps, part_time = load_work_data_from_gsheet()
 
     if absences.empty:
         absences = pd.DataFrame(columns=["결강ID", "일자", "요일", "교사명", "사유", "상세사유", "교시", "학급", "과목", "등록시각"])
@@ -295,10 +294,15 @@ def init_state():
         swaps = pd.DataFrame(columns=["원본일자", "교사A", "요일A", "교시A", "학급A", "과목A",
                                       "목표일자", "교사B", "요일B", "교시B", "학급B", "과목B",
                                       "유형", "시간강사구인", "등록시각"])
+    if part_time.empty:
+        pt_cols = ["번호", "시간강사명", "담당과목", "과목군", "비고"] + \
+                  [f"{d}{p}" for d in DAYS for p in range(1, 8)]
+        part_time = pd.DataFrame(columns=pt_cols)
 
     st.session_state.absences = absences
     st.session_state.subs = subs
     st.session_state.swaps = swaps
+    st.session_state.part_time = part_time
 
     init_history_if_needed()
 
