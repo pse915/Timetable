@@ -3,3 +3,5 @@ pandas
 numpy
 openpyxl
 xlsxwriter
+gspread
+google-auth
