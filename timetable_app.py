@@ -2,15 +2,13 @@
 """
 ==========================================================================================
  중학교 전체 시간표 관리 및 결강·보강 자동 처리 프로그램 (Streamlit Web App)
- 2026 서라벌여자중학교용 – 최종 성능·가시성 강화 + 복무 통합 탭 버전
- (Undo/Redo + 시간강사 + 누적보강 + 작업내역 + 배정취소 + 복무 통합 관리/판단)
+ 2026 서라벌여자중학교용 – 최종 성능·가시성 강화 + 복무 통합 탭 + 3대 개선 버전
 ==========================================================================================
-※ 이번 버전 주요 개선
-  1. 결강 등록 + 보강 배정 → 한 탭 좌우 분할 (유지)
-  2. 기본정보·시간표 편집 탭 제거
-  3. 복무 일정 관리 + 복무 기반 판단 → 하나의 탭으로 통합 (왼쪽: 복무 입력/목록, 오른쪽: 선택 교사 시간표 + 결강/교체 바로 처리)
-  4. 일일 변경 내역서 → 사이드바 버튼
-  5. 전체 캐시/속도 최적화 + 버그 수정 (불필요한 재계산 최소화, DataFrame 연산 경량화, 세션 상태 안정화)
+※ 이번 버전 주요 개선 (3가지)
+  1. 보강(대체) 수업이 교사 주간표·매트릭스에 정상 표시되도록 effective timetable에 보강 반영
+  2. 복무 등록 시 교시 단위(1~7교시) 세분화 지원 (전체 또는 특정 교시만 불가능)
+  3. 복무 탭 오른쪽 "선택 교사 당일 시간표 & 처리"에서 맞교환 추천을 버튼 없이 한눈에 바로 표시
+  + 기존 캐시 구조 유지 + 속도 최적화
 """
 
 import io
@@ -391,8 +389,11 @@ def load_work_data_from_gsheet():
             for col in ["교시A", "교시B"]:
                 if col in swaps.columns:
                     swaps[col] = swaps[col].apply(safe_int)
-        if not duties.empty and "일자" in duties.columns:
-            duties["일자"] = duties["일자"].apply(normalize_date_str)
+        if not duties.empty:
+            if "일자" in duties.columns:
+                duties["일자"] = duties["일자"].apply(normalize_date_str)
+            if "교시" in duties.columns:
+                duties["교시"] = duties["교시"].apply(safe_int)
 
         return absences, subs, swaps, part_time, cumulative, duties
     except Exception as e:
@@ -443,7 +444,8 @@ def init_state():
         pt_cols = ["번호", "시간강사명", "담당과목", "과목군", "비고"] + [f"{d}{p}" for d in DAYS for p in range(1, 8)]
         part_time = pd.DataFrame(columns=pt_cols)
     if duties.empty:
-        duties = pd.DataFrame(columns=["교사명", "일자", "사유", "상세사유", "등록시각"])
+        # 교시 단위 지원: 교시=0 이면 하루 전체, 1~7이면 해당 교시만
+        duties = pd.DataFrame(columns=["교사명", "일자", "교시", "사유", "상세사유", "등록시각"])
 
     st.session_state.absences = absences
     st.session_state.subs = subs
@@ -462,10 +464,10 @@ def init_state():
 init_state()
 
 # ==========================================================================================
-# 3. 핵심 로직 (이동 원본 표시 + 속도 강화 + 복무 연동)
+# 3. 핵심 로직 (보강 반영 + 복무 교시 단위 + 속도 강화)
 # ==========================================================================================
 def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
-    """맞교환 반영 최종 시간표 (캐시 + 버전 관리)"""
+    """맞교환 + 보강 반영 최종 시간표 (캐시 + 버전 관리)"""
     norm_on_date = normalize_date_str(on_date)
     if not norm_on_date:
         return st.session_state.timetable.copy()
@@ -488,6 +490,7 @@ def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
         cache[cache_key] = empty
         return empty.copy()
 
+    # 1) 기본 + 맞교환 적용
     base = tt[tt["요일"] == day]
     current_map = {}
     for r in base.itertuples(index=False):
@@ -544,6 +547,27 @@ def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
                             "과목": s_a, "학급": c_a, "과목군": subject_group(s_a)
                         }
 
+    # 2) 보강(대체) 반영 ← 핵심 개선 1
+    subs = st.session_state.get("subs", pd.DataFrame())
+    if not subs.empty and "일자" in subs.columns:
+        day_subs = subs[subs["일자"] == norm_on_date]
+        for r in day_subs.itertuples(index=False):
+            p = safe_int(getattr(r, "교시", 0))
+            abs_t = str(getattr(r, "결강교사", "")).strip()
+            sub_t = str(getattr(r, "보강교사", "")).strip()
+            cls = str(getattr(r, "학급", "")).strip()
+            subj = str(getattr(r, "과목", "")).strip()
+            if not sub_t or p <= 0:
+                continue
+            # 원 결강교사 슬롯 제거
+            current_map.pop((abs_t, p), None)
+            # 보강교사 슬롯에 추가
+            current_map[(sub_t, p)] = {
+                "교사명": sub_t, "요일": day, "교시": p,
+                "과목": subj, "학급": cls,
+                "과목군": subject_group(subj)
+            }
+
     df_eff = pd.DataFrame(list(current_map.values()))
     if df_eff.empty:
         df_eff = pd.DataFrame(columns=REQUIRED_TT_COLS + ["과목군"])
@@ -551,7 +575,6 @@ def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
     return df_eff.copy()
 
 def get_swap_origin_info(teacher: str, on_date: str, period: int) -> str:
-    """해당 슬롯이 맞교환으로 들어온 경우 원본 위치 정보를 반환"""
     norm_date = normalize_date_str(on_date)
     if not norm_date:
         return ""
@@ -618,13 +641,23 @@ def lesson_of(teacher: str, day: str, period: int):
     m = tt[(tt["교사명"] == teacher) & (tt["요일"] == day) & (tt["교시"] == safe_int(period))]
     return None if m.empty else m.iloc[0].to_dict()
 
-def has_duty_on_date(teacher: str, on_date: str) -> bool:
-    """복무 시트에 해당 교사가 해당 일자에 등록되어 있으면 True (수업 불가능)"""
+def has_duty(teacher: str, on_date: str, period: int = None) -> bool:
+    """복무 체크 (교시 단위 지원). period=None이면 해당 날짜에 아무 복무라도 있으면 True"""
     duties = st.session_state.get("duties", pd.DataFrame())
     if duties.empty or "교사명" not in duties.columns or "일자" not in duties.columns:
         return False
     norm_date = normalize_date_str(on_date)
-    return ((duties["교사명"] == teacher) & (duties["일자"] == norm_date)).any()
+    mask = (duties["교사명"] == teacher) & (duties["일자"] == norm_date)
+    if not mask.any():
+        return False
+    if period is None:
+        return True
+    # 교시=0 은 하루 전체를 의미
+    sub = duties[mask]
+    if "교시" not in sub.columns:
+        return True
+    periods = sub["교시"].apply(safe_int).tolist()
+    return (0 in periods) or (safe_int(period) in periods)
 
 def is_free(teacher: str, day: str, period: int, on_date: str = None,
             is_part_time: bool = False, eff_tt: pd.DataFrame = None) -> bool:
@@ -632,8 +665,8 @@ def is_free(teacher: str, day: str, period: int, on_date: str = None,
     norm_date = normalize_date_str(on_date)
     if not is_teacher_available(teacher, day, p_int, is_part_time):
         return False
-    # 복무 등록된 날은 무조건 불가능
-    if norm_date and has_duty_on_date(teacher, norm_date):
+    # 복무 체크 (교시 단위)
+    if norm_date and has_duty(teacher, norm_date, p_int):
         return False
     if not is_part_time:
         if norm_date:
@@ -666,15 +699,15 @@ def can_teacher_take_slot(teacher: str, day: str, period: int, on_date: str = No
            is_free(teacher, day, period, on_date, is_part_time, eff_tt=eff_tt)
 
 def absent_all_day(teacher: str, on_date: str) -> bool:
+    """하루 종일 결강/복무 여부 (추천 제외용)"""
     a = st.session_state.absences
     norm_date = normalize_date_str(on_date)
     if not a.empty and "일자" in a.columns:
         if ((a["일자"] == norm_date) & (a["교사명"] == teacher)).any():
             return True
-    return has_duty_on_date(teacher, norm_date)
+    return has_duty(teacher, norm_date)  # 아무 교시라도 복무가 있으면 하루로 취급
 
 def cumulative_sub_count(start_date: str = None, end_date: str = None) -> dict:
-    """캐시된 누적보강 수"""
     if start_date is None and end_date is None:
         if st.session_state.get("_cum_cache") is not None:
             return st.session_state._cum_cache
@@ -1076,6 +1109,7 @@ def class_matrix() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 def get_teacher_week_view(teacher: str, ref_date: date):
+    """교사 주간표 – 결강 / 보강 / 맞교환 모두 표시"""
     weekday = ref_date.weekday()
     monday = ref_date - timedelta(days=weekday)
     week_dates = [monday + timedelta(days=i) for i in range(5)]
@@ -1092,14 +1126,17 @@ def get_teacher_week_view(teacher: str, ref_date: date):
                 cell = f"{r['학급']} {r['과목']}"
                 if origin:
                     cell += f"\n🔄 from {origin}"
+                # 결강 표시
                 abs_m = st.session_state.absences
                 if not abs_m.empty and ((abs_m["일자"] == on_date) & (abs_m["교사명"] == teacher) & (abs_m["교시"] == p)).any():
                     cell = f"[결강] {cell}"
+                # 보강 표시 (보강교사로 들어온 경우)
                 sub_m = st.session_state.subs
                 if not sub_m.empty and ((sub_m["일자"] == on_date) & (sub_m["보강교사"] == teacher) & (sub_m["교시"] == p)).any():
                     cell = f"[보강] {cell}"
                 row[d] = cell
             else:
+                # 원래 수업이 있었는데 결강된 경우도 표시할 수 있음 (선택)
                 row[d] = ""
         grid_data.append(row)
     return pd.DataFrame(grid_data), week_dates
@@ -1279,7 +1316,6 @@ with st.sidebar:
     st.metric("주간 수업", f"{len(st.session_state.timetable)} 시수")
     st.metric("누적 보강", f"{len(st.session_state.subs)} 건")
 
-    # ===== 일일 변경 내역서 (사이드바) =====
     st.divider()
     st.subheader("📄 일일 변경 내역서")
     report_date = st.date_input("출력 일자", value=date.today(), key="sidebar_report_date")
@@ -1322,7 +1358,7 @@ tabs = st.tabs([
     "통계 (학기/월별)",
     "시간표 변경 테스트용",
     "변경된 교사 주간표",
-    "📋 복무 관리 & 판단"          # ← 통합 탭
+    "📋 복무 관리 & 판단"
 ])
 
 # ------------------------------------------------------------------ 0. 시간표 조회
@@ -1807,14 +1843,14 @@ with tabs[6]:
 
             st.dataframe(grid, use_container_width=True, height=450)
 
-# ------------------------------------------------------------------ 7. 복무 관리 & 판단 (통합 탭)
+# ------------------------------------------------------------------ 7. 복무 관리 & 판단 (통합 탭) – 개선 버전
 with tabs[7]:
     st.subheader("📋 복무 일정 관리 & 수업 처리 판단 (결강 / 교체)")
-    st.caption("왼쪽에서 복무를 등록·선택하면, 오른쪽에서 해당 교사의 당일 시간표를 보고 바로 결강 등록하거나 맞교환을 실행할 수 있습니다. 등록된 복무는 보강 추천에서 자동 제외됩니다.")
+    st.caption("왼쪽에서 복무를 등록·선택하면, 오른쪽에서 해당 교사의 당일 시간표를 보고 바로 결강 등록하거나 맞교환을 실행할 수 있습니다. 등록된 복무(교시 단위)는 보강 추천에서 자동 제외됩니다.")
 
-    left, right = st.columns([1, 1.4])
+    left, right = st.columns([1, 1.45])
 
-    # ===== 왼쪽: 복무 입력 + 목록 =====
+    # ===== 왼쪽: 복무 입력 + 목록 (교시 단위 지원) =====
     with left:
         st.markdown("### 📌 복무 등록 / 목록")
         teacher_list = st.session_state.teachers["교사명"].tolist() if not st.session_state.teachers.empty else []
@@ -1823,32 +1859,60 @@ with tabs[7]:
         duty_reason = st.selectbox("사유", ABSENCE_REASONS, key="duty_reason_sel")
         duty_detail = st.text_input("상세 사유 (선택)", key="duty_detail_sel")
 
+        # 교시 선택 (전체 또는 특정 교시)
+        st.markdown("**불가능한 교시 선택**")
+        all_day = st.checkbox("하루 전체 (모든 교시)", value=False, key="duty_all_day")
+        selected_periods = []
+        if not all_day:
+            period_opts = list(range(1, MAX_PERIOD + 1))
+            selected_periods = st.multiselect("교시 선택 (1~7)", period_opts, default=[], key="duty_periods")
+
         if st.button("복무 등록", type="primary", key="btn_reg_duty"):
             if duty_teacher and duty_teacher != "없음":
-                push_history(f"복무 등록 ({duty_teacher})")
-                new_row = {
-                    "교사명": duty_teacher,
-                    "일자": duty_date.strftime("%Y-%m-%d"),
-                    "사유": duty_reason,
-                    "상세사유": duty_detail,
-                    "등록시각": datetime.now().strftime("%Y-%m-%d %H:%M")
-                }
-                d = st.session_state.duties
-                if not d.empty:
-                    d = d[~((d["교사명"] == duty_teacher) & (d["일자"] == new_row["일자"]))]
-                st.session_state.duties = pd.concat([d, pd.DataFrame([new_row])], ignore_index=True)
-                save_work_data_to_gsheet()
-                st.success(f"{duty_teacher} 선생님 {new_row['일자']} 복무 등록 완료")
-                st.rerun()
+                if not all_day and not selected_periods:
+                    st.warning("하루 전체가 아니면 최소 1개 교시를 선택하세요.")
+                else:
+                    push_history(f"복무 등록 ({duty_teacher})")
+                    d = st.session_state.duties
+                    # 기존 동일 교사+일자 데이터 제거 후 새로 등록
+                    if not d.empty:
+                        d = d[~((d["교사명"] == duty_teacher) & (d["일자"] == duty_date.strftime("%Y-%m-%d")))]
+
+                    new_rows = []
+                    if all_day:
+                        new_rows.append({
+                            "교사명": duty_teacher,
+                            "일자": duty_date.strftime("%Y-%m-%d"),
+                            "교시": 0,  # 0 = 하루 전체
+                            "사유": duty_reason,
+                            "상세사유": duty_detail,
+                            "등록시각": datetime.now().strftime("%Y-%m-%d %H:%M")
+                        })
+                    else:
+                        for p in selected_periods:
+                            new_rows.append({
+                                "교사명": duty_teacher,
+                                "일자": duty_date.strftime("%Y-%m-%d"),
+                                "교시": p,
+                                "사유": duty_reason,
+                                "상세사유": duty_detail,
+                                "등록시각": datetime.now().strftime("%Y-%m-%d %H:%M")
+                            })
+                    st.session_state.duties = pd.concat([d, pd.DataFrame(new_rows)], ignore_index=True)
+                    save_work_data_to_gsheet()
+                    st.success(f"{duty_teacher} 선생님 {duty_date.strftime('%Y-%m-%d')} 복무 등록 완료")
+                    st.rerun()
 
         st.divider()
         st.markdown("#### 등록된 복무 목록 (클릭하여 선택)")
         duties = st.session_state.duties
         selected_duty = None
         if not duties.empty:
-            # 목록 표시 + 선택
-            display_df = duties.sort_values(["일자", "교사명"]).reset_index(drop=True)
-            st.dataframe(display_df, use_container_width=True, height=250)
+            display_df = duties.sort_values(["일자", "교사명", "교시"]).reset_index(drop=True)
+            # 교시 표시 개선
+            display_df_show = display_df.copy()
+            display_df_show["교시표시"] = display_df_show["교시"].apply(lambda x: "전체" if safe_int(x) == 0 else f"{safe_int(x)}교시")
+            st.dataframe(display_df_show[["교사명", "일자", "교시표시", "사유", "상세사유"]], use_container_width=True, height=250)
 
             sel_idx = st.number_input("선택할 행 번호 (0부터)", min_value=0, max_value=max(0, len(display_df)-1), value=0, key="duty_sel_idx")
             if st.button("이 복무 선택하여 오른쪽에 표시", key="btn_sel_duty"):
@@ -1867,11 +1931,10 @@ with tabs[7]:
         else:
             st.info("등록된 복무 일정이 없습니다.")
 
-        # 세션에 선택된 복무가 있으면 사용
         if "_selected_duty" in st.session_state:
             selected_duty = st.session_state["_selected_duty"]
 
-    # ===== 오른쪽: 선택된 복무의 시간표 + 결강/교체 처리 =====
+    # ===== 오른쪽: 선택 교사 당일 시간표 & 처리 (맞교환 한눈에 표시) =====
     with right:
         st.markdown("### 📌 선택 교사 당일 시간표 & 처리")
         if not selected_duty:
@@ -1880,13 +1943,15 @@ with tabs[7]:
             t_name = selected_duty.get("교사명", "")
             d_str = selected_duty.get("일자", "")
             reason = selected_duty.get("사유", "")
+            duty_p = safe_int(selected_duty.get("교시", 0))
             try:
                 d_obj = datetime.strptime(d_str, "%Y-%m-%d").date()
                 day_kr = WEEKDAY_KR[d_obj.weekday()]
             except Exception:
                 day_kr = ""
 
-            st.markdown(f"**{t_name}** · {d_str} ({day_kr}) · 사유: {reason}")
+            duty_info = "하루 전체" if duty_p == 0 else f"{duty_p}교시"
+            st.markdown(f"**{t_name}** · {d_str} ({day_kr}) · 사유: {reason} · 대상: {duty_info}")
 
             if day_kr not in DAYS:
                 st.warning("주말은 시간표가 없습니다.")
@@ -1899,7 +1964,6 @@ with tabs[7]:
                 else:
                     st.caption(f"총 {len(target_lessons)}시간 (맞교환·결강·보강 실시간 반영)")
 
-                    # 이미 결강/보강/맞교환 여부 확인용
                     absences = st.session_state.absences
                     subs = st.session_state.subs
                     swaps = st.session_state.swaps
@@ -1909,7 +1973,9 @@ with tabs[7]:
                         cls_val = les["학급"]
                         sub_val = les["과목"]
 
-                        # 상태 체크
+                        # 이 교시가 복무 대상인지 체크
+                        is_duty_period = (duty_p == 0) or (duty_p == p_val)
+
                         is_absent = False
                         if not absences.empty:
                             is_absent = ((absences["일자"] == d_str) & (absences["교사명"] == t_name) & (absences["교시"] == p_val)).any()
@@ -1939,17 +2005,21 @@ with tabs[7]:
                         elif is_swapped:
                             origin = get_swap_origin_info(t_name, d_str, p_val)
                             status = f"🔄 맞교환됨 (원본: {origin})" if origin else "🔄 맞교환됨"
+                        elif not is_duty_period:
+                            status = "⚪ 복무 대상 아님"
 
-                        with st.expander(f"{p_val}교시 · {cls_val} · {sub_val}  {status}", expanded=not (is_subbed or is_absent or is_swapped)):
+                        with st.expander(f"{p_val}교시 · {cls_val} · {sub_val}  {status}", expanded=is_duty_period and not (is_subbed or is_absent or is_swapped)):
                             if is_subbed or is_absent or is_swapped:
                                 st.info("이미 처리된 수업입니다.")
                                 continue
+                            if not is_duty_period:
+                                st.caption("이 교시는 선택한 복무 범위에 포함되지 않습니다.")
+                                continue
 
-                            # 추천도 간단 계산
+                            # 추천 계산
                             cands = recommend_substitutes(day_kr, p_val, sub_val, cls_val, t_name, d_str, top_n=5, eff_tt=eff_tt)
                             free_cnt = len(cands)
 
-                            # 같은 날 다른 교시로 맞교환 가능 여부
                             possible_swaps = []
                             max_p = PERIODS_PER_DAY.get(day_kr, 7)
                             for op in range(1, max_p + 1):
@@ -1973,10 +2043,31 @@ with tabs[7]:
                             c1.metric("공강 교사 수", free_cnt)
                             c2.metric("교체 가능 수업", swap_cnt)
 
-                            # 액션 버튼
-                            act1, act2, act3 = st.columns(3)
+                            # ===== 맞교환 추천 한눈에 표시 (버튼 없이) =====
+                            if possible_swaps:
+                                st.markdown("**🔄 맞교환 가능 목록 (한눈에 보기)**")
+                                for i, sw in enumerate(possible_swaps[:4]):
+                                    st.write(f"• **{sw.get('유형')}** | {sw.get('교사B')} | {sw.get('현재 수업')} | {sw.get('상태')}")
+                                    if st.button(f"→ 이 수업과 맞교환 실행", key=f"duty_do_sw_{p_val}_{i}"):
+                                        b_info = sw.get("b_info", {})
+                                        a_info = {
+                                            "교사명": t_name, "일자": d_str, "요일": day_kr,
+                                            "교시": p_val, "학급": cls_val, "과목": sub_val
+                                        }
+                                        if sw.get("유형") in ["직접1:1", "1:1맞교환"]:
+                                            do_swap(a_info, b_info, d_str, d_str)
+                                        else:
+                                            do_linked_swap(a_info, str(sw.get("교사B")), d_str, d_str, day_kr, safe_int(b_info.get("교시", p_val)))
+                                        st.success("맞교환 완료!")
+                                        st.rerun()
+                            else:
+                                st.info("같은 날 바로 맞교환 가능한 수업이 없습니다.")
 
-                            # 1) 결강으로 등록
+                            st.divider()
+
+                            # 액션 버튼
+                            act1, act2 = st.columns(2)
+
                             if act1.button("결강으로 등록", key=f"duty_abs_{p_val}"):
                                 push_history(f"복무→결강 등록 ({t_name} {p_val}교시)")
                                 cid = f"{d_str}-{t_name}"
@@ -1994,7 +2085,6 @@ with tabs[7]:
                                 st.success(f"{p_val}교시 결강 등록 완료. 보강 배정 탭에서 배정하세요.")
                                 st.rerun()
 
-                            # 2) 보강 추천 보기 + 바로 배정
                             if act2.button("보강 추천 보기", key=f"duty_sub_{p_val}"):
                                 st.session_state[f"_show_sub_{p_val}"] = True
 
@@ -2011,28 +2101,5 @@ with tabs[7]:
                                                        t_name, pick, "복무기반_수동", pr, "복무 처리")
                                         st.success(f"{p_val}교시 → {pick} 배정 완료")
                                         st.rerun()
-
-                            # 3) 맞교환 실행
-                            if act3.button("맞교환 추천", key=f"duty_swap_{p_val}"):
-                                st.session_state[f"_show_swap_{p_val}"] = True
-
-                            if st.session_state.get(f"_show_swap_{p_val}", False):
-                                if not possible_swaps:
-                                    st.info("같은 날 바로 맞교환 가능한 수업이 없습니다.")
-                                else:
-                                    for i, sw in enumerate(possible_swaps[:5]):
-                                        st.write(f"**{sw.get('유형')}** · {sw.get('교사B')} · {sw.get('현재 수업')}")
-                                        if st.button(f"이 수업과 맞교환 실행", key=f"duty_do_sw_{p_val}_{i}"):
-                                            b_info = sw.get("b_info", {})
-                                            a_info = {
-                                                "교사명": t_name, "일자": d_str, "요일": day_kr,
-                                                "교시": p_val, "학급": cls_val, "과목": sub_val
-                                            }
-                                            if sw.get("유형") in ["직접1:1", "1:1맞교환"]:
-                                                do_swap(a_info, b_info, d_str, d_str)
-                                            else:
-                                                do_linked_swap(a_info, str(sw.get("교사B")), d_str, d_str, day_kr, safe_int(b_info.get("교시", p_val)))
-                                            st.success("맞교환 완료!")
-                                            st.rerun()
 
 # 끝
