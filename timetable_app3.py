@@ -475,12 +475,17 @@ def recommend_substitutes(day: str, period: int, subject: str, class_name: str,
         my_grades = {grade_of(c) for c in sub_tt["학급"]} if not sub_tt.empty and "학급" in sub_tt.columns else set()
         my_classes = set(sub_tt["학급"]) if not sub_tt.empty and "학급" in sub_tt.columns else set()
 
-        if grp in my_groups:
-            prio, prio_label, score = 1, "1순위 · 동일 과목", 100
-        elif grade in my_grades:
-            prio, prio_label, score = 2, "2순위 · 동일 학년", 60
+        is_same_subject = grp in my_groups
+        is_same_grade = grade in my_grades
+
+        if is_same_subject and is_same_grade:
+            prio, prio_label, score = 1, "1순위 · 동일 과목 & 동일 학년", 120
+        elif is_same_subject:
+            prio, prio_label, score = 2, "2순위 · 동일 과목", 90
+        elif is_same_grade:
+            prio, prio_label, score = 3, "3순위 · 동일 학년", 60
         else:
-            prio, prio_label, score = 3, "3순위 · 전체 공강", 20
+            prio, prio_label, score = 4, "4순위 · 전체 공강", 20
 
         c = cum.get(t, 0)
         score += (max_cum - c) * 6 + max(0, (22 - safe_int(load.get(t, 0)))) * 0.8
@@ -500,7 +505,7 @@ def recommend_substitutes(day: str, period: int, subject: str, class_name: str,
                 continue
             t_row = part[part["시간강사명"] == t]
             rows.append({
-                "보강교사": t, "유형": "시간강사", "우선순위": "시간강사", "_prio": 4,
+                "보강교사": t, "유형": "시간강사", "우선순위": "시간강사", "_prio": 5,
                 "담당과목": t_row["담당과목"].iloc[0] if not t_row.empty and "담당과목" in t_row.columns else "",
                 "주당시수": 0, "누적보강": 0, "추천점수": 40
             })
@@ -1508,11 +1513,27 @@ with tabs[10]:
         else:
             st.markdown(f"#### 📌 {target_teacher} 교사의 {abs_day}요일 수업 목록 ({len(target_lessons)}시간)")
             
+            date_str = absence_date.strftime("%Y-%m-%d")
+            subs_df = st.session_state.subs
+            
             for _, les in target_lessons.iterrows():
                 p_val = safe_int(les["교시"])
                 cls_val = les["학급"]
                 sub_val = les["과목"]
-                date_str = absence_date.strftime("%Y-%m-%d")
+
+                # 이미 보강 배정이 완료된 수업인지 검사
+                is_assigned = False
+                assigned_teacher = ""
+                if not subs_df.empty and "일자" in subs_df.columns and "교시" in subs_df.columns and "결강교사" in subs_df.columns:
+                    m_sub = subs_df[(subs_df["일자"] == date_str) & (subs_df["교시"].apply(safe_int) == p_val) & (subs_df["결강교사"] == target_teacher)]
+                    if not m_sub.empty and str(m_sub.iloc[0].get("보강교사", "")).strip():
+                        is_assigned = True
+                        assigned_teacher = str(m_sub.iloc[0].get("보강교사", "")).strip()
+
+                if is_assigned:
+                    with st.expander(f"📘 {p_val}교시 | 학급: {cls_val} | 과목: {sub_val} (✅ 보강배정 완료)", expanded=False):
+                        st.info(f"✅ 해당 수업은 이미 **{assigned_teacher}** 선생님으로 보강 배정이 완료되어 추천 목록에서 제외되었습니다.")
+                    continue
 
                 with st.expander(f"📘 {p_val}교시 | 학급: {cls_val} | 과목: {sub_val}", expanded=True):
                     # 1. 동시간대 공강 교사 검색 (보강 후보)
