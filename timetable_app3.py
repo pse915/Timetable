@@ -20,34 +20,42 @@ from google.oauth2.service_account import Credentials
 from google.auth.exceptions import DefaultCredentialsError
 
 # ==========================================================================================
-# 0. 기본 설정 / 상수 / 유틸리티 & Custom CSS (표 가독성 강화)
+# 0. 기본 설정 / 상수 / 유틸리티 & Custom CSS (표 구분선 및 가독성 강회)
 # ==========================================================================================
 st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", layout="wide")
 
-# 표 구분선 및 가독성 향상을 위한 Custom CSS 주입
+# 표 구분선(격자선) 및 가독성 향상을 위한 Custom CSS 주입
 st.markdown("""
 <style>
-    /* Streamlit DataFrame 및 Table 테두리/격자선 강화 */
+    /* Streamlit DataFrame 및 DataEditor 셀 격자 테두리 표시 */
     [data-testid="stDataFrame"] {
-        border: 1px solid #cbd5e1 !important;
+        border: 1px solid #94a3b8 !important;
         border-radius: 6px;
     }
-    div[data-testid="stDataFrame"] div[role="grid"] {
-        border-collapse: collapse !important;
+    [data-testid="stDataFrame"] [role="gridcell"], 
+    [data-testid="stDataFrame"] [role="columnheader"] {
+        border-right: 1px solid #cbd5e1 !important;
+        border-bottom: 1px solid #cbd5e1 !important;
     }
-    .stTable table {
+    div[role="grid"] div[role="row"] > div {
+        border-right: 1px solid #cbd5e1 !important;
+        border-bottom: 1px solid #cbd5e1 !important;
+    }
+    
+    /* 일반 HTML Table 구분선 강화 */
+    .stTable table, div[data-testid="stTable"] table {
         border-collapse: collapse !important;
         width: 100% !important;
-        border: 1px solid #94a3b8 !important;
+        border: 1px solid #64748b !important;
     }
-    .stTable th {
+    .stTable th, div[data-testid="stTable"] th {
         background-color: #f1f5f9 !important;
         color: #0f172a !important;
         font-weight: 700 !important;
-        border: 1px solid #94a3b8 !important;
+        border: 1px solid #64748b !important;
         text-align: center !important;
     }
-    .stTable td {
+    .stTable td, div[data-testid="stTable"] td {
         border: 1px solid #cbd5e1 !important;
         padding: 6px 10px !important;
     }
@@ -114,7 +122,7 @@ def grade_of(class_name: str) -> str:
     return ""
 
 # ==========================================================================================
-# Google Sheets 연결 및 방어적 API 예외 처리
+# Google Sheets 연결 캐싱 및 방어적 API 예외 처리 (속도 최적화)
 # ==========================================================================================
 @st.cache_resource(show_spinner=False)
 def get_gspread_client():
@@ -134,15 +142,19 @@ def get_gspread_client():
         st.error(f"Google 계정 인증 실패: {e}")
         st.stop()
 
+@st.cache_resource(show_spinner=False)
+def get_spreadsheet(spreadsheet_id: str):
+    """스프레드시트 객체 자체를 캐싱하여 open_by_key 호출에 따른 API 지연을 대폭 감소"""
+    client = get_gspread_client()
+    return client.open_by_key(spreadsheet_id)
+
 def get_worksheet(spreadsheet_id: str, sheet_name: str):
     try:
-        client = get_gspread_client()
-        sh = client.open_by_key(spreadsheet_id)
+        sh = get_spreadsheet(spreadsheet_id)
         return sh.worksheet(sheet_name)
     except WorksheetNotFound:
         try:
-            client = get_gspread_client()
-            sh = client.open_by_key(spreadsheet_id)
+            sh = get_spreadsheet(spreadsheet_id)
             return sh.add_worksheet(title=sheet_name, rows=2000, cols=40)
         except Exception as e:
             st.error(f"워크시트 생성 실패 [{sheet_name}]: {e}")
@@ -197,7 +209,6 @@ def push_history(action_name: str = "작업"):
 
     st.session_state.history = st.session_state.history[:st.session_state.history_index + 1]
 
-    # deep=True 복사로 메모리 포인터 참조 엉킴 및 메모리 누수 방지
     snapshot = {
         "action": action_name,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -262,7 +273,7 @@ def save_history_log_to_gsheet():
         st.warning(f"작업내역 로그 저장 실패: {e}")
 
 # ==========================================================================================
-# 2. 데이터 로드 / 저장 및 타입 방어
+# 2. 데이터 로드 / 저장 및 타입 방어 (날짜/교시 사전 정규화로 연산 속도 향상)
 # ==========================================================================================
 REQUIRED_TT_COLS = ["교사명", "요일", "교시", "과목", "학급"]
 
@@ -346,10 +357,26 @@ def load_work_data_from_gsheet():
         part_time = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "시간강사"))
         cumulative = df_from_worksheet(get_worksheet(WORK_SHEET_ID, "누적보강"))
 
-        if not absences.empty and "교시" in absences.columns:
-            absences["교시"] = absences["교시"].apply(lambda x: safe_int(x, 0))
-        if not subs.empty and "교시" in subs.columns:
-            subs["교시"] = subs["교시"].apply(lambda x: safe_int(x, 0))
+        # 날짜 및 교시 타입 사전 표준화로 필터링 연산 속도 개선
+        if not absences.empty:
+            if "교시" in absences.columns:
+                absences["교시"] = absences["교시"].apply(lambda x: safe_int(x, 0))
+            if "일자" in absences.columns:
+                absences["일자"] = absences["일자"].apply(normalize_date_str)
+        if not subs.empty:
+            if "교시" in subs.columns:
+                subs["교시"] = subs["교시"].apply(lambda x: safe_int(x, 0))
+            if "일자" in subs.columns:
+                subs["일자"] = subs["일자"].apply(normalize_date_str)
+        if not swaps.empty:
+            if "원본일자" in swaps.columns:
+                swaps["원본일자"] = swaps["원본일자"].apply(normalize_date_str)
+            if "목표일자" in swaps.columns:
+                swaps["목표일자"] = swaps["목표일자"].apply(normalize_date_str)
+            if "교시A" in swaps.columns:
+                swaps["교시A"] = swaps["교시A"].apply(lambda x: safe_int(x, 0))
+            if "교시B" in swaps.columns:
+                swaps["교시B"] = swaps["교시B"].apply(lambda x: safe_int(x, 0))
 
         return absences, subs, swaps, part_time, cumulative
     except Exception as e:
@@ -412,7 +439,7 @@ init_state()
 # 3. 핵심 로직 & 성능 최적화 (맞교환 실시간 동적 반영 로직)
 # ==========================================================================================
 def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
-    """맞교환(swaps) 내역을 정확히 반영하여 특정 날짜의 최종 변경된 시간표를 동적으로 생성"""
+    """맞교환(swaps) 내역을 정확히 반영하여 특정 날짜의 최종 변경된 시간표를 동적으로 생성 (최적화 버전)"""
     norm_on_date = normalize_date_str(on_date)
     if not norm_on_date:
         return st.session_state.timetable
@@ -439,10 +466,12 @@ def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
         }
 
     swaps = st.session_state.get("swaps", pd.DataFrame())
-    if not swaps.empty:
-        for _, sw in swaps.iterrows():
-            orig_date = normalize_date_str(sw.get("원본일자", ""))
-            target_date = normalize_date_str(sw.get("목표일자", ""))
+    if not swaps.empty and "원본일자" in swaps.columns:
+        # 해당 날짜 관련 맞교환만 신속 필터링
+        relevant_swaps = swaps[(swaps["원본일자"] == norm_on_date) | (swaps["목표일자"] == norm_on_date)]
+        for _, sw in relevant_swaps.iterrows():
+            orig_date = sw.get("원본일자", "")
+            target_date = sw.get("목표일자", "")
             swap_type = str(sw.get("유형", "")).strip()
 
             t_a = str(sw.get("교사A", "")).strip()
@@ -455,7 +484,6 @@ def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
             c_b = str(sw.get("학급B", "")).strip()
             s_b = str(sw.get("과목B", "")).strip()
 
-            # 원본 일자 적용: 교사 A의 원본 시간 삭제 및 교사 B 배치
             if orig_date == norm_on_date:
                 current_map.pop((t_a, p_a), None)
                 if swap_type in ["1:1 맞교환", "1:1맞교환", "직접1:1"] and t_b:
@@ -466,7 +494,6 @@ def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
                         "과목군": subject_group(s_b if s_b else s_a)
                     }
 
-            # 목표 일자 적용: 교사 B의 원본 시간 삭제 및 교사 A 배치
             if target_date == norm_on_date:
                 if swap_type in ["1:1 맞교환", "1:1맞교환", "직접1:1"]:
                     if t_b and p_b > 0:
@@ -536,13 +563,11 @@ def is_free(teacher: str, day: str, period: int, on_date: str = None, is_part_ti
     if norm_date and not is_part_time:
         s = st.session_state.subs
         if not s.empty and "일자" in s.columns and "교시" in s.columns:
-            s_date = s["일자"].apply(normalize_date_str)
-            if ((s_date == norm_date) & (s["교시"].apply(safe_int) == p_int) & (s["보강교사"] == teacher)).any():
+            if ((s["일자"] == norm_date) & (s["교시"] == p_int) & (s["보강교사"] == teacher)).any():
                 return False
         a = st.session_state.absences
         if not a.empty and "일자" in a.columns and "교시" in a.columns:
-            a_date = a["일자"].apply(normalize_date_str)
-            if ((a_date == norm_date) & (a["교사명"] == teacher) & (a["교시"].apply(safe_int) == p_int)).any():
+            if ((a["일자"] == norm_date) & (a["교사명"] == teacher) & (a["교시"] == p_int)).any():
                 return False
     return True
 
@@ -560,14 +585,14 @@ def absent_all_day(teacher: str, on_date: str) -> bool:
     if a.empty or "일자" not in a.columns:
         return False
     norm_date = normalize_date_str(on_date)
-    return ((a["일자"].apply(normalize_date_str) == norm_date) & (a["교사명"] == teacher)).any()
+    return ((a["일자"] == norm_date) & (a["교사명"] == teacher)).any()
 
 def cumulative_sub_count(start_date: str = None, end_date: str = None) -> dict:
     s = st.session_state.subs
     base = {t: 0 for t in st.session_state.teachers["교사명"].tolist()} if not st.session_state.teachers.empty else {}
     if not s.empty and "보강교사" in s.columns:
         if start_date and end_date and "일자" in s.columns:
-            s_date = s["일자"].apply(normalize_date_str)
+            s_date = s["일자"]
             s = s[(s_date >= normalize_date_str(start_date)) & (s_date <= normalize_date_str(end_date))]
         for k, v in s["보강교사"].value_counts().items():
             if k in base:
@@ -673,7 +698,7 @@ def add_substitute(cid, on_date, day, period, class_name, subject,
     p_int = safe_int(period)
     norm_date = normalize_date_str(on_date)
     if not s.empty and "결강ID" in s.columns and "교시" in s.columns:
-        s = s[~((s["결강ID"] == cid) & (s["교시"].apply(safe_int) == p_int))]
+        s = s[~((s["결강ID"] == cid) & (s["교시"] == p_int))]
     new = {
         "결강ID": cid, "일자": norm_date, "요일": day, "교시": p_int,
         "학급": class_name, "과목": subject, "결강교사": absent_teacher,
@@ -688,7 +713,7 @@ def cancel_substitute(cid: str, period: int):
     push_history(f"보강 배정 취소 (교시 {p_int})")
     s = st.session_state.subs
     if not s.empty and "결강ID" in s.columns and "교시" in s.columns:
-        st.session_state.subs = s[~((s["결강ID"] == cid) & (s["교시"].apply(safe_int) == p_int))].reset_index(drop=True)
+        st.session_state.subs = s[~((s["결강ID"] == cid) & (s["교시"] == p_int))].reset_index(drop=True)
     save_work_data_to_gsheet()
 
 def check_conflicts(tt: pd.DataFrame) -> pd.DataFrame:
@@ -942,7 +967,6 @@ def get_teacher_week_view(teacher: str, ref_date: date):
 
     grid = pd.DataFrame("", index=[f"{p}교시" for p in range(1, MAX_PERIOD + 1)], columns=DAYS)
     
-    # 각 날짜별로 최종 변경사항이 반영된 시간표를 조회하여 그리드 구성
     for d_idx, cur_date in enumerate(week_dates):
         cur_date_str = cur_date.strftime("%Y-%m-%d")
         d = DAYS[d_idx]
@@ -955,20 +979,18 @@ def get_teacher_week_view(teacher: str, ref_date: date):
                 if 1 <= p <= PERIODS_PER_DAY.get(d, 7):
                     grid.at[f"{p}교시", d] = f"{r['과목']} {r['학급']}"
 
-        # 결강 표시 반영
         abs_m = st.session_state.absences
         if not abs_m.empty and "일자" in abs_m.columns:
-            m = abs_m[(abs_m["일자"].apply(normalize_date_str) == cur_date_str) & (abs_m["교사명"] == teacher)]
+            m = abs_m[(abs_m["일자"] == cur_date_str) & (abs_m["교사명"] == teacher)]
             for _, r in m.iterrows():
                 p = safe_int(r.get("교시"))
                 if 1 <= p <= MAX_PERIOD:
                     cur_val = str(grid.at[f"{p}교시", d])
                     grid.at[f"{p}교시", d] = f"🚫결강 {cur_val}".strip()
 
-        # 보강 배정 표시 반영
         sub_m = st.session_state.subs
         if not sub_m.empty and "일자" in sub_m.columns:
-            m = sub_m[(sub_m["일자"].apply(normalize_date_str) == cur_date_str) & (sub_m["보강교사"] == teacher)]
+            m = sub_m[(sub_m["일자"] == cur_date_str) & (sub_m["보강교사"] == teacher)]
             for _, r in m.iterrows():
                 p = safe_int(r.get("교시"))
                 if 1 <= p <= MAX_PERIOD:
@@ -985,9 +1007,9 @@ def build_report_html(on_date: str) -> str:
     a = st.session_state.absences
     s = st.session_state.subs
     w = st.session_state.swaps
-    a = a[a["일자"].apply(normalize_date_str) == norm_date] if not a.empty and "일자" in a.columns else pd.DataFrame()
-    s = s[s["일자"].apply(normalize_date_str) == norm_date] if not s.empty and "일자" in s.columns else pd.DataFrame()
-    w = w[(w["원본일자"].apply(normalize_date_str) == norm_date) | (w["목표일자"].apply(normalize_date_str) == norm_date)] if not w.empty and "원본일자" in w.columns else pd.DataFrame()
+    a = a[a["일자"] == norm_date] if not a.empty and "일자" in a.columns else pd.DataFrame()
+    s = s[s["일자"] == norm_date] if not s.empty and "일자" in s.columns else pd.DataFrame()
+    w = w[(w["원본일자"] == norm_date) | (w["목표일자"] == norm_date)] if not w.empty and "원본일자" in w.columns else pd.DataFrame()
 
     def rows_abs():
         if a.empty:
@@ -1204,7 +1226,7 @@ with tabs[2]:
             st.success("시간강사 정보가 Google Sheets에 저장되었습니다!")
             st.rerun()
 
-# ------------------------------------------------------------------ 3. 결강 등록 (맞교환 실시간 연동 적용)
+# ------------------------------------------------------------------ 3. 결강 등록
 with tabs[3]:
     c = st.columns([1, 1, 1, 2])
     d_sel = c[0].date_input("결강 일자", value=date.today())
@@ -1221,7 +1243,6 @@ with tabs[3]:
     elif not teacher_list:
         st.warning("등록된 교사가 없습니다.")
     else:
-        # [수정 핵심] 원본 시간표 대신 해당 날짜의 맞교환 반영 시간표(eff_tt)를 조회하여 교체된 수업도 즉시 표시
         eff_tt_today = get_effective_timetable_for_date(on_date)
         todays = eff_tt_today[
             (eff_tt_today["교사명"] == who) &
@@ -1245,7 +1266,7 @@ with tabs[3]:
                         rows = todays[todays["교시"].apply(safe_int).isin(sel_periods)]
                         a = st.session_state.absences
                         if not a.empty and "일자" in a.columns:
-                            a = a[~((a["일자"].apply(normalize_date_str) == on_date) & (a["교사명"] == who))]
+                            a = a[~((a["일자"] == on_date) & (a["교사명"] == who))]
                         new_rows = []
                         for _, r in rows.iterrows():
                             new_rows.append({
@@ -1266,7 +1287,7 @@ with tabs[3]:
     st.subheader("등록된 결강 목록")
     ab = st.session_state.absences
     if not ab.empty:
-        show = ab[ab["일자"].apply(normalize_date_str) == on_date] if (st.checkbox("선택한 일자만 보기", value=True) and "일자" in ab.columns) else ab
+        show = ab[ab["일자"] == on_date] if (st.checkbox("선택한 일자만 보기", value=True) and "일자" in ab.columns) else ab
         st.dataframe(show.sort_values(["일자", "교사명", "교시"]) if "일자" in show.columns else show, use_container_width=True)
     else:
         st.info("등록된 결강이 없습니다.")
@@ -1312,7 +1333,7 @@ with tabs[4]:
                         cur = st.session_state.subs
                         assigned = None
                         if not cur.empty and "결강ID" in cur.columns and "교시" in cur.columns:
-                            m = cur[(cur["결강ID"] == cid) & (cur["교시"].apply(safe_int) == p)]
+                            m = cur[(cur["결강ID"] == cid) & (cur["교시"] == p)]
                             if not m.empty:
                                 assigned = m.iloc[0]["보강교사"]
 
@@ -1467,8 +1488,8 @@ with tabs[6]:
     a = st.session_state.absences
     s = st.session_state.subs
     xls = to_excel_bytes({
-        "결강": a[a["일자"].apply(normalize_date_str) == rd] if not a.empty and "일자" in a.columns else pd.DataFrame(),
-        "보강": s[s["일자"].apply(normalize_date_str) == rd] if not s.empty and "일자" in s.columns else pd.DataFrame(),
+        "결강": a[a["일자"] == rd] if not a.empty and "일자" in a.columns else pd.DataFrame(),
+        "보강": s[s["일자"] == rd] if not s.empty and "일자" in s.columns else pd.DataFrame(),
         "시간표맞교환": st.session_state.swaps,
         "교사별시간표": teacher_matrix(),
         "학급별시간표": class_matrix(),
@@ -1523,7 +1544,7 @@ with tabs[7]:
         if save_cumulative_to_gsheet(save_df):
             st.success("누적보강 시트에 저장 완료!")
 
-# ------------------------------------------------------------------ 8. 시간표 변경 테스트용 (실시간 변동 반영)
+# ------------------------------------------------------------------ 8. 시간표 변경 테스트용
 with tabs[8]:
     st.subheader("🧪 시간표 변경 테스트용 (Google Sheets에 저장되지 않음)")
     st.info("이 탭은 일반 교사가 결강·보강·맞교환이 반영된 실시간 시간표를 안전하게 확인하고, 변경 시나리오(추천)를 테스트하기 위한 공간입니다. **어떤 변경도 시트에 저장되지 않습니다.**")
@@ -1549,7 +1570,6 @@ with tabs[8]:
             test_day_str = WEEKDAY_KR[test_date.weekday()]
             test_date_str = test_date.strftime("%Y-%m-%d")
             
-            # [수정] 맞교환 내역이 반영된 실시간 시간표에서 선택하도록 개선
             eff_tt_test = get_effective_timetable_for_date(test_date_str)
             sub_test = eff_tt_test[(eff_tt_test["교사명"] == test_teacher) & (eff_tt_test["요일"] == test_day_str)].sort_values("교시") if not eff_tt_test.empty else pd.DataFrame()
 
@@ -1615,7 +1635,7 @@ with tabs[9]:
         st.caption(f"주간: {week_dates[0].strftime('%Y-%m-%d')} ~ {week_dates[4].strftime('%Y-%m-%d')}")
         st.dataframe(grid, use_container_width=True, height=450)
 
-# ------------------------------------------------------------------ 10. 복무 기반 자동 판단 및 맞교환
+# ------------------------------------------------------------------ 10. 복무 기반 자동 판단 및 맞교환 (루프 성능 최적화)
 with tabs[10]:
     st.subheader("🤖 교사 복무 기반 수업 처리(교체 vs 보강) 자동 판단 및 바로 맞교환")
     st.caption("갑작스러운 복무 발생 시 사유 및 여건에 따른 맞교환/보강 적합도를 분석하고, 교체 가능한 타 교사 수업을 즉시 확인·실행합니다.")
@@ -1638,7 +1658,6 @@ with tabs[10]:
     else:
         date_str = absence_date.strftime("%Y-%m-%d")
         
-        # 날짜 포맷 규격화 적용된 유효 시간표 로드
         eff_tt = get_effective_timetable_for_date(date_str)
         target_lessons = eff_tt[eff_tt["교사명"] == target_teacher].sort_values("교시") if not eff_tt.empty else pd.DataFrame()
         
@@ -1655,23 +1674,21 @@ with tabs[10]:
                 cls_val = les["학급"]
                 sub_val = les["과목"]
 
-                # 맞교환 기록 확인
                 is_already_swapped = False
                 if not swaps_df.empty and "원본일자" in swaps_df.columns:
-                    s_orig = swaps_df["원본일자"].apply(normalize_date_str)
-                    s_target = swaps_df["목표일자"].apply(normalize_date_str)
-                    cond_orig = (s_orig == date_str) & (swaps_df["교사A"] == target_teacher) & (swaps_df["교시A"].apply(safe_int) == p_val)
-                    cond_target_b = (s_target == date_str) & (swaps_df["교사B"] == target_teacher) & (swaps_df["교시B"].apply(safe_int) == p_val)
-                    cond_target_a = (s_target == date_str) & (swaps_df["교사A"] == target_teacher) & (swaps_df["교시B"].apply(safe_int) == p_val)
+                    s_orig = swaps_df["원본일자"]
+                    s_target = swaps_df["목표일자"]
+                    cond_orig = (s_orig == date_str) & (swaps_df["교사A"] == target_teacher) & (swaps_df["교시A"] == p_val)
+                    cond_target_b = (s_target == date_str) & (swaps_df["교사B"] == target_teacher) & (swaps_df["교시B"] == p_val)
+                    cond_target_a = (s_target == date_str) & (swaps_df["교사A"] == target_teacher) & (swaps_df["교시B"] == p_val)
                     if (cond_orig | cond_target_b | cond_target_a).any():
                         is_already_swapped = True
 
-                # 이미 보강 배정이 완료된 수업인지 검사
                 is_assigned = False
                 assigned_teacher = ""
                 if not subs_df.empty and "일자" in subs_df.columns and "교시" in subs_df.columns and "결강교사" in subs_df.columns:
-                    s_date = subs_df["일자"].apply(normalize_date_str)
-                    m_sub = subs_df[(s_date == date_str) & (subs_df["교시"].apply(safe_int) == p_val) & (subs_df["결강교사"] == target_teacher)]
+                    s_date = subs_df["일자"]
+                    m_sub = subs_df[(s_date == date_str) & (subs_df["교시"] == p_val) & (subs_df["결강교사"] == target_teacher)]
                     if not m_sub.empty and str(m_sub.iloc[0].get("보강교사", "")).strip():
                         is_assigned = True
                         assigned_teacher = str(m_sub.iloc[0].get("보강교사", "")).strip()
@@ -1687,11 +1704,9 @@ with tabs[10]:
                     if is_already_swapped:
                         st.warning("⚠️ 이미 한번 옮긴 시간표 입니다.")
 
-                    # 1. 동시간대 공강 교사 검색
                     cands = recommend_substitutes(abs_day, p_val, sub_val, cls_val, target_teacher, date_str, top_n=10, eff_tt=eff_tt)
                     available_free_teachers = len(cands)
                     
-                    # 2. 교체 가능 타 교시/교사 수집
                     possible_swaps_all = []
                     max_p = PERIODS_PER_DAY.get(abs_day, 7)
                     for other_p in range(1, max_p + 1):
@@ -1711,7 +1726,6 @@ with tabs[10]:
 
                     swap_possible_count = len(possible_swaps_all)
 
-                    # 3. 확률 산정 알고리즘
                     if "당일" in urgency_type or duty_reason in ["병가", "조퇴", "외출"]:
                         base_swap_prob, base_sub_prob = 20, 80
                     else:
@@ -1730,7 +1744,6 @@ with tabs[10]:
                     swap_prob = int(np.clip(base_swap_prob, 5, 95))
                     sub_prob = 100 - swap_prob
 
-                    # 4. 분석 결과 표시
                     c_p1, c_p2 = st.columns(2)
                     c_p1.metric("수업 교체(맞교환) 추천도", f"{swap_prob}%")
                     c_p2.metric("보강(결보강) 처리 추천도", f"{sub_prob}%")
@@ -1744,7 +1757,6 @@ with tabs[10]:
 
                     st.caption(f"· 동시간대 공강 교사: {available_free_teachers}명 | · 해당 요일 직접 교체 가능 수업: {swap_possible_count}개")
 
-                    # 5. 교체 가능한 수업 목록 및 즉시 맞교환 기능
                     st.markdown("##### 🔄 교체 가능한 수업 목록 (바로 확인 및 맞교환)")
                     
                     if possible_swaps_all:
