@@ -2,14 +2,12 @@
 """
 ==========================================================================================
  중학교 전체 시간표 관리 및 결강·보강 자동 처리 프로그램 (Streamlit Web App)
- 2026 서라벌여자중학교용 – Google Sheets 연동 성능 최적화 및 예외 처리 강화 버전
- (Undo/Redo + 시간강사 + 누적보강 + 작업내역 + 배정취소 + 복무기반 자동 판단 탭)
+ 2026 서라벌여자중학교용 – Google Sheets 연동 성능 최적화, 고대비/색맹 접근성 및 반응형 강화
 ==========================================================================================
 """
 
 import io
 from datetime import date, datetime, timedelta
-from copy import deepcopy
 
 import numpy as np
 import pandas as pd
@@ -17,12 +15,16 @@ import streamlit as st
 import gspread
 from gspread.exceptions import APIError, WorksheetNotFound
 from google.oauth2.service_account import Credentials
-from google.auth.exceptions import DefaultCredentialsError
 
 # ==========================================================================================
-# 0. 기본 설정 / 상수 / 유틸리티
+# 0. 페이지 기본 설정 & 기본 정보
 # ==========================================================================================
-st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", layout="wide")
+st.set_page_config(
+    page_title="서라벌여중 시간표·결보강 관리 시스템",
+    page_icon="📘",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
@@ -35,7 +37,7 @@ WEEKDAY_KR = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "�
 TIMETABLE_SHEET_ID = "1jZhTHyJ8vKXn6tkoFXfY_f52-pj6eQTdVvRCo3cCmBA"
 WORK_SHEET_ID = "1g1B1cyZG_tfRn3AD1NZzr30YxYNYFewJeZYdos2obpU"
 
-MAX_HISTORY = 15  # 메모리 부하 방지를 위해 히스토리 스냅샷 최대 개수 최적화
+MAX_HISTORY = 10  # 메모리 과부하 방지 최적화
 ABSENCE_REASONS = ["병가", "연가", "출장", "공가", "조퇴", "외출", "연수", "특별휴가", "기타"]
 
 SUBJECT_GROUP = {
@@ -53,8 +55,94 @@ SUBJECT_GROUP = {
     "한문": "한문", "일본어": "일본어", "정보": "정보", "진동": "진로활동",
 }
 
+# ==========================================================================================
+# 0-1. 테마 & UI 스타일링 (색맹 고려, 고대비, 1920x1080+ 해상도 최적화)
+# ==========================================================================================
+def apply_custom_theme(theme_choice: str):
+    base_css = """
+    <style>
+        /* 1920x1080 이상 고해상도 레이아웃 최적화 */
+        .block-container {
+            max-width: 96% !important;
+            padding-top: 1.2rem !important;
+            padding-bottom: 2rem !important;
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+        }
+        .stDataFrame, div[data-testid="stTable"] {
+            font-size: 14px !important;
+        }
+        /* 탭 가독성 강화 */
+        button[data-baseweb="tab"] {
+            font-size: 15px !important;
+            font-weight: 600 !important;
+            padding: 10px 16px !important;
+        }
+        /* 상태 배지 커스텀 */
+        .badge-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            display: inline-block;
+        }
+    </style>
+    """
+    
+    if theme_choice == "고대비/색맹 포용 (High Contrast)":
+        theme_css = """
+        <style>
+            .stApp { background-color: #121212 !important; color: #FFFFFF !important; }
+            div[data-testid="stSidebar"] { background-color: #1E1E1E !important; border-right: 2px solid #333333; }
+            .stButton > button {
+                background-color: #005A9C !important;
+                color: #FFFFFF !important;
+                border: 2px solid #FFFFFF !important;
+                font-weight: bold !important;
+            }
+            .stButton > button:hover {
+                background-color: #0078D4 !important;
+            }
+            div[data-baseweb="select"] > div { background-color: #262626 !important; color: #FFFFFF !important; }
+            .stDataFrame { border: 1px solid #555555 !important; }
+        </style>
+        """
+    elif theme_choice == "모던 다크 (Modern Dark)":
+        theme_css = """
+        <style>
+            .stApp { background-color: #1A1D24 !important; color: #E0E6ED !important; }
+            div[data-testid="stSidebar"] { background-color: #14161B !important; }
+            .stButton > button {
+                background-color: #2B5278 !important;
+                color: #E0E6ED !important;
+                border-radius: 6px !important;
+            }
+        </style>
+        """
+    elif theme_choice == "소프트 오션 (Ocean Blue)":
+        theme_css = """
+        <style>
+            .stApp { background-color: #F4F7FA !important; color: #1E293B !important; }
+            div[data-testid="stSidebar"] { background-color: #E2E8F0 !important; }
+            .stButton > button {
+                background-color: #0284C7 !important;
+                color: #FFFFFF !important;
+                border-radius: 6px !important;
+            }
+        </style>
+        """
+    else:  # 기본 라이트
+        theme_css = """
+        <style>
+            .stApp { background-color: #FFFFFF !important; color: #0F172A !important; }
+        </style>
+        """
+    
+    st.markdown(base_css + theme_css, unsafe_allow_html=True)
+
+# ==========================================================================================
+# 0-2. 유틸리티 함수
+# ==========================================================================================
 def safe_int(val, default=0) -> int:
-    """형변환 오류 방지 유틸리티"""
     if pd.isna(val) or val is None:
         return default
     try:
@@ -63,7 +151,6 @@ def safe_int(val, default=0) -> int:
         return default
 
 def normalize_date_str(d_str) -> str:
-    """날짜 포맷 표준화 유틸리티 (YYYY-MM-DD)"""
     if pd.isna(d_str) or not d_str or str(d_str).strip() in ("", "nan", "None"):
         return ""
     try:
@@ -84,7 +171,7 @@ def grade_of(class_name: str) -> str:
     return ""
 
 # ==========================================================================================
-# Google Sheets 연결 및 방어적 API 예외 처리
+# Google Sheets 연동
 # ==========================================================================================
 @st.cache_resource(show_spinner=False)
 def get_gspread_client():
@@ -118,7 +205,7 @@ def get_worksheet(spreadsheet_id: str, sheet_name: str):
             st.error(f"워크시트 생성 실패 [{sheet_name}]: {e}")
             return None
     except APIError as e:
-        st.error(f"Google API 호출 할당량 초과 또는 네트워크 오류 ({sheet_name}): {e}")
+        st.error(f"Google API 할당량 초과 또는 네트워크 오류 ({sheet_name}): {e}")
         return None
     except Exception as e:
         st.error(f"시트 연동 에러 [{sheet_name}]: {e}")
@@ -153,7 +240,7 @@ def df_to_worksheet(ws, df: pd.DataFrame):
         values = [df_clean.columns.tolist()] + df_clean.values.tolist()
         ws.update(values, value_input_option="USER_ENTERED")
     except APIError as e:
-        st.error(f"Google Sheets API 할당량 초과 또는 쓰기 에러: {e}")
+        st.error(f"Google Sheets API 쓰기 에러: {e}")
     except Exception as e:
         st.error(f"시트 저장 처리 실패: {e}")
 
@@ -231,7 +318,7 @@ def save_history_log_to_gsheet():
         st.warning(f"작업내역 로그 저장 실패: {e}")
 
 # ==========================================================================================
-# 2. 데이터 로드 / 저장 및 타입 방어
+# 2. 데이터 로드 / 저장
 # ==========================================================================================
 REQUIRED_TT_COLS = ["교사명", "요일", "교시", "과목", "학급"]
 
@@ -378,10 +465,10 @@ def init_state():
 init_state()
 
 # ==========================================================================================
-# 3. 핵심 로직 & 성능 최적화 (루프 내 중복 실행 방지 및 완벽 정규화 적용)
+# 3. 핵심 로직 (맞교환 동적 반영, 결강·보강 실시간 동기화)
 # ==========================================================================================
 def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
-    """맞교환(swaps) 내역을 정확히 반영하여 특정 날짜의 최종 변경된 시간표를 생성"""
+    """맞교환(swaps) 내역을 완벽히 반영하여 특정 날짜의 변동된 시간표 반환"""
     norm_on_date = normalize_date_str(on_date)
     if not norm_on_date:
         return st.session_state.timetable
@@ -424,7 +511,6 @@ def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
             c_b = str(sw.get("학급B", "")).strip()
             s_b = str(sw.get("과목B", "")).strip()
 
-            # 원본 일자 적용: 교사 A의 원본 시간 삭제 및 교사 B 배치
             if orig_date == norm_on_date:
                 current_map.pop((t_a, p_a), None)
                 if swap_type in ["1:1 맞교환", "1:1맞교환", "직접1:1"] and t_b:
@@ -435,7 +521,6 @@ def get_effective_timetable_for_date(on_date: str) -> pd.DataFrame:
                         "과목군": subject_group(s_b if s_b else s_a)
                     }
 
-            # 목표 일자 적용: 교사 B의 원본 시간 삭제 및 교사 A 배치
             if target_date == norm_on_date:
                 if swap_type in ["1:1 맞교환", "1:1맞교환", "직접1:1"]:
                     if t_b and p_b > 0:
@@ -478,16 +563,9 @@ def is_teacher_available(teacher: str, day: str, period: int, is_part_time: bool
                 num_val = pd.to_numeric(val, errors='coerce')
                 if pd.notna(num_val) and num_val <= 0:
                     return False
-            except:
+            except Exception:
                 pass
     return True
-
-def lesson_of(teacher: str, day: str, period: int):
-    tt = st.session_state.timetable
-    if tt.empty:
-        return None
-    m = tt[(tt["교사명"] == teacher) & (tt["요일"] == day) & (tt["교시"] == safe_int(period))]
-    return None if m.empty else m.iloc[0].to_dict()
 
 def is_free(teacher: str, day: str, period: int, on_date: str = None, is_part_time: bool = False, eff_tt: pd.DataFrame = None) -> bool:
     p_int = safe_int(period)
@@ -500,7 +578,8 @@ def is_free(teacher: str, day: str, period: int, on_date: str = None, is_part_ti
             if not eff.empty and not eff[(eff["교사명"] == teacher) & (eff["교시"] == p_int)].empty:
                 return False
         else:
-            if lesson_of(teacher, day, p_int) is not None:
+            tt = st.session_state.timetable
+            if not tt.empty and not tt[(tt["교사명"] == teacher) & (tt["요일"] == day) & (tt["교시"] == p_int)].empty:
                 return False
     if norm_date and not is_part_time:
         s = st.session_state.subs
@@ -904,14 +983,13 @@ def class_matrix() -> pd.DataFrame:
     return mat
 
 def get_teacher_week_view(teacher: str, ref_date: date):
-    """특정 주의 최종 변동 반영된 주간 시간표 생성 (get_effective_timetable_for_date 기반 통합)"""
+    """특정 주의 변동 반영 주간 시간표 생성 (get_effective_timetable_for_date 통합)"""
     weekday = ref_date.weekday()
     monday = ref_date - timedelta(days=weekday)
     week_dates = [monday + timedelta(days=i) for i in range(5)]
 
     grid = pd.DataFrame("", index=[f"{p}교시" for p in range(1, MAX_PERIOD + 1)], columns=DAYS)
     
-    # 각 날짜별로 최종 변경사항이 반영된 시간표를 조회하여 그리드 구성
     for d_idx, cur_date in enumerate(week_dates):
         cur_date_str = cur_date.strftime("%Y-%m-%d")
         d = DAYS[d_idx]
@@ -924,7 +1002,6 @@ def get_teacher_week_view(teacher: str, ref_date: date):
                 if 1 <= p <= PERIODS_PER_DAY.get(d, 7):
                     grid.at[f"{p}교시", d] = f"{r['과목']} {r['학급']}"
 
-        # 결강 표시 반영
         abs_m = st.session_state.absences
         if not abs_m.empty and "일자" in abs_m.columns:
             m = abs_m[(abs_m["일자"].apply(normalize_date_str) == cur_date_str) & (abs_m["교사명"] == teacher)]
@@ -932,16 +1009,15 @@ def get_teacher_week_view(teacher: str, ref_date: date):
                 p = safe_int(r.get("교시"))
                 if 1 <= p <= MAX_PERIOD:
                     cur_val = str(grid.at[f"{p}교시", d])
-                    grid.at[f"{p}교시", d] = f"🚫결강 {cur_val}".strip()
+                    grid.at[f"{p}교시", d] = f"🚫[결강] {cur_val}".strip()
 
-        # 보강 배정 표시 반영
         sub_m = st.session_state.subs
         if not sub_m.empty and "일자" in sub_m.columns:
             m = sub_m[(sub_m["일자"].apply(normalize_date_str) == cur_date_str) & (sub_m["보강교사"] == teacher)]
             for _, r in m.iterrows():
                 p = safe_int(r.get("교시"))
                 if 1 <= p <= MAX_PERIOD:
-                    grid.at[f"{p}교시", d] = f"✅보강 {r.get('학급','')} {r.get('과목','')}"
+                    grid.at[f"{p}교시", d] = f"✅[보강] {r.get('학급','')} {r.get('과목','')}"
 
     return grid, week_dates
 
@@ -1026,9 +1102,18 @@ def to_excel_bytes(sheets: dict) -> bytes:
     return buf.getvalue()
 
 # ==========================================================================================
-# 5. 사이드바
+# 5. 사이드바 (테마 선택 추가)
 # ==========================================================================================
 with st.sidebar:
+    st.header("🎨 화면 테마 설정")
+    theme_choice = st.selectbox(
+        "테마 선택 (색맹/시력 보호 고려)",
+        ["기본 라이트 (Light)", "고대비/색맹 포용 (High Contrast)", "모던 다크 (Modern Dark)", "소프트 오션 (Ocean Blue)"],
+        index=0
+    )
+    apply_custom_theme(theme_choice)
+
+    st.divider()
     st.header("데이터 (Google Sheets)")
     
     if st.button("🔄 원본 시간표 다시 불러오기", use_container_width=True):
@@ -1052,38 +1137,31 @@ with st.sidebar:
 
     if st.button("💾 현재 작업 내역 저장", use_container_width=True, type="primary"):
         if save_work_data_to_gsheet():
-            st.success("Google Sheets에 저장 완료! (작업내역 로그 포함)")
+            st.success("Google Sheets에 저장 완료!")
 
     st.divider()
     st.subheader("작업 되돌리기")
     c_undo, c_redo = st.columns(2)
-    if c_undo.button("↩ 되돌리기 (Undo)", use_container_width=True):
+    if c_undo.button("↩ 되돌리기", use_container_width=True):
         if undo():
             save_work_data_to_gsheet()
-            st.success("이전 단계로 되돌렸습니다. (시트도 반영됨)")
+            st.success("이전 단계로 되돌렸습니다.")
             st.rerun()
         else:
             st.warning("더 이상 되돌릴 수 없습니다.")
-    if c_redo.button("↪ 다시실행 (Redo)", use_container_width=True):
+    if c_redo.button("↪ 다시실행", use_container_width=True):
         if redo():
             save_work_data_to_gsheet()
-            st.success("다시 실행했습니다. (시트도 반영됨)")
+            st.success("다시 실행했습니다.")
             st.rerun()
         else:
             st.warning("다시 실행할 단계가 없습니다.")
-
-    if "history" in st.session_state and st.session_state.history:
-        st.caption(f"히스토리: {st.session_state.history_index + 1} / {len(st.session_state.history)}")
-        with st.expander("최근 작업 목록"):
-            for h in reversed(st.session_state.history[-8:]):
-                st.write(f"{h.get('time','')} - {h.get('action','')}")
 
     st.divider()
     st.caption(f"{SCHOOL_YEAR}학년도 · {SCHOOL_NAME}")
     st.metric("등록 교사", f"{len(st.session_state.teachers)} 명")
     st.metric("시간강사", f"{len(st.session_state.part_time)} 명")
     st.metric("주간 수업", f"{len(st.session_state.timetable)} 시수")
-    st.metric("누적 보강", f"{len(st.session_state.subs)} 건")
 
 if st.session_state.timetable.empty:
     st.title("중학교 시간표·결보강 관리 프로그램")
@@ -1106,7 +1184,7 @@ tabs = st.tabs([
 with tabs[0]:
     view = st.radio("보기 방식", ["교사별 전체 매트릭스 (기본 주간)", "학급별 매트릭스 (기본 주간)", "교사 1인 주간표 (달력 – 주차 독립)"], horizontal=True)
     if view == "교사별 전체 매트릭스 (기본 주간)":
-        st.dataframe(teacher_matrix(), use_container_width=True, height=760)
+        st.dataframe(teacher_matrix(), use_container_width=True, height=720)
     elif view == "학급별 매트릭스 (기본 주간)":
         st.dataframe(class_matrix(), use_container_width=True, height=680)
     else:
@@ -1170,10 +1248,10 @@ with tabs[2]:
         st.session_state.part_time = ed_pt.reset_index(drop=True)
         push_history("시간강사 정보 수정")
         if save_work_data_to_gsheet():
-            st.success("시간강사 정보가 Google Sheets에 저장되었습니다!")
+            st.success("시간강사 정보가 저장되었습니다!")
             st.rerun()
 
-# ------------------------------------------------------------------ 3. 결강 등록
+# ------------------------------------------------------------------ 3. 결강 등록 (버그 수정: 교체된 수업 동적 반영)
 with tabs[3]:
     c = st.columns([1, 1, 1, 2])
     d_sel = c[0].date_input("결강 일자", value=date.today())
@@ -1190,18 +1268,21 @@ with tabs[3]:
     elif not teacher_list:
         st.warning("등록된 교사가 없습니다.")
     else:
-        todays = st.session_state.timetable[
-            (st.session_state.timetable["교사명"] == who) &
-            (st.session_state.timetable["요일"] == day)
-        ].sort_values("교시")
+        # [핵심 수정] 원본 시간표 대신 맞교환이 반영된 특정 날짜의 유효 시간표를 불러옵니다.
+        eff_tt_today = get_effective_timetable_for_date(on_date)
+        
+        todays = eff_tt_today[
+            (eff_tt_today["교사명"] == who) &
+            (eff_tt_today["요일"] == day)
+        ].sort_values("교시") if not eff_tt_today.empty else pd.DataFrame()
 
         if todays.empty:
-            st.info(f"{who} 교사는 {day}요일에 수업이 없습니다.")
+            st.info(f"{who} 교사는 {on_date} ({day}요일)에 수업이 없습니다 (맞교환 변경 반영됨).")
         else:
             opts = [f"{safe_int(r['교시'])}교시 · {r['학급']} · {r['과목']}" for _, r in todays.iterrows()]
-            picked = st.multiselect("결강 교시", opts, default=opts)
+            picked = st.multiselect("결강 교시 선택 (맞교환된 수업 포함)", opts, default=opts)
 
-            if st.button("결강 등록", type="primary"):
+            if st.button("결강 등록 실행", type="primary"):
                 if not picked:
                     st.warning("교시를 선택하세요.")
                 else:
@@ -1255,10 +1336,10 @@ with tabs[4]:
             else:
                 head = rows.iloc[0]
                 norm_head_date = normalize_date_str(head.get('일자',''))
-                st.markdown(f"### {norm_head_date} ({head.get('요일','')}) · **{head.get('교사명','')}** · {head.get('사유','')} · {len(rows)}시간")
-                include_pt = st.checkbox("시간강사도 추천에 포함", value=False)
+                st.markdown(f"### 📌 {norm_head_date} ({head.get('요일','')}) · **{head.get('교사명','')}** · 사유: {head.get('사유','')} · {len(rows)}시간")
+                include_pt = st.checkbox("시간강사도 추천 대상에 포함", value=False)
 
-                if st.button("전 교시 자동 배정", type="primary"):
+                if st.button("전 교시 자동 추천 및 일괄 배정", type="primary"):
                     try:
                         push_history("자동 보강 배정")
                         log = auto_assign_all(cid, norm_head_date, head["요일"], rows, include_pt=include_pt)
@@ -1275,7 +1356,7 @@ with tabs[4]:
                 eff_tt = get_effective_timetable_for_date(norm_head_date)
                 for _, r in rows.iterrows():
                     p = safe_int(r["교시"])
-                    with st.expander(f"{p}교시 · {r.get('학급','')} · {r.get('과목','')}", expanded=True):
+                    with st.expander(f"📘 {p}교시 · {r.get('학급','')} · {r.get('과목','')}", expanded=True):
                         cur = st.session_state.subs
                         assigned = None
                         if not cur.empty and "결강ID" in cur.columns and "교시" in cur.columns:
@@ -1284,8 +1365,8 @@ with tabs[4]:
                                 assigned = m.iloc[0]["보강교사"]
 
                         if assigned:
-                            st.success(f"현재 배정 : **{assigned}**")
-                            if st.button("❌ 배정 취소 (결강 상태로 되돌리기)", key=f"cancel_{cid}_{p}", type="secondary"):
+                            st.success(f"현재 배정 교사: **{assigned}**")
+                            if st.button("❌ 배정 취소 (미배정 상태로 되돌리기)", key=f"cancel_{cid}_{p}", type="secondary"):
                                 cancel_substitute(cid, p)
                                 st.success(f"{p}교시 배정이 취소되었습니다.")
                                 st.rerun()
@@ -1300,13 +1381,13 @@ with tabs[4]:
                                 cand = pd.DataFrame()
 
                             if cand.empty:
-                                st.error("가능한 공강 교사가 없습니다.")
+                                st.error("배정 가능한 공강 교사가 없습니다.")
                             else:
                                 st.dataframe(cand, use_container_width=True, hide_index=True)
                                 cc = st.columns([2, 2, 1])
-                                pick = cc[0].selectbox("보강 교사", cand["보강교사"].tolist(), key=f"pick_{cid}_{p}")
+                                pick = cc[0].selectbox("보강 교사 선택", cand["보강교사"].tolist(), key=f"pick_{cid}_{p}")
                                 memo = cc[1].text_input("비고", key=f"memo_{cid}_{p}")
-                                if cc[2].button("배정", key=f"btn_{cid}_{p}", use_container_width=True):
+                                if cc[2].button("배정 저장", key=f"btn_{cid}_{p}", use_container_width=True):
                                     try:
                                         pr_series = cand.loc[cand["보강교사"] == pick, "우선순위"]
                                         pr = pr_series.iloc[0] if not pr_series.empty else "수동배정"
@@ -1322,7 +1403,7 @@ with tabs[4]:
 # ------------------------------------------------------------------ 5. 맞교환
 with tabs[5]:
     st.markdown("### 🔄 스마트 시간표 변경 & 맞교환")
-    st.caption("변경은 해당 날짜에만 적용됩니다.")
+    st.caption("맞교환 변경은 지정된 날짜의 시간표에만 적용됩니다.")
     
     col_a, col_b = st.columns(2)
     teacher_list = st.session_state.teachers["교사명"].tolist() if not st.session_state.teachers.empty else []
@@ -1335,8 +1416,7 @@ with tabs[5]:
         
         if not teacher_list:
             st.warning("등록된 교사가 없습니다.")
-            t_a = None
-            pick_a = None
+            t_a, pick_a = None, None
         else:
             t_a = st.selectbox("교사 A", teacher_list, key="teacher_a_select")
             eff_tt_a = get_effective_timetable_for_date(date_a_str)
@@ -1347,7 +1427,7 @@ with tabs[5]:
                 pick_a = None
             else:
                 opts_a = [f"{safe_int(r['교시'])}교시 · {r['학급']} · {r['과목']}" for _, r in sub_a.iterrows()]
-                sel_a = st.selectbox("변경할 수업", opts_a, key="lesson_a_select")
+                sel_a = st.selectbox("변경할 수업 선택", opts_a, key="lesson_a_select")
                 row_a = sub_a.iloc[opts_a.index(sel_a)]
                 pick_a = {
                     "교사명": t_a, "일자": date_a_str, "요일": day_a, 
@@ -1418,6 +1498,7 @@ with tabs[5]:
                     add_substitute(cid, date_b_str, day_b, p_b_input, pick_a["학급"], pick_a["과목"],
                                    pick_a["교사명"], sub_pick, "시간표변경_대리", pr_val, f"{pick_a['일자']} 이동")
                     st.success(f"'{sub_pick}' 등록 완료")
+                    st.rerun()
             else:
                 st.info("추천 대리/보강 교사가 없습니다.")
 
@@ -1471,29 +1552,28 @@ with tabs[7]:
     df = df.sort_values("누적보강", ascending=False)
 
     c = st.columns(4)
-    c[0].metric("총 보강", int(df["누적보강"].sum()) if not df.empty else 0)
+    c[0].metric("총 보강 건수", int(df["누적보강"].sum()) if not df.empty else 0)
     c[1].metric("보강 참여 교사", int((df["누적보강"] > 0).sum()) if not df.empty else 0)
-    c[2].metric("최다 보강", int(df["누적보강"].max()) if not df.empty else 0)
-    c[3].metric("평균 보강", round(float(df["누적보강"].mean()), 2) if not df.empty else 0)
+    c[2].metric("최다 보강 시수", int(df["누적보강"].max()) if not df.empty else 0)
+    c[3].metric("평균 보강 시수", round(float(df["누적보강"].mean()), 2) if not df.empty else 0)
 
-    st.caption(f"기간: {start_str} ~ {end_str}")
+    st.caption(f"조회 기간: {start_str} ~ {end_str}")
     if not df.empty:
         st.bar_chart(df.set_index("교사명")["누적보강"], height=340)
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     st.divider()
-    st.subheader("누적보강 시트에 저장")
-    if st.button("📊 현재 통계를 누적보강 시트에 저장", type="primary"):
+    if st.button("📊 현재 통계를 Google Sheets 누적보강 시트에 저장", type="primary"):
         save_df = df.copy()
         save_df["기간"] = f"{start_str} ~ {end_str}"
         save_df["저장시각"] = datetime.now().strftime("%Y-%m-%d %H:%M")
         if save_cumulative_to_gsheet(save_df):
             st.success("누적보강 시트에 저장 완료!")
 
-# ------------------------------------------------------------------ 8. 시간표 변경 테스트용
+# ------------------------------------------------------------------ 8. 실시간 시뮬레이션 테스트용 (시트 미반영)
 with tabs[8]:
-    st.subheader("🧪 시간표 변경 테스트용 (Google Sheets에 저장되지 않음)")
-    st.info("이 탭은 일반 교사가 결강·보강·맞교환이 반영된 시간표를 안전하게 확인하고, 변경 시나리오(추천)를 테스트하기 위한 공간입니다. **어떤 변경도 시트에 반영되지 않습니다.**")
+    st.subheader("🧪 시간표 변경 실시간 테스트 (Google Sheets 저장 안됨)")
+    st.info("이 탭은 변경 사항을 실제 저장하지 않고 안전하게 가상 테스트할 수 있는 공간입니다. 실시간 상태를 동적으로 반영합니다.")
 
     teacher_list = st.session_state.teachers["교사명"].tolist() if not st.session_state.teachers.empty else []
     if not teacher_list:
@@ -1503,12 +1583,12 @@ with tabs[8]:
         test_date = st.date_input("기준 날짜", value=date.today(), key="test_date")
 
         grid, week_dates = get_teacher_week_view(test_teacher, test_date)
-        st.caption(f"주간: {week_dates[0].strftime('%Y-%m-%d')} ~ {week_dates[4].strftime('%Y-%m-%d')} (결강·보강·맞교환 반영)")
+        st.caption(f"주간: {week_dates[0].strftime('%Y-%m-%d')} ~ {week_dates[4].strftime('%Y-%m-%d')} (결강·보강·맞교환 실시간 반영됨)")
 
-        st.dataframe(grid, use_container_width=True, height=420)
+        st.dataframe(grid, use_container_width=True, height=400)
 
         st.divider()
-        st.markdown("#### 🔄 가상 맞교환 & 변경 추천 시뮬레이션")
+        st.markdown("#### 🔄 가상 맞교환 시뮬레이션")
         col_ta, col_tb = st.columns(2)
         
         with col_ta:
@@ -1538,7 +1618,7 @@ with tabs[8]:
             test_p_b = st.selectbox("희망 교시", list(range(1, PERIODS_PER_DAY.get(test_day_b, MAX_PERIOD) + 1)), key="test_period_b")
 
         if pick_test_a:
-            st.markdown(f"##### 💡 추천 결과 (시뮬레이션: {pick_test_a['일자']} {pick_test_a['교시']}교시 → {test_date_b_str} {test_p_b}교시)")
+            st.markdown(f"##### 💡 가상 시뮬레이션 결과 ({pick_test_a['일자']} {pick_test_a['교시']}교시 → {test_date_b_str} {test_p_b}교시)")
             df_swap_t, df_linked_t, df_sub_t = get_target_time_recommendations(
                 pick_test_a["교사명"], pick_test_a["일자"], pick_test_a["교시"], pick_test_a["학급"], pick_test_a["과목"],
                 test_date_b_str, test_p_b, eff_tt_a=eff_tt_test, eff_tt_b=get_effective_timetable_for_date(test_date_b_str)
@@ -1566,7 +1646,7 @@ with tabs[8]:
 
 # ------------------------------------------------------------------ 9. 변경된 교사 주간표
 with tabs[9]:
-    st.subheader("📅 변경된 교사 주간 시간표 (결강·보강·맞교환 반영)")
+    st.subheader("📅 변경된 교사 주간 시간표 (결강·보강·맞교환 즉시 반영)")
     teacher_list = st.session_state.teachers["교사명"].tolist() if not st.session_state.teachers.empty else []
     if not teacher_list:
         st.warning("등록된 교사가 없습니다.")
@@ -1582,7 +1662,7 @@ with tabs[9]:
 
 # ------------------------------------------------------------------ 10. 복무 기반 자동 판단 및 맞교환
 with tabs[10]:
-    st.subheader("🤖 교사 복무 기반 수업 처리(교체 vs 보강) 자동 판단 및 바로 맞교환")
+    st.subheader("🤖 교사 복무 기반 수업 처리(교체 vs 보강) 자동 판단 및 즉시 맞교환")
     st.caption("갑작스러운 복무 발생 시 사유 및 여건에 따른 맞교환/보강 적합도를 분석하고, 교체 가능한 타 교사 수업을 즉시 확인·실행합니다.")
 
     col1, col2 = st.columns(2)
@@ -1603,14 +1683,13 @@ with tabs[10]:
     else:
         date_str = absence_date.strftime("%Y-%m-%d")
         
-        # 날짜 포맷 규격화 적용된 유효 시간표 로드
         eff_tt = get_effective_timetable_for_date(date_str)
         target_lessons = eff_tt[eff_tt["교사명"] == target_teacher].sort_values("교시") if not eff_tt.empty else pd.DataFrame()
         
         if target_lessons.empty:
             st.info(f"{target_teacher} 교사는 {date_str} ({abs_day})에 예정된 수업이 없습니다.")
         else:
-            st.markdown(f"#### 📌 {target_teacher} 교사의 {abs_day}요일 수업 목록 ({len(target_lessons)}시간 - 수정 반영됨)")
+            st.markdown(f"#### 📌 {target_teacher} 교사의 {abs_day}요일 수업 목록 ({len(target_lessons)}시간 - 맞교환 반영됨)")
             
             subs_df = st.session_state.subs
             swaps_df = st.session_state.swaps
@@ -1620,7 +1699,6 @@ with tabs[10]:
                 cls_val = les["학급"]
                 sub_val = les["과목"]
 
-                # 맞교환 기록 확인
                 is_already_swapped = False
                 if not swaps_df.empty and "원본일자" in swaps_df.columns:
                     s_orig = swaps_df["원본일자"].apply(normalize_date_str)
@@ -1631,7 +1709,6 @@ with tabs[10]:
                     if (cond_orig | cond_target_b | cond_target_a).any():
                         is_already_swapped = True
 
-                # 이미 보강 배정이 완료된 수업인지 검사
                 is_assigned = False
                 assigned_teacher = ""
                 if not subs_df.empty and "일자" in subs_df.columns and "교시" in subs_df.columns and "결강교사" in subs_df.columns:
@@ -1644,19 +1721,17 @@ with tabs[10]:
                 if is_assigned:
                     with st.expander(f"📘 {p_val}교시 | 학급: {cls_val} | 과목: {sub_val} (✅ 보강배정 완료)", expanded=False):
                         if is_already_swapped:
-                            st.warning("⚠️ 이미 한번 옮긴 시간표 입니다.")
+                            st.warning("⚠️ 이미 맞교환 처리된 수업입니다.")
                         st.info(f"✅ 해당 수업은 이미 **{assigned_teacher}** 선생님으로 보강 배정이 완료되어 추천 목록에서 제외되었습니다.")
                     continue
 
                 with st.expander(f"📘 {p_val}교시 | 학급: {cls_val} | 과목: {sub_val}", expanded=True):
                     if is_already_swapped:
-                        st.warning("⚠️ 이미 한번 옮긴 시간표 입니다.")
+                        st.warning("⚠️ 이미 맞교환 처리된 수업입니다.")
 
-                    # 1. 동시간대 공강 교사 검색
                     cands = recommend_substitutes(abs_day, p_val, sub_val, cls_val, target_teacher, date_str, top_n=10, eff_tt=eff_tt)
                     available_free_teachers = len(cands)
                     
-                    # 2. 교체 가능 타 교시/교사 수집
                     possible_swaps_all = []
                     max_p = PERIODS_PER_DAY.get(abs_day, 7)
                     for other_p in range(1, max_p + 1):
@@ -1676,7 +1751,6 @@ with tabs[10]:
 
                     swap_possible_count = len(possible_swaps_all)
 
-                    # 3. 확률 산정 알고리즘
                     if "당일" in urgency_type or duty_reason in ["병가", "조퇴", "외출"]:
                         base_swap_prob, base_sub_prob = 20, 80
                     else:
@@ -1695,22 +1769,20 @@ with tabs[10]:
                     swap_prob = int(np.clip(base_swap_prob, 5, 95))
                     sub_prob = 100 - swap_prob
 
-                    # 4. 분석 결과 표시
                     c_p1, c_p2 = st.columns(2)
                     c_p1.metric("수업 교체(맞교환) 추천도", f"{swap_prob}%")
                     c_p2.metric("보강(결보강) 처리 추천도", f"{sub_prob}%")
 
                     if swap_prob >= 60:
-                        st.success(f"💡 **[수업 교체 권장]** {duty_reason} 사유로 인한 사전 변경이며, 교체할 수 있는 타 교사 수업이 {swap_possible_count}건 존재합니다.")
+                        st.success(f"💡 **[수업 교체 권장]** 사전 신청 복무이며, 맞교환 가능한 타 교사 수업이 {swap_possible_count}건 존재합니다.")
                     elif sub_prob >= 60:
-                        st.warning(f"💡 **[보강 처리 권장]** 긴급도나 맞교환 여건을 고려할 때, 당일 공강 교사 배정(보강) 처리가 적합합니다.")
+                        st.warning(f"💡 **[보강 처리 권장]** 긴급도 및 여건상 공강 교사 보강 배정이 적합합니다.")
                     else:
-                        st.info("💡 **[중립/시간강사 권장]** 교체와 보강 처리 가능성이 비슷합니다.")
+                        st.info("💡 **[중립/시간강사 권장]** 교체와 보강 처리 가능성이 유사합니다.")
 
                     st.caption(f"· 동시간대 공강 교사: {available_free_teachers}명 | · 해당 요일 직접 교체 가능 수업: {swap_possible_count}개")
 
-                    # 5. 교체 가능한 수업 목록 및 즉시 맞교환 기능
-                    st.markdown("##### 🔄 교체 가능한 수업 목록 (바로 확인 및 맞교환)")
+                    st.markdown("##### 🔄 교체 가능한 수업 목록 (즉시 맞교환)")
                     
                     if possible_swaps_all:
                         swap_disp_rows = []
@@ -1727,7 +1799,7 @@ with tabs[10]:
                         st.dataframe(df_disp, use_container_width=True, hide_index=True)
 
                         sw_choice = st.selectbox(
-                            "교체할 대상 선택 후 즉시 맞교환 실행", 
+                            "교체 대상 선택", 
                             options=range(len(possible_swaps_all[:5])), 
                             format_func=lambda i: f"[{possible_swaps_all[i].get('유형')}] {possible_swaps_all[i].get('교사B')} 선생님 ({possible_swaps_all[i].get('현재 수업')})",
                             key=f"sw_sel_{p_val}"
@@ -1749,4 +1821,4 @@ with tabs[10]:
                                 st.success(f"✅ {target_teacher} → {target_sw.get('교사B')} 연계 공강 교환이 완료되었습니다!")
                             st.rerun()
                     else:
-                        st.info("ℹ️ 해당 요일에 충돌 없이 바로 맞교환할 수 있는 추천 대상 수업이 없습니다. '보강 배정' 탭에서 보강 교사를 배정하세요.")
+                        st.info("ℹ️ 해당 요일에 충돌 없이 맞교환할 대상 수업이 없습니다. '보강 배정' 탭을 활용하세요.")
