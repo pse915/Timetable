@@ -1619,21 +1619,94 @@ with tabs[8]:
                 else:
                     st.dataframe(df_sub_t.drop(columns=["_prio", "_score"], errors='ignore'), use_container_width=True, hide_index=True)
 
-# ------------------------------------------------------------------ 9. 변경된 교사 주간표
+# ------------------------------------------------------------------ 9. 변경 교사 주간표 (time2 버전 적용)
 with tabs[9]:
-    st.subheader("📅 변경된 교사 주간 시간표 (결강·보강·맞교환 반영)")
-    teacher_list = st.session_state.teachers["교사명"].tolist() if not st.session_state.teachers.empty else []
-    if not teacher_list:
-        st.warning("등록된 교사가 없습니다.")
+    st.subheader("📋 변경된 교사 주간표 일괄 보기 (수업계용)")
+    st.caption("선택한 주차에 결강·보강·맞교환이 발생한 모든 교사의 주간 시간표를 한 번에 확인합니다.")
+
+    ref_date = st.date_input("기준 날짜 (해당 주 월~금)", value=date.today(), key="changed_week_ref")
+    weekday = ref_date.weekday()
+    monday = ref_date - timedelta(days=weekday)
+    week_dates = [monday + timedelta(days=i) for i in range(5)]
+    week_start = week_dates[0].strftime("%Y-%m-%d")
+    week_end = week_dates[4].strftime("%Y-%m-%d")
+
+    st.info(f"조회 주차: **{week_start} ~ {week_end}**")
+
+    changed_teachers = set()
+
+    abs_df = st.session_state.absences
+    if not abs_df.empty and "일자" in abs_df.columns:
+        mask = (abs_df["일자"] >= week_start) & (abs_df["일자"] <= week_end)
+        changed_teachers.update(abs_df.loc[mask, "교사명"].dropna().unique())
+
+    sub_df = st.session_state.subs
+    if not sub_df.empty and "일자" in sub_df.columns:
+        mask = (sub_df["일자"] >= week_start) & (sub_df["일자"] <= week_end)
+        changed_teachers.update(sub_df.loc[mask, "보강교사"].dropna().unique())
+        changed_teachers.update(sub_df.loc[mask, "결강교사"].dropna().unique())
+
+    swap_df = st.session_state.swaps
+    if not swap_df.empty and "원본일자" in swap_df.columns and "목표일자" in swap_df.columns:
+        mask = (
+            ((swap_df["원본일자"] >= week_start) & (swap_df["원본일자"] <= week_end)) |
+            ((swap_df["목표일자"] >= week_start) & (swap_df["목표일자"] <= week_end))
+        )
+        changed_teachers.update(swap_df.loc[mask, "교사A"].dropna().unique())
+        changed_teachers.update(swap_df.loc[mask, "교사B"].dropna().unique())
+
+    changed_teachers = sorted([t for t in changed_teachers if t and str(t).strip()])
+
+    if not changed_teachers:
+        st.success("이번 주에는 결강·보강·맞교환이 발생한 교사가 없습니다.")
     else:
-        col_t1, col_t2 = st.columns(2)
-        with col_t1:
-            t_sel = st.selectbox("교사 선택", teacher_list, key="week_view_teacher")
-        with col_t2:
-            ref_d = st.date_input("기준 날짜", value=date.today(), key="week_view_ref_date")
-        grid, week_dates = get_teacher_week_view(t_sel, ref_d)
-        st.caption(f"주간: {week_dates[0].strftime('%Y-%m-%d')} ~ {week_dates[4].strftime('%Y-%m-%d')}")
-        st.dataframe(grid, use_container_width=True, height=450)
+        st.markdown(f"**변경이 있는 교사: {len(changed_teachers)}명**")
+        st.write(", ".join(changed_teachers))
+
+        view_mode = st.radio(
+            "보기 방식",
+            ["모든 변경 교사 한 번에 보기", "특정 교사만 선택해서 보기"],
+            horizontal=True,
+            key="changed_view_mode"
+        )
+
+        if view_mode == "특정 교사만 선택해서 보기":
+            selected = st.multiselect(
+                "교사 선택",
+                changed_teachers,
+                default=changed_teachers[:3] if len(changed_teachers) > 3 else changed_teachers,
+                key="changed_teacher_select"
+            )
+        else:
+            selected = changed_teachers
+
+        st.divider()
+
+        for teacher in selected:
+            with st.expander(f"👤 {teacher}", expanded=True):
+                grid, _ = get_teacher_week_view(teacher, ref_date)
+                st.dataframe(grid, use_container_width=True, height=320)
+
+                summary = []
+                if not abs_df.empty and "일자" in abs_df.columns:
+                    a_cnt = abs_df[(abs_df["일자"] >= week_start) & (abs_df["일자"] <= week_end) & (abs_df["교사명"] == teacher)]
+                    if not a_cnt.empty:
+                        summary.append(f"결강 {len(a_cnt)}건")
+                if not sub_df.empty and "일자" in sub_df.columns:
+                    s_cnt = sub_df[(sub_df["일자"] >= week_start) & (sub_df["일자"] <= week_end) & (sub_df["보강교사"] == teacher)]
+                    if not s_cnt.empty:
+                        summary.append(f"보강 배정 {len(s_cnt)}건")
+                if not swap_df.empty and "원본일자" in swap_df.columns:
+                    sw_cnt = swap_df[
+                        (((swap_df["원본일자"] >= week_start) & (swap_df["원본일자"] <= week_end)) |
+                         ((swap_df["목표일자"] >= week_start) & (swap_df["목표일자"] <= week_end))) &
+                        ((swap_df["교사A"] == teacher) | (swap_df["교사B"] == teacher))
+                    ]
+                    if not sw_cnt.empty:
+                        summary.append(f"맞교환/변경 {len(sw_cnt)}건")
+
+                if summary:
+                    st.caption(" · ".join(summary))
 
 # ------------------------------------------------------------------ 10. 복무 기반 자동 판단 및 맞교환 (루프 성능 최적화)
 with tabs[10]:
