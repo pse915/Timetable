@@ -36,8 +36,8 @@ WEEKDAY_KR = ["월", "화", "수", "목", "금", "토", "일"]
 ABSENCE_REASONS = ["연가", "병가", "출장", "조퇴", "외출", "특별휴가", "공가"]
 MAX_HISTORY = 30
 
-TIMETABLE_SHEET_ID = "14lIvh3zT8LSo394L1-dskI_G0dM983xI4mpt2k5zZzE"
-WORK_SHEET_ID = "1Iq9jO4hK0dskJ392mSK90234mnskDI1039mmsLDKsll"
+TIMETABLE_SHEET_ID = "1jZhTHyJ8vKXn6tkoFXfY_f52-pj6eQTdVvRCo3cCmBA"
+WORK_SHEET_ID = "1g1B1cyZG_tfRn3AD1NZzr30YxYNYFewJeZYdos2obpU"
 
 SUBJECT_GROUP = {
     "국어": "국어", "수학": "수학", "영어": "영어", "사회": "사회", "역사": "사회",
