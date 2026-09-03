@@ -56,86 +56,73 @@ SUBJECT_GROUP = {
 }
 
 # ==========================================================================================
-# 0-1. 테마 & UI 스타일링 (색맹 고려, 고대비, 1920x1080+ 해상도 최적화)
+# 0-1. 테마 & UI 스타일링 (색맹 고려, 고대비, 1920x1080+ 해상도 최적화 - 들여쓰기 오류 수정)
 # ==========================================================================================
 def apply_custom_theme(theme_choice: str):
-    base_css = """
-    <style>
-        /* 1920x1080 이상 고해상도 레이아웃 최적화 */
-        .block-container {
-            max-width: 96% !important;
-            padding-top: 1.2rem !important;
-            padding-bottom: 2rem !important;
-            padding-left: 2rem !important;
-            padding-right: 2rem !important;
-        }
-        .stDataFrame, div[data-testid="stTable"] {
-            font-size: 14px !important;
-        }
-        /* 탭 가독성 강화 */
-        button[data-baseweb="tab"] {
-            font-size: 15px !important;
-            font-weight: 600 !important;
-            padding: 10px 16px !important;
-        }
-        /* 상태 배지 커스텀 */
-        .badge-status {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: bold;
-            display: inline-block;
-        }
-    </style>
-    """
+    base_css = """<style>
+.block-container {
+    max-width: 96% !important;
+    padding-top: 1.2rem !important;
+    padding-bottom: 2rem !important;
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+}
+.stDataFrame, div[data-testid="stTable"] {
+    font-size: 14px !important;
+}
+button[data-baseweb="tab"] {
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    padding: 10px 16px !important;
+}
+.badge-status {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    display: inline-block;
+}
+</style>"""
     
     if theme_choice == "고대비/색맹 포용 (High Contrast)":
-        theme_css = """
-        <style>
-            .stApp { background-color: #121212 !important; color: #FFFFFF !important; }
-            div[data-testid="stSidebar"] { background-color: #1E1E1E !important; border-right: 2px solid #333333; }
-            .stButton > button {
-                background-color: #005A9C !important;
-                color: #FFFFFF !important;
-                border: 2px solid #FFFFFF !important;
-                font-weight: bold !important;
-            }
-            .stButton > button:hover {
-                background-color: #0078D4 !important;
-            }
-            div[data-baseweb="select"] > div { background-color: #262626 !important; color: #FFFFFF !important; }
-            .stDataFrame { border: 1px solid #555555 !important; }
-        </style>
-        """
+        theme_css = """<style>
+.stApp { background-color: #121212 !important; color: #FFFFFF !important; }
+div[data-testid="stSidebar"] { background-color: #1E1E1E !important; border-right: 2px solid #333333; }
+.stButton > button {
+    background-color: #005A9C !important;
+    color: #FFFFFF !important;
+    border: 2px solid #FFFFFF !important;
+    font-weight: bold !important;
+}
+.stButton > button:hover {
+    background-color: #0078D4 !important;
+}
+div[data-baseweb="select"] > div { background-color: #262626 !important; color: #FFFFFF !important; }
+.stDataFrame { border: 1px solid #555555 !important; }
+</style>"""
     elif theme_choice == "모던 다크 (Modern Dark)":
-        theme_css = """
-        <style>
-            .stApp { background-color: #1A1D24 !important; color: #E0E6ED !important; }
-            div[data-testid="stSidebar"] { background-color: #14161B !important; }
-            .stButton > button {
-                background-color: #2B5278 !important;
-                color: #E0E6ED !important;
-                border-radius: 6px !important;
-            }
-        </style>
-        """
+        theme_css = """<style>
+.stApp { background-color: #1A1D24 !important; color: #E0E6ED !important; }
+div[data-testid="stSidebar"] { background-color: #14161B !important; }
+.stButton > button {
+    background-color: #2B5278 !important;
+    color: #E0E6ED !important;
+    border-radius: 6px !important;
+}
+</style>"""
     elif theme_choice == "소프트 오션 (Ocean Blue)":
-        theme_css = """
-        <style>
-            .stApp { background-color: #F4F7FA !important; color: #1E293B !important; }
-            div[data-testid="stSidebar"] { background-color: #E2E8F0 !important; }
-            .stButton > button {
-                background-color: #0284C7 !important;
-                color: #FFFFFF !important;
-                border-radius: 6px !important;
-            }
-        </style>
-        """
+        theme_css = """<style>
+.stApp { background-color: #F4F7FA !important; color: #1E293B !important; }
+div[data-testid="stSidebar"] { background-color: #E2E8F0 !important; }
+.stButton > button {
+    background-color: #0284C7 !important;
+    color: #FFFFFF !important;
+    border-radius: 6px !important;
+}
+</style>"""
     else:  # 기본 라이트
-        theme_css = """
-        <style>
-            .stApp { background-color: #FFFFFF !important; color: #0F172A !important; }
-        </style>
-        """
+        theme_css = """<style>
+.stApp { background-color: #FFFFFF !important; color: #0F172A !important; }
+</style>"""
     
     st.markdown(base_css + theme_css, unsafe_allow_html=True)
 
@@ -1251,7 +1238,7 @@ with tabs[2]:
             st.success("시간강사 정보가 저장되었습니다!")
             st.rerun()
 
-# ------------------------------------------------------------------ 3. 결강 등록 (버그 수정: 교체된 수업 동적 반영)
+# ------------------------------------------------------------------ 3. 결강 등록
 with tabs[3]:
     c = st.columns([1, 1, 1, 2])
     d_sel = c[0].date_input("결강 일자", value=date.today())
@@ -1268,7 +1255,6 @@ with tabs[3]:
     elif not teacher_list:
         st.warning("등록된 교사가 없습니다.")
     else:
-        # [핵심 수정] 원본 시간표 대신 맞교환이 반영된 특정 날짜의 유효 시간표를 불러옵니다.
         eff_tt_today = get_effective_timetable_for_date(on_date)
         
         todays = eff_tt_today[
