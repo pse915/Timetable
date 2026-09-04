@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 서라벌여중 시간표·결보강 관리 프로그램
-2026 최종 초고속 최적화 + 전체 기능 완전 버전
-(모든 탭 완전 구현 / 생략 없음 / 속도 대폭 개선)
+2026 최종 완전판 (초고속 + 결강/보강/이동 원본 표기 완료)
 """
 
 import io
@@ -300,7 +299,7 @@ def init_state():
 init_state()
 
 # ==========================================================================================
-# 핵심 로직 (초고속)
+# 핵심 로직
 # ==========================================================================================
 @st.cache_data(show_spinner=False, ttl=120)
 def get_effective_timetable_for_date(on_date: str, version: int = 0) -> pd.DataFrame:
@@ -328,6 +327,7 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0) -> pd.DataF
             "과목군": str(getattr(r, "과목군", subject_group(r.과목))).strip()
         }
 
+    # 맞교환 반영
     swaps = st.session_state.swaps
     if not swaps.empty:
         mask = (swaps["원본일자"] == norm) | (swaps["목표일자"] == norm)
@@ -353,6 +353,7 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0) -> pd.DataF
                     current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
                                            "과목": s_a, "학급": c_a, "과목군": subject_group(s_a)}
 
+    # 보강 반영
     subs = st.session_state.subs
     if not subs.empty:
         day_subs = subs[subs["일자"] == norm]
@@ -372,6 +373,45 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0) -> pd.DataF
     if df.empty:
         df = pd.DataFrame(columns=["교사명", "요일", "교시", "과목", "학급", "과목군"])
     return df
+
+def get_swap_origin_info(teacher: str, on_date: str, period: int) -> str:
+    """이 수업이 어디서 이동해 왔는지 원본 정보 반환"""
+    norm_date = normalize_date_str(on_date)
+    if not norm_date:
+        return ""
+    swaps = st.session_state.get("swaps", pd.DataFrame())
+    if swaps.empty:
+        return ""
+
+    p = safe_int(period)
+
+    # 교사A가 목표 날짜로 이동해 온 경우
+    mask1 = (swaps["목표일자"] == norm_date) & (swaps["교사A"] == teacher) & (swaps["교시B"] == p)
+    if mask1.any():
+        row = swaps[mask1].iloc[0]
+        orig_day = str(row.get("요일A", "")).strip()
+        orig_p = safe_int(row.get("교시A", 0))
+        partner = str(row.get("교사B", "")).strip()
+        return f"{orig_day}{orig_p}({partner})" if partner else f"{orig_day}{orig_p}"
+
+    # 상대방이 원본에서 이 자리로 온 경우
+    mask2 = (swaps["원본일자"] == norm_date) & (swaps["교사B"] == teacher) & (swaps["교시A"] == p)
+    if mask2.any():
+        row = swaps[mask2].iloc[0]
+        orig_day = str(row.get("요일B", "")).strip()
+        orig_p = safe_int(row.get("교시B", 0))
+        partner = str(row.get("교사A", "")).strip()
+        return f"{orig_day}{orig_p}({partner})" if partner else f"{orig_day}{orig_p}"
+
+    # 연계 교환
+    mask3 = (swaps["목표일자"] == norm_date) & (swaps["교사A"] == teacher) & (swaps["교시B"] == p)
+    if mask3.any():
+        row = swaps[mask3].iloc[0]
+        if "연계" in str(row.get("유형", "")):
+            orig_day = str(row.get("요일A", "")).strip()
+            orig_p = safe_int(row.get("교시A", 0))
+            return f"{orig_day}{orig_p}"
+    return ""
 
 def has_duty(teacher: str, on_date: str, period: int = None) -> bool:
     duties = st.session_state.duties
@@ -544,13 +584,12 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
     day_a = WEEKDAY_KR[datetime.strptime(norm_a, "%Y-%m-%d").weekday()]
     day_b = WEEKDAY_KR[datetime.strptime(norm_b, "%Y-%m-%d").weekday()]
 
-    lesson_a = {"교사명": teacher_a, "일자": norm_a, "요일": day_a, "교시": p_a, "학급": class_a, "과목": subject_a}
     grp_a = subject_group(subject_a)
     grade_a = grade_of(class_a)
     cum = cumulative_sub_count(version=st.session_state.get("_data_version", 0))
     load = weekly_load(version=st.session_state.get("_data_version", 0))
 
-    swap_recs, linked_recs, sub_recs = [], [], []
+    swap_recs, linked_recs = [], []
 
     for t_b in ti["교사명"].tolist():
         if t_b == teacher_a or has_duty(t_b, norm_b):
@@ -559,7 +598,6 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
         if not b_lessons.empty:
             for _, b_row in b_lessons.iterrows():
                 b_item = {"교사명": t_b, "일자": norm_b, "요일": day_b, "교시": p_b, "학급": b_row["학급"], "과목": b_row["과목"]}
-                # 간단한 유효성 검사
                 is_valid = is_free(teacher_a, day_b, p_b, norm_b, eff_tt_b) and is_free(t_b, day_a, p_a, norm_a, eff_tt_a)
                 score = 2000 if is_valid else -1000
                 if is_valid:
@@ -569,15 +607,14 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
                 swap_recs.append({
                     "유형": "직접1:1", "교사B": t_b, "현재 수업": f"{day_b}{p_b}교시 · {b_row['학급']} · {b_row['과목']}",
                     "상태": "✅ 가능" if is_valid else "❌ 충돌", "is_valid": is_valid, "_score": score,
-                    "b_info": b_item, "errs": [], "guides": [], "설명": f"{teacher_a} ↔ {t_b}"
+                    "b_info": b_item
                 })
         if is_free(t_b, day_b, p_b, norm_b, eff_tt_b) and is_free(teacher_a, day_b, p_b, norm_b, eff_tt_b):
             score = 1500 - cum.get(t_b, 0) * 12
             linked_recs.append({
                 "유형": "연계공강교환", "교사B": t_b, "현재 수업": f"{day_b}{p_b}교시 공강",
                 "상태": "✅ 가능", "is_valid": True, "_score": score,
-                "b_info": {"교사명": t_b, "일자": norm_b, "요일": day_b, "교시": p_b, "학급": class_a, "과목": subject_a},
-                "errs": [], "guides": [], "설명": f"{teacher_a} → {day_b}{p_b}"
+                "b_info": {"교사명": t_b, "일자": norm_b, "요일": day_b, "교시": p_b, "학급": class_a, "과목": subject_a}
             })
 
     df_swap = pd.DataFrame(swap_recs).sort_values("_score", ascending=False).reset_index(drop=True) if swap_recs else pd.DataFrame()
@@ -620,28 +657,56 @@ def class_matrix(version=0):
     return pd.DataFrame(rows)
 
 def get_teacher_week_view(teacher: str, ref_date: date):
+    """결강 / 보강 / 이동 원본이 모두 표시되는 주간표"""
     weekday = ref_date.weekday()
     monday = ref_date - timedelta(days=weekday)
     week_dates = [monday + timedelta(days=i) for i in range(5)]
     ver = st.session_state.get("_data_version", 0)
+
+    absences = st.session_state.get("absences", pd.DataFrame())
+    subs = st.session_state.get("subs", pd.DataFrame())
+
     grid = []
     for p in range(1, MAX_PERIOD + 1):
         row = {"교시": p}
         for i, d in enumerate(DAYS):
             on_date = week_dates[i].strftime("%Y-%m-%d")
             eff = get_effective_timetable_for_date(on_date, ver)
-            m = eff[(eff["교사명"] == teacher) & (eff["교시"] == p)]
+
+            m = eff[(eff["교사명"] == teacher) & (eff["교시"] == p)] if not eff.empty else pd.DataFrame()
+
             if not m.empty:
                 r = m.iloc[0]
                 cell = f"{r['학급']} {r['과목']}"
-                if not st.session_state.absences.empty and ((st.session_state.absences["일자"] == on_date) & (st.session_state.absences["교사명"] == teacher) & (st.session_state.absences["교시"] == p)).any():
+
+                # 1. 맞교환/이동 원본 표시
+                origin = get_swap_origin_info(teacher, on_date, p)
+                if origin:
+                    cell += f" 🔄 from {origin}"
+
+                # 2. 결강 표시
+                is_absent = False
+                if not absences.empty:
+                    is_absent = ((absences["일자"] == on_date) &
+                                 (absences["교사명"] == teacher) &
+                                 (absences["교시"] == p)).any()
+                if is_absent:
                     cell = f"[결강] {cell}"
-                if not st.session_state.subs.empty and ((st.session_state.subs["일자"] == on_date) & (st.session_state.subs["보강교사"] == teacher) & (st.session_state.subs["교시"] == p)).any():
+
+                # 3. 보강 표시
+                is_sub = False
+                if not subs.empty:
+                    is_sub = ((subs["일자"] == on_date) &
+                              (subs["보강교사"] == teacher) &
+                              (subs["교시"] == p)).any()
+                if is_sub:
                     cell = f"[보강] {cell}"
+
                 row[d] = cell
             else:
                 row[d] = ""
         grid.append(row)
+
     return pd.DataFrame(grid), week_dates
 
 def get_changed_teachers_for_week(ref_date: date):
@@ -772,9 +837,9 @@ if st.session_state.timetable.empty:
     st.stop()
 
 # ==========================================================================================
-# 메인 화면 – 모든 탭 완전 구현
+# 메인 화면
 # ==========================================================================================
-st.title("시간표 · 결강/보강 관리 (초고속 완전판)")
+st.title("시간표 · 결강/보강 관리 (완전판)")
 
 tabs = st.tabs([
     "시간표 조회", "시간강사 관리", "결강·보강", "시간표 맞교환 & 변경 추천",
@@ -794,7 +859,7 @@ with tabs[0]:
         t = st.selectbox("교사 선택", tlist, key="view_t")
         ref = st.date_input("기준 날짜", value=date.today(), key="view_ref")
         grid, dates = get_teacher_week_view(t, ref)
-        st.caption(f"{dates[0]} ~ {dates[4]}")
+        st.caption(f"{dates[0]} ~ {dates[4]}  |  [결강] [보강] 🔄 from 원본 표시")
         st.dataframe(grid, use_container_width=True)
 
 # ------------------------------------------------------------------ 1. 시간강사 관리
@@ -893,7 +958,7 @@ with tabs[2]:
                                 add_substitute(cid, head["일자"], head["요일"], p, r.학급, r.과목, head["교사명"], pick, "수동", pr, "")
                                 st.rerun()
 
-# ------------------------------------------------------------------ 3. 시간표 맞교환 & 변경 추천
+# ------------------------------------------------------------------ 3. 시간표 맞교환
 with tabs[3]:
     st.markdown("### 🔄 스마트 시간표 변경 & 맞교환")
     col_a, col_b = st.columns(2)
@@ -972,7 +1037,7 @@ with tabs[4]:
     if not df.empty:
         st.bar_chart(df.set_index("교사명")["누적보강"])
 
-# ------------------------------------------------------------------ 5. 시간표 변경 테스트용
+# ------------------------------------------------------------------ 5. 테스트용
 with tabs[5]:
     st.subheader("🧪 시간표 변경 테스트용 (저장 안 됨)")
     tlist = st.session_state.teachers["교사명"].tolist()
@@ -1067,7 +1132,7 @@ with tabs[7]:
                         st.caption("복무 대상 아님")
                         continue
 
-                    # 맞교환 한눈에 표시
+                    # 맞교환 한눈에
                     possible = []
                     for op in range(1, PERIODS_PER_DAY.get(day_kr, 7) + 1):
                         if op != p and is_free(t_name, day_kr, op, d_str, eff):
@@ -1078,10 +1143,6 @@ with tabs[7]:
                         st.markdown("**🔄 맞교환 가능 목록**")
                         for i, sw in enumerate(possible[:4]):
                             st.write(f"• {sw['교사']} ({sw['교시']}교시 {sw['수업']})")
-                            if st.button(f"이 수업과 맞교환", key=f"dsw_{p}_{i}"):
-                                # 간단 맞교환 실행
-                                st.success("맞교환 요청 처리됨 (실제 로직은 do_swap 호출)")
-                                st.rerun()
                     else:
                         st.info("같은 날 맞교환 가능 수업 없음")
 
@@ -1102,4 +1163,4 @@ with tabs[7]:
                         st.success("결강 등록 완료")
                         st.rerun()
 
-st.caption("초고속 최적화 + 모든 기능 완전 구현 버전")
+st.caption("완전판 · 결강/보강/이동 원본 표기 완료 · 초고속 최적화")
