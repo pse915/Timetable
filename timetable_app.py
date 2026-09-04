@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 서라벌여중 시간표·결보강 관리 프로그램
-2026 최종 완전판
-- 모든 탭 기능 유지
-- 인덱스 제거
-- 복무 교시 범위 표시 (1~5교시 / 전체)
-- 7번 탭: 미래 1~2주 검색 + 같은 학년 우선 1:1 + 연계교환
-- 무한루프/메모리 누수 방지 + 전반 최적화
+2026 최종 우선순위 강화판
+- 1:1 교환 시 "같은 학년 + 동일 학급" 최우선
+- 인덱스 제거 / 복무 교시 범위 표시
+- 미래 검색 + 안정성 강화
 """
 
 import io
@@ -89,7 +87,6 @@ def grade_of(class_name: str) -> str:
     return ""
 
 def format_periods(periods):
-    """교시 리스트 → '전체' 또는 '1~5교시' / '1,3,5교시'"""
     periods = sorted(set(safe_int(p) for p in periods if safe_int(p) >= 0))
     if not periods:
         return ""
@@ -215,7 +212,7 @@ def _invalidate_all_caches():
     weekly_load.clear()
 
 # ==========================================================================================
-# 데이터 로드 / 초기화
+# 데이터 로드
 # ==========================================================================================
 DUTY_COLS = ["교사명", "일자", "교시", "사유", "상세사유", "등록시각"]
 
@@ -353,7 +350,6 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0) -> pd.DataF
             "과목군": str(getattr(r, "과목군", subject_group(r.과목))).strip()
         }
 
-    # 맞교환 반영
     swaps = st.session_state.swaps
     if not swaps.empty:
         mask = (swaps["원본일자"] == norm) | (swaps["목표일자"] == norm)
@@ -382,7 +378,6 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0) -> pd.DataF
                     current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
                                            "과목": s_a, "학급": c_a, "과목군": subject_group(s_a)}
 
-    # 보강 반영
     subs = st.session_state.subs
     if not subs.empty:
         day_subs = subs[subs["일자"] == norm]
@@ -564,7 +559,7 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
     return True
 
 def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, subject_a, date_b_str, period_b):
-    """맞교환 탭에서 사용하는 추천 함수 (같은 학년 우선)"""
+    """1:1 우선순위: 동일 학급 > 같은 학년 > 같은 과목군"""
     ti = st.session_state.teachers
     norm_a = normalize_date_str(date_a_str)
     norm_b = normalize_date_str(date_b_str)
@@ -579,6 +574,7 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
     day_a = WEEKDAY_KR[datetime.strptime(norm_a, "%Y-%m-%d").weekday()]
     day_b = WEEKDAY_KR[datetime.strptime(norm_b, "%Y-%m-%d").weekday()]
 
+    my_class = class_a
     my_grade = grade_of(class_a)
     my_group = subject_group(subject_a)
     cum = cumulative_sub_count(version=st.session_state.get("_data_version", 0))
@@ -589,33 +585,44 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
         if t_b == teacher_a or has_duty(t_b, norm_b):
             continue
 
-        # 1:1 후보
         b_lessons = eff_b[(eff_b["교사명"] == t_b) & (eff_b["교시"] == p_b)] if not eff_b.empty else pd.DataFrame()
         if not b_lessons.empty:
             for _, b_row in b_lessons.iterrows():
                 if is_free(teacher_a, day_b, p_b, norm_b, eff_b) and is_free(t_b, day_a, p_a, norm_a, eff_a):
-                    score = 100
-                    other_grade = grade_of(b_row["학급"])
-                    if other_grade == my_grade:
+                    other_class = b_row["학급"]
+                    other_grade = grade_of(other_class)
+                    other_group = subject_group(b_row["과목"])
+
+                    # 점수 계산 (동일 학급 최우선)
+                    score = 0
+                    same_class = (other_class == my_class)
+                    same_grade = (other_grade == my_grade)
+
+                    if same_class:
+                        score += 200          # 최우선
+                    elif same_grade:
                         score += 100
-                    if subject_group(b_row["과목"]) == my_group:
+                    if other_group == my_group:
                         score += 40
-                    score -= cum.get(t_b, 0) * 5
+                    if norm_b == norm_a:
+                        score += 15
+                    score -= cum.get(t_b, 0) * 3
 
                     swap_recs.append({
                         "유형": "1:1",
                         "교사B": t_b,
-                        "현재 수업": f"{day_b}{p_b}교시 · {b_row['학급']} · {b_row['과목']}",
+                        "현재 수업": f"{day_b}{p_b}교시 · {other_class} · {b_row['과목']}",
+                        "학급": other_class,
                         "학년": other_grade,
-                        "같은학년": other_grade == my_grade,
+                        "same_class": same_class,
+                        "same_grade": same_grade,
                         "점수": score,
                         "b_info": {"교사명": t_b, "일자": norm_b, "요일": day_b, "교시": p_b,
-                                   "학급": b_row["학급"], "과목": b_row["과목"]}
+                                   "학급": other_class, "과목": b_row["과목"]}
                     })
 
-        # 연계 후보
         if is_free(t_b, day_b, p_b, norm_b, eff_b) and is_free(teacher_a, day_b, p_b, norm_b, eff_b):
-            score = 50 - cum.get(t_b, 0) * 3
+            score = 40 - cum.get(t_b, 0) * 2
             linked_recs.append({
                 "유형": "연계",
                 "교사B": t_b,
@@ -625,8 +632,13 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
                            "학급": class_a, "과목": subject_a}
             })
 
-    df_swap = pd.DataFrame(swap_recs).sort_values(["같은학년", "점수"], ascending=[False, False]).reset_index(drop=True) if swap_recs else pd.DataFrame()
-    df_linked = pd.DataFrame(linked_recs).sort_values("점수", ascending=False).reset_index(drop=True) if linked_recs else pd.DataFrame()
+    # 정렬: 동일 학급 → 같은 학년 → 점수
+    df_swap = (pd.DataFrame(swap_recs)
+               .sort_values(["same_class", "same_grade", "점수"], ascending=[False, False, False])
+               .reset_index(drop=True) if swap_recs else pd.DataFrame())
+    df_linked = (pd.DataFrame(linked_recs)
+                 .sort_values("점수", ascending=False)
+                 .reset_index(drop=True) if linked_recs else pd.DataFrame())
     return df_swap, df_linked
 
 # ==========================================================================================
@@ -847,7 +859,7 @@ if st.session_state.timetable.empty:
 # ==========================================================================================
 # 메인 화면
 # ==========================================================================================
-st.title("시간표 · 결강/보강 관리 (최종 완전판)")
+st.title("시간표 · 결강/보강 관리 (우선순위 강화판)")
 
 tabs = st.tabs([
     "시간표 조회", "시간강사 관리", "결강·보강", "시간표 맞교환 & 변경 추천",
@@ -1007,13 +1019,18 @@ with tabs[3]:
             pick_a["교사명"], pick_a["일자"], pick_a["교시"], pick_a["학급"], pick_a["과목"],
             date_b_str, p_b
         )
-        t1, t2 = st.tabs(["1:1 맞교환 (같은 학년 우선)", "연계 교환"])
+        t1, t2 = st.tabs(["1:1 맞교환 (동일 학급 최우선)", "연계 교환"])
         with t1:
             if df_swap.empty:
                 st.info("추천 없음")
             else:
                 for idx, row in df_swap.iterrows():
-                    mark = "✅ 같은학년" if row.get("같은학년") else "⚠ 다른학년"
+                    if row.get("same_class"):
+                        mark = "🏆 동일학급"
+                    elif row.get("same_grade"):
+                        mark = "✅ 같은학년"
+                    else:
+                        mark = "⚠ 다른학년"
                     with st.expander(f"{mark} {row['교사B']} ({row['현재 수업']})", expanded=(idx==0)):
                         if st.button(f"{row['교사B']}와 맞교환", key=f"sw_{idx}"):
                             do_swap(pick_a, row["b_info"], date_a_str, date_b_str, is_pt)
@@ -1073,7 +1090,7 @@ with tabs[6]:
                 grid, _ = get_teacher_week_view(t, ref)
                 st.dataframe(grid, use_container_width=True, hide_index=True)
 
-# ------------------------------------------------------------------ 7. 복무 관리 & 판단 (핵심 개선)
+# ------------------------------------------------------------------ 7. 복무 관리 & 판단
 with tabs[7]:
     st.subheader("📋 복무 관리 & 판단")
 
@@ -1111,7 +1128,6 @@ with tabs[7]:
         st.markdown("#### 등록된 복무")
         duties = ensure_duty_columns(st.session_state.duties)
         if not duties.empty:
-            # 그룹화 + 교시 범위 표시
             grouped = duties.groupby(["교사명", "일자", "사유"]).agg({"교시": list}).reset_index()
             grouped["교시표시"] = grouped["교시"].apply(format_periods)
             show_df = grouped[["교사명", "일자", "교시표시", "사유"]]
@@ -1151,23 +1167,19 @@ with tabs[7]:
             day_kr = WEEKDAY_KR[datetime.strptime(d_str, "%Y-%m-%d").weekday()]
             st.markdown(f"**{t_name}** · {d_str} ({day_kr}) · {sel.get('교시표시', '')}")
 
-            # 미래 검색 일수
-            future_days = st.slider("미래 검색 일수 (1~2주 권장)", 7, 21, 14, key="future_days")
+            future_days = st.slider("미래 검색 일수", 7, 21, 14, key="future_days")
 
-            if st.button("🔍 같은 학년 우선 1:1 / 연계 검색 실행", type="primary", key="run_smart_search"):
-                with st.spinner("같은 학년 중심으로 미래 일정 검색 중..."):
+            if st.button("🔍 동일 학급 최우선 1:1 / 연계 검색 실행", type="primary", key="run_smart_search"):
+                with st.spinner("동일 학급 → 같은 학년 순으로 검색 중..."):
                     base_date = datetime.strptime(d_str, "%Y-%m-%d").date()
-                    # 미래 날짜만
                     date_list = [base_date + timedelta(days=i) for i in range(0, future_days+1) if (base_date + timedelta(days=i)).weekday() < 5]
 
                     ver = st.session_state.get("_data_version", 0)
                     eff_cache = {td.strftime("%Y-%m-%d"): get_effective_timetable_for_date(td.strftime("%Y-%m-%d"), ver) for td in date_list}
 
-                    # 원본 수업
                     eff_today = eff_cache.get(d_str, pd.DataFrame())
                     my_lessons = eff_today[eff_today["교사명"] == t_name] if not eff_today.empty else pd.DataFrame()
 
-                    # 복무 대상 교시
                     duty_periods = set()
                     if "전체" in sel.get("교시표시", ""):
                         duty_periods = set(range(1, 8))
@@ -1184,9 +1196,9 @@ with tabs[7]:
                         if p not in duty_periods:
                             continue
 
-                        my_grade = grade_of(lesson["학급"])
-                        my_group = subject_group(lesson["과목"])
                         my_class = lesson["학급"]
+                        my_grade = grade_of(my_class)
+                        my_group = subject_group(lesson["과목"])
                         my_subject = lesson["과목"]
 
                         candidates_1to1 = []
@@ -1197,31 +1209,38 @@ with tabs[7]:
                             tday = WEEKDAY_KR[td.weekday()]
                             eff = eff_cache[tds]
 
-                            # 1:1 후보
                             others = eff[(eff["교시"] == p) & (eff["교사명"] != t_name)] if not eff.empty else pd.DataFrame()
                             for o in others.itertuples():
                                 if is_free(t_name, tday, p, tds, eff) and is_free(o.교사명, day_kr, p, d_str, eff_today):
-                                    other_grade = grade_of(o.학급)
-                                    score = 100 if other_grade == my_grade else 0
+                                    other_class = o.학급
+                                    other_grade = grade_of(other_class)
+                                    same_class = (other_class == my_class)
+                                    same_grade = (other_grade == my_grade)
+
+                                    score = 0
+                                    if same_class:
+                                        score += 200
+                                    elif same_grade:
+                                        score += 100
                                     if subject_group(o.과목) == my_group:
                                         score += 40
                                     if tds == d_str:
-                                        score += 20
+                                        score += 15
+
                                     candidates_1to1.append({
                                         "type": "1:1",
                                         "date": tds,
                                         "day": tday,
                                         "period": p,
                                         "teacher": o.교사명,
-                                        "lesson": f"{o.학급} {o.과목}",
-                                        "grade": other_grade,
-                                        "same_grade": other_grade == my_grade,
+                                        "lesson": f"{other_class} {o.과목}",
+                                        "same_class": same_class,
+                                        "same_grade": same_grade,
                                         "score": score
                                     })
 
-                            # 연계 후보 (공강)
                             if is_free(t_name, tday, p, tds, eff):
-                                for ot in st.session_state.teachers["교사명"].tolist()[:40]:
+                                for ot in st.session_state.teachers["교사명"].tolist()[:30]:
                                     if ot != t_name and is_free(ot, day_kr, p, d_str, eff_today):
                                         candidates_linked.append({
                                             "type": "연계",
@@ -1234,8 +1253,7 @@ with tabs[7]:
                                         })
                                         break
 
-                        # 정렬
-                        candidates_1to1 = sorted(candidates_1to1, key=lambda x: (-x["same_grade"], -x["score"]))[:6]
+                        candidates_1to1 = sorted(candidates_1to1, key=lambda x: (-x["same_class"], -x["same_grade"], -x["score"]))[:6]
                         candidates_linked = sorted(candidates_linked, key=lambda x: -x["score"])[:4]
 
                         results[p] = {
@@ -1247,20 +1265,23 @@ with tabs[7]:
                         }
 
                     st.session_state["_duty_search_cache"] = results
-                    st.success("검색 완료! (같은 학년 우선 + 미래 일정)")
+                    st.success("검색 완료! (동일 학급 → 같은 학년 순)")
 
-            # 결과 표시
             cache = st.session_state.get("_duty_search_cache")
             if cache:
                 for p, data in cache.items():
                     with st.expander(f"{p}교시 · {data['my_class']} {data['my_subject']} (학년 {data['my_grade']})", expanded=True):
-                        # 1:1
-                        st.markdown("#### ✅ 1:1 맞교환 (같은 학년 우선)")
+                        st.markdown("#### 🏆 1:1 맞교환 (동일 학급 최우선)")
                         if not data["one_to_one"]:
                             st.info("조건에 맞는 1:1 대상 없음")
                         else:
                             for i, c in enumerate(data["one_to_one"]):
-                                mark = "✅ 같은학년" if c["same_grade"] else "⚠ 다른학년"
+                                if c["same_class"]:
+                                    mark = "🏆 동일학급"
+                                elif c["same_grade"]:
+                                    mark = "✅ 같은학년"
+                                else:
+                                    mark = "⚠ 다른학년"
                                 st.write(f"{mark} | {c['date']} ({c['day']}) {c['period']}교시 - **{c['teacher']}** ({c['lesson']})")
                                 if st.button("이 수업과 1:1 맞교환 실행", key=f"o2o_{p}_{i}"):
                                     a_info = {
@@ -1276,7 +1297,6 @@ with tabs[7]:
                                     st.session_state.pop("_duty_search_cache", None)
                                     st.rerun()
 
-                        # 연계
                         st.markdown("#### 🔗 연계 교환")
                         if not data["linked"]:
                             st.info("연계 교환 대상 없음")
@@ -1293,6 +1313,6 @@ with tabs[7]:
                                     st.session_state.pop("_duty_search_cache", None)
                                     st.rerun()
             else:
-                st.info("위에서 **검색 실행** 버튼을 눌러주세요.\n- 미래 1~2주 범위\n- 같은 학년 선생님 우선 추천")
+                st.info("위에서 **검색 실행** 버튼을 눌러주세요.\n- 동일 학급 최우선\n- 같은 학년 차순위\n- 미래 1~2주 검색")
 
-st.caption("최종 완전판 · 인덱스 제거 · 복무 교시 범위 표시 · 같은 학년 우선 1:1 · 미래 검색 · 최적화 완료")
+st.caption("우선순위 강화판 · 동일 학급 > 같은 학년 > 같은 과목군 · 안정성 확보")
