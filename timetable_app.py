@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 서라벌여중 시간표·결보강 관리 프로그램
-2026 최종 완전판 (인덱스 제거 + 복무 교시 범위 표시 + 속도/버그 수정)
+2026 최종 완전판
+(7번 탭: 1~2주 범위 1:1 맞교환 + 연계교환 검색 기능 추가)
 """
 
 import io
@@ -83,7 +84,6 @@ def grade_of(class_name: str) -> str:
     return ""
 
 def format_periods(periods):
-    """교시 리스트를 '전체' 또는 '1~5교시' / '1,3,5교시' 형태로 변환"""
     periods = sorted(set(safe_int(p) for p in periods if safe_int(p) >= 0))
     if not periods:
         return ""
@@ -91,7 +91,6 @@ def format_periods(periods):
         return "전체"
     if len(periods) == 1:
         return f"{periods[0]}교시"
-    # 연속 구간 처리
     ranges = []
     start = prev = periods[0]
     for p in periods[1:]:
@@ -348,7 +347,6 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0) -> pd.DataF
             "과목군": str(getattr(r, "과목군", subject_group(r.과목))).strip()
         }
 
-    # 맞교환 반영
     swaps = st.session_state.swaps
     if not swaps.empty:
         mask = (swaps["원본일자"] == norm) | (swaps["목표일자"] == norm)
@@ -374,7 +372,6 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0) -> pd.DataF
                     current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
                                            "과목": s_a, "학급": c_a, "과목군": subject_group(s_a)}
 
-    # 보강 반영
     subs = st.session_state.subs
     if not subs.empty:
         day_subs = subs[subs["일자"] == norm]
@@ -1073,10 +1070,10 @@ with tabs[6]:
                 grid, _ = get_teacher_week_view(t, ref)
                 st.dataframe(grid, use_container_width=True, hide_index=True)
 
-# ------------------------------------------------------------------ 7. 복무 관리 & 판단 (인덱스 제거 + 교시 범위 표시 + 속도 개선)
+# ------------------------------------------------------------------ 7. 복무 관리 & 판단 (1~2주 범위 검색 강화)
 with tabs[7]:
     st.subheader("📋 복무 관리 & 판단")
-    left, right = st.columns([1, 1.4])
+    left, right = st.columns([1, 1.45])
 
     with left:
         st.markdown("### 복무 등록")
@@ -1091,7 +1088,6 @@ with tabs[7]:
             if all_day or periods:
                 push_history(f"복무 ({t})")
                 duties = ensure_duty_columns(st.session_state.duties)
-                # 기존 동일 교사+일자 삭제 후 새로 추가
                 duties = duties[~((duties["교사명"] == t) & (duties["일자"] == d.strftime("%Y-%m-%d")))]
                 news = []
                 if all_day:
@@ -1107,7 +1103,6 @@ with tabs[7]:
         st.markdown("#### 등록된 복무")
         duties = ensure_duty_columns(st.session_state.duties)
         if not duties.empty:
-            # 교사+일자 기준으로 그룹화하여 교시 범위 표시
             grouped = duties.groupby(["교사명", "일자", "사유"]).agg({
                 "교시": list,
                 "상세사유": "first",
@@ -1118,18 +1113,15 @@ with tabs[7]:
 
             st.dataframe(show_df, height=250, hide_index=True, use_container_width=True)
 
-            # 선택용 인덱스 (그룹화된 행 기준)
             sel_idx = st.number_input("선택 행 번호 (0부터)", min_value=0, max_value=max(0, len(show_df)-1), value=0, key="duty_idx")
             
             if st.button("이 복무 선택", key="duty_sel"):
-                # 원본 duties에서 해당 교사+일자 정보 추출
                 sel_row = show_df.iloc[int(sel_idx)]
                 st.session_state["_sel_duty"] = {
                     "교사명": sel_row["교사명"],
                     "일자": sel_row["일자"],
-                    "교시": 0 if "전체" in sel_row["교시표시"] else None,  # 범위일 경우 오른쪽에서 처리
-                    "사유": sel_row["사유"],
-                    "교시표시": sel_row["교시표시"]
+                    "교시표시": sel_row["교시표시"],
+                    "사유": sel_row["사유"]
                 }
                 st.rerun()
 
@@ -1145,7 +1137,7 @@ with tabs[7]:
             st.info("등록된 복무 없음")
 
     with right:
-        st.markdown("### 선택 교사 당일 처리")
+        st.markdown("### 선택 교사 당일 처리 + 1~2주 교환 검색")
         sel = st.session_state.get("_sel_duty")
         if not sel:
             st.info("왼쪽에서 복무를 선택하세요.")
@@ -1155,16 +1147,20 @@ with tabs[7]:
             day_kr = WEEKDAY_KR[datetime.strptime(d_str, "%Y-%m-%d").weekday()]
             st.markdown(f"**{t_name}** · {d_str} ({day_kr}) · {sel.get('교시표시', '')}")
 
-            ver = st.session_state.get("_data_version", 0)
-            eff = get_effective_timetable_for_date(d_str, ver)
-            lessons = eff[eff["교사명"] == t_name].sort_values("교시")
+            # 검색 범위 설정 (당일 ± 2주)
+            base_date = datetime.strptime(d_str, "%Y-%m-%d").date()
+            search_days = 14  # 1~2주
+            date_range = [base_date + timedelta(days=i) for i in range(-search_days, search_days + 1) if (base_date + timedelta(days=i)).weekday() < 5]
 
-            # 이 복무에 해당하는 교시 집합
+            ver = st.session_state.get("_data_version", 0)
+            eff_today = get_effective_timetable_for_date(d_str, ver)
+            lessons = eff_today[eff_today["교사명"] == t_name].sort_values("교시")
+
+            # 복무 대상 교시
             duty_periods = set()
             if "전체" in sel.get("교시표시", ""):
                 duty_periods = set(range(1, 8))
             else:
-                # 원본 duties에서 실제 교시 가져오기
                 raw = st.session_state.duties
                 mask = (raw["교사명"] == t_name) & (raw["일자"] == d_str)
                 duty_periods = set(raw.loc[mask, "교시"].tolist())
@@ -1179,20 +1175,82 @@ with tabs[7]:
                         st.caption("복무 대상 아님")
                         continue
 
-                    # 맞교환 한눈에
-                    possible = []
-                    for op in range(1, PERIODS_PER_DAY.get(day_kr, 7) + 1):
-                        if op != p and is_free(t_name, day_kr, op, d_str, eff):
-                            others = eff[(eff["교시"] == op) & (eff["교사명"] != t_name)]
-                            for o in others.itertuples():
-                                possible.append({"교사": o.교사명, "수업": f"{o.학급} {o.과목}", "교시": op})
-                    if possible:
-                        st.markdown("**🔄 맞교환 가능 목록**")
-                        for i, sw in enumerate(possible[:4]):
-                            st.write(f"• {sw['교사']} ({sw['교시']}교시 {sw['수업']})")
-                    else:
-                        st.info("같은 날 맞교환 가능 수업 없음")
+                    st.markdown("**🔍 1~2주 범위 맞교환 / 연계교환 검색 결과**")
 
+                    # 1:1 맞교환 후보
+                    one_to_one = []
+                    linked = []
+
+                    for target_date in date_range:
+                        t_date_str = target_date.strftime("%Y-%m-%d")
+                        t_day = WEEKDAY_KR[target_date.weekday()]
+                        eff_target = get_effective_timetable_for_date(t_date_str, ver)
+
+                        # 해당 날짜의 모든 교시에 대해 검색
+                        for op in range(1, PERIODS_PER_DAY.get(t_day, 7) + 1):
+                            # 상대 교사가 수업 있는 경우 → 1:1 후보
+                            others = eff_target[(eff_target["교시"] == op) & (eff_target["교사명"] != t_name)]
+                            for o in others.itertuples():
+                                # 간단한 유효성: 서로 그 시간에 비어있는지
+                                if is_free(t_name, t_day, op, t_date_str, eff_target) and is_free(o.교사명, day_kr, p, d_str, eff_today):
+                                    one_to_one.append({
+                                        "유형": "1:1 맞교환",
+                                        "날짜": t_date_str,
+                                        "요일": t_day,
+                                        "교시": op,
+                                        "상대교사": o.교사명,
+                                        "수업": f"{o.학급} {o.과목}",
+                                        "score": 100 if t_date_str == d_str else 80
+                                    })
+
+                            # 공강이면 연계 교환 후보
+                            if is_free(t_name, t_day, op, t_date_str, eff_target):
+                                # 다른 교사가 원래 내 시간에 올 수 있는지
+                                for other_t in st.session_state.teachers["교사명"].tolist():
+                                    if other_t == t_name or has_duty(other_t, t_date_str):
+                                        continue
+                                    if is_free(other_t, day_kr, p, d_str, eff_today):
+                                        linked.append({
+                                            "유형": "연계 교환",
+                                            "날짜": t_date_str,
+                                            "요일": t_day,
+                                            "교시": op,
+                                            "상대교사": other_t,
+                                            "수업": "공강 → 연계",
+                                            "score": 60 if t_date_str == d_str else 40
+                                        })
+
+                    # 결과 정렬 및 중복 제거
+                    one_to_one = sorted(one_to_one, key=lambda x: (-x["score"], x["날짜"]))
+                    linked = sorted(linked, key=lambda x: (-x["score"], x["날짜"]))
+
+                    # 상위 결과만 표시
+                    if one_to_one:
+                        st.markdown("#### ✅ 1:1 맞교환 가능")
+                        for i, item in enumerate(one_to_one[:8]):
+                            st.write(f"• **{item['날짜']} ({item['요일']}) {item['교시']}교시** - {item['상대교사']} ({item['수업']})")
+                            if st.button(f"이 수업과 1:1 맞교환 실행", key=f"o2o_{p}_{i}"):
+                                a_info = {"교사명": t_name, "일자": d_str, "요일": day_kr, "교시": p, "학급": r.학급, "과목": r.과목}
+                                b_info = {"교사명": item["상대교사"], "일자": item["날짜"], "요일": item["요일"], "교시": item["교시"], "학급": "", "과목": ""}
+                                do_swap(a_info, b_info, d_str, item["날짜"])
+                                st.success("1:1 맞교환 등록 완료")
+                                st.rerun()
+                    else:
+                        st.info("1:1 맞교환 가능한 수업이 없습니다.")
+
+                    if linked:
+                        st.markdown("#### 🔗 연계 교환 가능")
+                        for i, item in enumerate(linked[:6]):
+                            st.write(f"• **{item['날짜']} ({item['요일']}) {item['교시']}교시** - {item['상대교사']}")
+                            if st.button(f"연계 교환 실행", key=f"lnk_{p}_{i}"):
+                                a_info = {"교사명": t_name, "일자": d_str, "요일": day_kr, "교시": p, "학급": r.학급, "과목": r.과목}
+                                do_linked_swap(a_info, item["상대교사"], d_str, item["날짜"], item["요일"], item["교시"])
+                                st.success("연계 교환 등록 완료")
+                                st.rerun()
+                    else:
+                        st.info("연계 교환 가능한 대상이 없습니다.")
+
+                    st.divider()
                     if st.button("결강으로 등록", key=f"dabs_{p}"):
                         push_history(f"복무→결강 ({t_name} {p})")
                         cid = f"{d_str}-{t_name}"
@@ -1210,4 +1268,4 @@ with tabs[7]:
                         st.success("결강 등록 완료")
                         st.rerun()
 
-st.caption("완전판 · 인덱스 제거 · 복무 교시 범위 표시 · 속도/버그 수정 완료")
+st.caption("완전판 · 7번 탭 1~2주 범위 1:1 + 연계교환 검색 지원")
