@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 서라벌여중 시간표·결보강 관리 프로그램
-2026 최종판 - 예산 시트 연동 (1회 보강 = 10,000원 차감)
+2026 최종판 - 예산 표시 권한 제한 + 최적화
 """
 
 import io
@@ -276,14 +276,13 @@ def save_id_request(name, email, desired_id, memo):
         df = pd.concat([df, new], ignore_index=True)
     df_to_worksheet(ws, df)
 
+@st.cache_data(ttl=15, show_spinner=False)
 def load_budget_df():
     """예산 시트 전체 로드 (이력 포함)"""
     ws = get_worksheet(WORK_SHEET_ID, "예산")
     df = df_from_worksheet(ws)
-    # 기본 구조 보장
     expected_cols = ["일시", "내용", "변동금액", "잔액"]
     if df.empty or not any(c in df.columns for c in expected_cols + ["보강예산 현황"]):
-        # 초기화
         init_df = pd.DataFrame([{
             "일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "내용": "초기 예산 설정",
@@ -292,9 +291,7 @@ def load_budget_df():
         }])
         df_to_worksheet(ws, init_df)
         return init_df
-    # 컬럼 정규화
     if "보강예산 현황" in df.columns and "잔액" not in df.columns:
-        # 스크린샷 형태 → 변환
         try:
             val = safe_int(df.iloc[0, 0]) if not df.empty else 2200000
         except Exception:
@@ -307,29 +304,26 @@ def load_budget_df():
         }])
     for c in expected_cols:
         if c not in df.columns:
-            df[c] = ""
+            df[c] = 0 if c in ("변동금액", "잔액") else ""
     return df
 
 def get_current_budget():
-    """최신 잔액 반환"""
-    df = load_budget_df()
-    if df.empty:
-        return 2200000
-    # 마지막 행의 잔액
+    """최신 잔액 반환 (캐시된 df 사용)"""
     try:
-        last_val = safe_int(df.iloc[-1]["잔액"])
-        return last_val if last_val > 0 else 2200000
+        df = load_budget_df()
+        if df.empty:
+            return 2200000
+        last_val = safe_int(df.iloc[-1].get("잔액", 2200000))
+        return max(0, last_val)
     except Exception:
         return 2200000
 
 def update_budget(change_amount: int, reason: str = "보강"):
-    """예산 변경 + 시트에 기록 (change_amount는 음수면 차감)"""
+    """예산 변경 + 시트에 기록"""
     try:
         df = load_budget_df()
         current = get_current_budget()
-        new_balance = current + change_amount
-        if new_balance < 0:
-            new_balance = 0
+        new_balance = max(0, current + change_amount)
         new_row = pd.DataFrame([{
             "일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "내용": reason,
@@ -339,8 +333,7 @@ def update_budget(change_amount: int, reason: str = "보강"):
         df = pd.concat([df, new_row], ignore_index=True)
         ws = get_worksheet(WORK_SHEET_ID, "예산")
         df_to_worksheet(ws, df)
-        # 캐시 클리어
-        load_budget_df.clear() if hasattr(load_budget_df, "clear") else None
+        load_budget_df.clear()
         return new_balance
     except Exception as e:
         st.warning(f"예산 업데이트 실패: {e}")
@@ -396,6 +389,7 @@ def _invalidate_all_caches():
     class_matrix.clear()
     cumulative_sub_count.clear()
     weekly_load.clear()
+    load_budget_df.clear()
 
 # ==========================================================================================
 # 데이터 로드
@@ -763,7 +757,7 @@ def add_substitute(cid, on_date, day, period, class_name, subject, absent_teache
     }])
     st.session_state.subs = pd.concat([s, new], ignore_index=True)
     save_work_data_to_gsheet()
-    # ★ 예산 차감 (1회 보강 = 10,000원)
+    # 예산 차감 (모든 권한에서 시스템적으로 차감)
     update_budget(-SUB_COST, f"보강 1건 ({sub_teacher} ← {absent_teacher})")
 
 def cancel_substitute(cid, period):
@@ -779,7 +773,6 @@ def cancel_substitute(cid, period):
     p = safe_int(period)
     st.session_state.subs = s[~((s["결강ID"] == cid) & (s["교시"] == p))].reset_index(drop=True)
     save_work_data_to_gsheet()
-    # 취소 시 예산 복구
     update_budget(+SUB_COST, f"보강 취소 복구 ({period}교시)")
 
 def do_swap(a, b, date_a, date_b, is_part_time_purpose=False, is_test=False):
@@ -1212,12 +1205,14 @@ with st.sidebar:
         st.divider()
         st.metric("등록 교사", len(st.session_state.teachers))
         st.metric("누적 보강", len(st.session_state.subs))
-        # 예산 표시
-        try:
-            curr_budget = get_current_budget()
-            st.metric("보강비 잔액", f"{curr_budget:,.0f}원")
-        except Exception:
-            pass
+
+        # ★ 보강비 잔액: 마스터 / 교육과정부만 표시
+        if is_edu_or_master():
+            try:
+                curr_budget = get_current_budget()
+                st.metric("보강비 잔액", f"{curr_budget:,.0f}원")
+            except Exception:
+                pass
 
         if can_full_data():
             st.divider()
@@ -1715,7 +1710,7 @@ if "📋 복무 관리 & 판단" in tab_map:
                                 eff = eff_cache[tds]
                                 others = eff[(eff["교시"] == p) & (eff["교사명"] != t_name)] if not eff.empty else pd.DataFrame()
                                 for o in others.itertuples():
-                                    if is_free(t_name, tday, p, tds, eff) and is_free(o.교사명, day_kr, p, d_str, eff_today):
+                                    if is_free(t_name, tday, p, tds, eff) and is_free(o.교사명, day_kr, p, d_str, e_today if 'e_today' in locals() else eff_today):
                                         other_class = o.학급
                                         other_grade = grade_of(other_class)
                                         same_class = (other_class == my_class)
@@ -1732,7 +1727,7 @@ if "📋 복무 관리 & 판단" in tab_map:
                                         })
                                 if is_free(t_name, tday, p, tds, eff):
                                     for ot in st.session_state.teachers["교사명"].tolist()[:30]:
-                                        if ot != t_name and is_free(ot, day_kr, p, d_str, eff_today):
+                                        if ot != t_name and is_free(ot, day_kr, p, d_str, e_today if 'e_today' in locals() else eff_today):
                                             candidates_linked.append({
                                                 "type": "연계", "date": tds, "day": tday, "period": p,
                                                 "teacher": ot, "lesson": "공강", "score": 30
@@ -1803,7 +1798,6 @@ if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
             budget_msg = "예산 부족 → 맞교환 우선 추천"
         st.caption(f"추천 모드: {budget_msg} (교환 가중치 ×{budget_factor})")
 
-        # 예산 이력 보기
         with st.expander("예산 변경 이력 보기"):
             budget_df = load_budget_df()
             st.dataframe(budget_df.tail(20), use_container_width=True, hide_index=True)
