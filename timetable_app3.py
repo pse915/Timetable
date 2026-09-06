@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 서라벌여중 시간표·결보강 관리 프로그램
-2026 최종판 - 테스트 샌드박스 + 다중 출장 조정 추천 + 예산 연동
+2026 최종판 - 예산 시트 연동 (1회 보강 = 10,000원 차감)
 """
 
 import io
@@ -44,6 +44,7 @@ WORK_SHEET_ID = "1g1B1cyZG_tfRn3AD1NZzr30YxYNYFewJeZYdos2obpU"
 MAX_HISTORY = 6
 ABSENCE_REASONS = ["병가", "연가", "출장", "공가", "조퇴", "외출", "연수", "특별휴가", "기타"]
 MAX_LOGIN_ATTEMPTS = 5
+SUB_COST = 10000  # 1회 보강 비용
 
 SUBJECT_GROUP = {
     "국어1": "국어", "국어2": "국어", "사회": "사회", "사회1": "사회", "사회2": "사회", "사회3": "사회",
@@ -275,26 +276,75 @@ def save_id_request(name, email, desired_id, memo):
         df = pd.concat([df, new], ignore_index=True)
     df_to_worksheet(ws, df)
 
-@st.cache_data(ttl=60, show_spinner=False)
-def load_budget_remaining():
-    """예산 시트에서 보강비 잔액 불러오기 (없으면 충분히 남은 것으로 간주)"""
+def load_budget_df():
+    """예산 시트 전체 로드 (이력 포함)"""
+    ws = get_worksheet(WORK_SHEET_ID, "예산")
+    df = df_from_worksheet(ws)
+    # 기본 구조 보장
+    expected_cols = ["일시", "내용", "변동금액", "잔액"]
+    if df.empty or not any(c in df.columns for c in expected_cols + ["보강예산 현황"]):
+        # 초기화
+        init_df = pd.DataFrame([{
+            "일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "내용": "초기 예산 설정",
+            "변동금액": 2200000,
+            "잔액": 2200000
+        }])
+        df_to_worksheet(ws, init_df)
+        return init_df
+    # 컬럼 정규화
+    if "보강예산 현황" in df.columns and "잔액" not in df.columns:
+        # 스크린샷 형태 → 변환
+        try:
+            val = safe_int(df.iloc[0, 0]) if not df.empty else 2200000
+        except Exception:
+            val = 2200000
+        df = pd.DataFrame([{
+            "일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "내용": "기존 예산 불러오기",
+            "변동금액": 0,
+            "잔액": val
+        }])
+    for c in expected_cols:
+        if c not in df.columns:
+            df[c] = ""
+    return df
+
+def get_current_budget():
+    """최신 잔액 반환"""
+    df = load_budget_df()
+    if df.empty:
+        return 2200000
+    # 마지막 행의 잔액
     try:
-        ws = get_worksheet(WORK_SHEET_ID, "예산")
-        df = df_from_worksheet(ws)
-        if df.empty:
-            return 999999  # 예산 정보 없으면 충분히 남은 것으로 처리
-        # 잔액 컬럼이 있으면 사용, 없으면 계산 시도
-        if "잔액" in df.columns:
-            vals = pd.to_numeric(df["잔액"], errors="coerce").dropna()
-            if not vals.empty:
-                return float(vals.sum())
-        if "보강비잔액" in df.columns:
-            vals = pd.to_numeric(df["보강비잔액"], errors="coerce").dropna()
-            if not vals.empty:
-                return float(vals.iloc[0])
-        return 500000  # 기본값
+        last_val = safe_int(df.iloc[-1]["잔액"])
+        return last_val if last_val > 0 else 2200000
     except Exception:
-        return 500000
+        return 2200000
+
+def update_budget(change_amount: int, reason: str = "보강"):
+    """예산 변경 + 시트에 기록 (change_amount는 음수면 차감)"""
+    try:
+        df = load_budget_df()
+        current = get_current_budget()
+        new_balance = current + change_amount
+        if new_balance < 0:
+            new_balance = 0
+        new_row = pd.DataFrame([{
+            "일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "내용": reason,
+            "변동금액": change_amount,
+            "잔액": new_balance
+        }])
+        df = pd.concat([df, new_row], ignore_index=True)
+        ws = get_worksheet(WORK_SHEET_ID, "예산")
+        df_to_worksheet(ws, df)
+        # 캐시 클리어
+        load_budget_df.clear() if hasattr(load_budget_df, "clear") else None
+        return new_balance
+    except Exception as e:
+        st.warning(f"예산 업데이트 실패: {e}")
+        return get_current_budget()
 
 # ==========================================================================================
 # 히스토리
@@ -346,7 +396,6 @@ def _invalidate_all_caches():
     class_matrix.clear()
     cumulative_sub_count.clear()
     weekly_load.clear()
-    load_budget_remaining.clear()
 
 # ==========================================================================================
 # 데이터 로드
@@ -480,12 +529,11 @@ def init_state():
     st.session_state._data_version = 0
     st.session_state.history = []
     st.session_state.history_index = -1
-    # 테스트용 임시 상태
     st.session_state.test_swaps = pd.DataFrame()
     push_history("초기 상태")
 
 # ==========================================================================================
-# 핵심 로직 (기존 + 테스트용 임시 반영)
+# 핵심 로직
 # ==========================================================================================
 @st.cache_data(show_spinner=False, ttl=180)
 def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: bool = False) -> pd.DataFrame:
@@ -514,7 +562,6 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
             "원본교사": ""
         }
 
-    # 실제 맞교환
     swaps = st.session_state.swaps
     if not swaps.empty:
         mask = (swaps["원본일자"] == norm) | (swaps["목표일자"] == norm)
@@ -543,7 +590,6 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
                     current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
                                            "과목": s_a, "학급": c_a, "과목군": subject_group(s_a), "원본교사": ""}
 
-    # 테스트용 임시 맞교환 반영
     if use_test:
         test_swaps = st.session_state.get("test_swaps", pd.DataFrame())
         if not test_swaps.empty:
@@ -551,7 +597,6 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
             for sw in test_swaps[mask].itertuples(index=False):
                 t_a, p_a = str(sw.교사A).strip(), safe_int(sw.교시A)
                 t_b, p_b = str(sw.교사B).strip(), safe_int(sw.교시B)
-                typ = str(getattr(sw, "유형", "")).strip()
                 s_a = str(getattr(sw, "과목A", "")).strip()
                 c_a = str(getattr(sw, "학급A", "")).strip()
                 if sw.원본일자 == norm:
@@ -564,7 +609,6 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
                     current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
                                            "과목": s_a, "학급": c_a, "과목군": subject_group(s_a), "원본교사": ""}
 
-    # 보강
     subs = st.session_state.subs
     if not subs.empty:
         day_subs = subs[subs["일자"] == norm]
@@ -580,7 +624,6 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
                     "과목군": subject_group(str(r.과목)), "원본교사": ""
                 }
 
-    # 시간강사 기간 대체
     pt_df = st.session_state.get("part_time", pd.DataFrame())
     if not pt_df.empty and "시작일" in pt_df.columns:
         for _, prow in pt_df.iterrows():
@@ -720,6 +763,8 @@ def add_substitute(cid, on_date, day, period, class_name, subject, absent_teache
     }])
     st.session_state.subs = pd.concat([s, new], ignore_index=True)
     save_work_data_to_gsheet()
+    # ★ 예산 차감 (1회 보강 = 10,000원)
+    update_budget(-SUB_COST, f"보강 1건 ({sub_teacher} ← {absent_teacher})")
 
 def cancel_substitute(cid, period):
     if not can_full_data():
@@ -734,6 +779,8 @@ def cancel_substitute(cid, period):
     p = safe_int(period)
     st.session_state.subs = s[~((s["결강ID"] == cid) & (s["교시"] == p))].reset_index(drop=True)
     save_work_data_to_gsheet()
+    # 취소 시 예산 복구
+    update_budget(+SUB_COST, f"보강 취소 복구 ({period}교시)")
 
 def do_swap(a, b, date_a, date_b, is_part_time_purpose=False, is_test=False):
     rec = {
@@ -810,7 +857,6 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
                     if norm_b == norm_a:
                         score += 15
                     score -= cum.get(t_b, 0) * 3
-                    # 예산에 따라 교환 점수 가중
                     score *= budget_factor
                     swap_recs.append({
                         "유형": "1:1", "교사B": t_b,
@@ -1166,6 +1212,12 @@ with st.sidebar:
         st.divider()
         st.metric("등록 교사", len(st.session_state.teachers))
         st.metric("누적 보강", len(st.session_state.subs))
+        # 예산 표시
+        try:
+            curr_budget = get_current_budget()
+            st.metric("보강비 잔액", f"{curr_budget:,.0f}원")
+        except Exception:
+            pass
 
         if can_full_data():
             st.divider()
@@ -1442,11 +1494,11 @@ if "통계" in tab_map:
         if not df.empty:
             st.bar_chart(df.set_index("교사명")["누적보강"])
 
-# ------------------------------------------------------------------ 시간표 변경 테스트용 (샌드박스 복원)
+# ------------------------------------------------------------------ 시간표 변경 테스트용
 if "시간표 변경 테스트용" in tab_map:
     with tab_map["시간표 변경 테스트용"]:
         st.subheader("🧪 시간표 변경 테스트용 (저장 안 됨 · 샌드박스)")
-        st.info("이 탭에서 한 맞교환/연계교환은 **실제로 저장되지 않습니다**. 미리보기만 가능합니다. 「테스트 초기화」로 되돌릴 수 있습니다.")
+        st.info("이 탭에서 한 맞교환/연계교환은 **실제로 저장되지 않습니다**. 미리보기만 가능합니다.")
 
         if st.button("🔄 테스트 상태 초기화", type="secondary"):
             st.session_state.test_swaps = pd.DataFrame()
@@ -1731,32 +1783,32 @@ if "📋 복무 관리 & 판단" in tab_map:
                 else:
                     st.info("위에서 **검색 실행** 버튼을 눌러주세요.")
 
-# ------------------------------------------------------------------ 다중 출장·전체 조정 추천 (신규)
+# ------------------------------------------------------------------ 다중 출장·전체 조정 추천
 if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
     with tab_map["🛠️ 다중 출장·전체 조정 추천"]:
         st.subheader("🛠️ 다중 출장·전체 조정 추천 (마스터/교육과정부 전용)")
         st.info("여러 교사가 동시에 출장·복무일 때 사용합니다. 예산 잔액에 따라 보강 vs 맞교환 비중을 자동 조절합니다.")
 
-        # 예산 정보
-        remaining_budget = load_budget_remaining()
-        st.metric("현재 보강비 잔액 (대략)", f"{remaining_budget:,.0f}원")
+        remaining_budget = get_current_budget()
+        st.metric("현재 보강비 잔액", f"{remaining_budget:,.0f}원")
 
-        # 예산에 따른 가중치
         if remaining_budget > 1000000:
-            budget_factor = 0.7   # 예산 충분 → 보강 비중 상대적으로 높음 (교환 점수 낮춤)
+            budget_factor = 0.7
             budget_msg = "예산 충분 → 보강 허용 비중 높음"
         elif remaining_budget > 300000:
             budget_factor = 1.0
             budget_msg = "예산 보통 → 균형 추천"
         else:
-            budget_factor = 1.8   # 예산 부족 → 교환 비중 크게 높임
+            budget_factor = 1.8
             budget_msg = "예산 부족 → 맞교환 우선 추천"
         st.caption(f"추천 모드: {budget_msg} (교환 가중치 ×{budget_factor})")
 
-        st.markdown("### 1. 불가능한 교사·교시 선택")
-        st.caption("출장/복무로 불가능한 교사와 교시를 선택하세요. (여러 개 가능)")
+        # 예산 이력 보기
+        with st.expander("예산 변경 이력 보기"):
+            budget_df = load_budget_df()
+            st.dataframe(budget_df.tail(20), use_container_width=True, hide_index=True)
 
-        # 간단한 다중 선택 UI
+        st.markdown("### 1. 불가능한 교사·교시 선택")
         if "multi_absent" not in st.session_state:
             st.session_state.multi_absent = []
 
@@ -1795,7 +1847,6 @@ if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
                         if lessons.empty:
                             continue
                         lesson = lessons.iloc[0]
-                        # 미래 14일 검색
                         base_date = datetime.strptime(d_str, "%Y-%m-%d").date()
                         for i in range(0, 15):
                             td = base_date + timedelta(days=i)
