@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 서라벌여중 시간표·결보강 관리 프로그램
-2026 최종판 - 예산 표시 권한 제한 + 최적화
+2026 최종판 - 다중 출장 탭 날짜 범위(시작일~종료일) 지원
 """
 
 import io
@@ -278,7 +278,6 @@ def save_id_request(name, email, desired_id, memo):
 
 @st.cache_data(ttl=15, show_spinner=False)
 def load_budget_df():
-    """예산 시트 전체 로드 (이력 포함)"""
     ws = get_worksheet(WORK_SHEET_ID, "예산")
     df = df_from_worksheet(ws)
     expected_cols = ["일시", "내용", "변동금액", "잔액"]
@@ -308,7 +307,6 @@ def load_budget_df():
     return df
 
 def get_current_budget():
-    """최신 잔액 반환 (캐시된 df 사용)"""
     try:
         df = load_budget_df()
         if df.empty:
@@ -319,7 +317,6 @@ def get_current_budget():
         return 2200000
 
 def update_budget(change_amount: int, reason: str = "보강"):
-    """예산 변경 + 시트에 기록"""
     try:
         df = load_budget_df()
         current = get_current_budget()
@@ -757,7 +754,6 @@ def add_substitute(cid, on_date, day, period, class_name, subject, absent_teache
     }])
     st.session_state.subs = pd.concat([s, new], ignore_index=True)
     save_work_data_to_gsheet()
-    # 예산 차감 (모든 권한에서 시스템적으로 차감)
     update_budget(-SUB_COST, f"보강 1건 ({sub_teacher} ← {absent_teacher})")
 
 def cancel_substitute(cid, period):
@@ -1206,7 +1202,7 @@ with st.sidebar:
         st.metric("등록 교사", len(st.session_state.teachers))
         st.metric("누적 보강", len(st.session_state.subs))
 
-        # ★ 보강비 잔액: 마스터 / 교육과정부만 표시
+        # 보강비 잔액: 마스터 / 교육과정부만 표시
         if is_edu_or_master():
             try:
                 curr_budget = get_current_budget()
@@ -1710,7 +1706,7 @@ if "📋 복무 관리 & 판단" in tab_map:
                                 eff = eff_cache[tds]
                                 others = eff[(eff["교시"] == p) & (eff["교사명"] != t_name)] if not eff.empty else pd.DataFrame()
                                 for o in others.itertuples():
-                                    if is_free(t_name, tday, p, tds, eff) and is_free(o.교사명, day_kr, p, d_str, e_today if 'e_today' in locals() else eff_today):
+                                    if is_free(t_name, tday, p, tds, eff) and is_free(o.교사명, day_kr, p, d_str, eff_today):
                                         other_class = o.학급
                                         other_grade = grade_of(other_class)
                                         same_class = (other_class == my_class)
@@ -1727,7 +1723,7 @@ if "📋 복무 관리 & 판단" in tab_map:
                                         })
                                 if is_free(t_name, tday, p, tds, eff):
                                     for ot in st.session_state.teachers["교사명"].tolist()[:30]:
-                                        if ot != t_name and is_free(ot, day_kr, p, d_str, e_today if 'e_today' in locals() else eff_today):
+                                        if ot != t_name and is_free(ot, day_kr, p, d_str, eff_today):
                                             candidates_linked.append({
                                                 "type": "연계", "date": tds, "day": tday, "period": p,
                                                 "teacher": ot, "lesson": "공강", "score": 30
@@ -1778,11 +1774,11 @@ if "📋 복무 관리 & 판단" in tab_map:
                 else:
                     st.info("위에서 **검색 실행** 버튼을 눌러주세요.")
 
-# ------------------------------------------------------------------ 다중 출장·전체 조정 추천
+# ------------------------------------------------------------------ 다중 출장·전체 조정 추천 (시작일~종료일 지원)
 if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
     with tab_map["🛠️ 다중 출장·전체 조정 추천"]:
         st.subheader("🛠️ 다중 출장·전체 조정 추천 (마스터/교육과정부 전용)")
-        st.info("여러 교사가 동시에 출장·복무일 때 사용합니다. 예산 잔액에 따라 보강 vs 맞교환 비중을 자동 조절합니다.")
+        st.info("여러 교사가 동시에 출장·복무일 때 사용합니다. **시작일(교시) ~ 종료일(교시)** 범위를 지정할 수 있습니다.")
 
         remaining_budget = get_current_budget()
         st.metric("현재 보강비 잔액", f"{remaining_budget:,.0f}원")
@@ -1802,24 +1798,57 @@ if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
             budget_df = load_budget_df()
             st.dataframe(budget_df.tail(20), use_container_width=True, hide_index=True)
 
-        st.markdown("### 1. 불가능한 교사·교시 선택")
+        st.markdown("### 1. 불가능한 교사·기간 선택 (시작일 ~ 종료일)")
+
         if "multi_absent" not in st.session_state:
             st.session_state.multi_absent = []
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            abs_teacher = st.selectbox("교사", st.session_state.teachers["교사명"].tolist(), key="multi_t")
-        with col2:
-            abs_date = st.date_input("날짜", value=date.today(), key="multi_d")
-        with col3:
-            abs_periods = st.multiselect("교시", list(range(1, 8)), key="multi_p")
+        # 교사 선택
+        abs_teacher = st.selectbox("교사", st.session_state.teachers["교사명"].tolist(), key="multi_t")
 
-        if st.button("선택 추가"):
-            for p in abs_periods:
-                item = {"교사": abs_teacher, "일자": abs_date.strftime("%Y-%m-%d"), "교시": p}
-                if item not in st.session_state.multi_absent:
-                    st.session_state.multi_absent.append(item)
-            st.rerun()
+        col_start, col_end = st.columns(2)
+        with col_start:
+            st.markdown("**시작일**")
+            start_date = st.date_input("시작일", value=date.today(), key="multi_start_d")
+            start_periods = st.multiselect("시작일 교시", list(range(1, 8)), key="multi_start_p")
+            start_all = st.checkbox("시작일 하루 전체", key="multi_start_all")
+            if start_all:
+                start_periods = [0]
+
+        with col_end:
+            st.markdown("**종료일**")
+            end_date = st.date_input("종료일", value=date.today(), key="multi_end_d")
+            end_periods = st.multiselect("종료일 교시", list(range(1, 8)), key="multi_end_p")
+            end_all = st.checkbox("종료일 하루 전체", key="multi_end_all")
+            if end_all:
+                end_periods = [0]
+
+        if st.button("기간 추가 (시작일~종료일)", type="primary"):
+            if start_date > end_date:
+                st.error("시작일이 종료일보다 늦을 수 없습니다.")
+            else:
+                current = start_date
+                added_count = 0
+                while current <= end_date:
+                    # 주말 제외
+                    if current.weekday() < 5:
+                        d_str = current.strftime("%Y-%m-%d")
+                        if current == start_date:
+                            periods_to_add = start_periods if start_periods else [0]
+                        elif current == end_date:
+                            periods_to_add = end_periods if end_periods else [0]
+                        else:
+                            # 중간 날짜는 하루 전체로 처리
+                            periods_to_add = [0]
+
+                        for p in periods_to_add:
+                            item = {"교사": abs_teacher, "일자": d_str, "교시": p}
+                            if item not in st.session_state.multi_absent:
+                                st.session_state.multi_absent.append(item)
+                                added_count += 1
+                    current += timedelta(days=1)
+                st.success(f"{added_count}건이 추가되었습니다.")
+                st.rerun()
 
         if st.session_state.multi_absent:
             st.write("**현재 선택된 불가능 목록**")
@@ -1835,37 +1864,42 @@ if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
                         t_name = item["교사"]
                         d_str = item["일자"]
                         p = item["교시"]
+                        # 하루 전체(0)인 경우 해당 날짜의 모든 수업 교시를 대상으로
                         day_kr = WEEKDAY_KR[datetime.strptime(d_str, "%Y-%m-%d").weekday()]
                         eff = get_effective_timetable_for_date(d_str, st.session_state.get("_data_version", 0))
-                        lessons = eff[(eff["교사명"] == t_name) & (eff["교시"] == p)]
+                        if p == 0:
+                            lessons = eff[eff["교사명"] == t_name]
+                        else:
+                            lessons = eff[(eff["교사명"] == t_name) & (eff["교시"] == p)]
                         if lessons.empty:
                             continue
-                        lesson = lessons.iloc[0]
-                        base_date = datetime.strptime(d_str, "%Y-%m-%d").date()
-                        for i in range(0, 15):
-                            td = base_date + timedelta(days=i)
-                            if td.weekday() >= 5:
-                                continue
-                            tds = td.strftime("%Y-%m-%d")
-                            tday = WEEKDAY_KR[td.weekday()]
-                            df_swap, df_linked = get_target_time_recommendations(
-                                t_name, d_str, p, lesson["학급"], lesson["과목"],
-                                tds, p, budget_factor=budget_factor
-                            )
-                            for _, row in df_swap.head(3).iterrows():
-                                all_recs.append({
-                                    "원본교사": t_name, "원본일자": d_str, "원본교시": p,
-                                    "유형": "1:1", "추천교사": row["교사B"],
-                                    "추천내용": row["현재 수업"], "점수": row["점수"],
-                                    "동일학급": row.get("same_class", False)
-                                })
-                            for _, row in df_linked.head(2).iterrows():
-                                all_recs.append({
-                                    "원본교사": t_name, "원본일자": d_str, "원본교시": p,
-                                    "유형": "연계", "추천교사": row["교사B"],
-                                    "추천내용": row["현재 수업"], "점수": row["점수"],
-                                    "동일학급": False
-                                })
+                        for _, lesson in lessons.iterrows():
+                            actual_p = safe_int(lesson["교시"])
+                            base_date = datetime.strptime(d_str, "%Y-%m-%d").date()
+                            for i in range(0, 15):
+                                td = base_date + timedelta(days=i)
+                                if td.weekday() >= 5:
+                                    continue
+                                tds = td.strftime("%Y-%m-%d")
+                                tday = WEEKDAY_KR[td.weekday()]
+                                df_swap, df_linked = get_target_time_recommendations(
+                                    t_name, d_str, actual_p, lesson["학급"], lesson["과목"],
+                                    tds, actual_p, budget_factor=budget_factor
+                                )
+                                for _, row in df_swap.head(3).iterrows():
+                                    all_recs.append({
+                                        "원본교사": t_name, "원본일자": d_str, "원본교시": actual_p,
+                                        "유형": "1:1", "추천교사": row["교사B"],
+                                        "추천내용": row["현재 수업"], "점수": row["점수"],
+                                        "동일학급": row.get("same_class", False)
+                                    })
+                                for _, row in df_linked.head(2).iterrows():
+                                    all_recs.append({
+                                        "원본교사": t_name, "원본일자": d_str, "원본교시": actual_p,
+                                        "유형": "연계", "추천교사": row["교사B"],
+                                        "추천내용": row["현재 수업"], "점수": row["점수"],
+                                        "동일학급": False
+                                    })
                     if all_recs:
                         rec_df = pd.DataFrame(all_recs).sort_values(["동일학급", "점수"], ascending=[False, False])
                         st.session_state["_multi_recs"] = rec_df
