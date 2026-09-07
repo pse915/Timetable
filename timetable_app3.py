@@ -1426,6 +1426,221 @@ def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
 </html>"""
     return html
 
+def build_test_swaps_report_html(test_swaps: pd.DataFrame) -> str:
+    """테스트용 맞교환 목록을 받아 관련된 모든 교사/일자의 결보강 계획서를 다중 페이지 HTML로 반환"""
+    if test_swaps.empty:
+        return "<html><body><p>테스트 중인 맞교환 내역이 없습니다.</p></body></html>"
+
+    pairs = set()
+    for _, r in test_swaps.iterrows():
+        da = str(r.get("원본일자", ""))
+        db = str(r.get("목표일자", ""))
+        ta = str(r.get("교사A", ""))
+        tb = str(r.get("교사B", ""))
+        if ta and da: pairs.add((ta, da))
+        if ta and db: pairs.add((ta, db))
+        if tb and da: pairs.add((tb, da))
+        if tb and db: pairs.add((tb, db))
+
+    pages = []
+    for teacher_name, on_date in sorted(pairs):
+        try:
+            dt = datetime.strptime(on_date, "%Y-%m-%d")
+            day_kr = WEEKDAY_KR[dt.weekday()]
+            date_display = f"{dt.year}년 {dt.month}월 {dt.day}일 ({day_kr})"
+        except Exception:
+            date_display = on_date
+            day_kr = ""
+
+        subject_dept = get_teacher_subject(teacher_name)
+        dept_line = f"{subject_dept} 과" if subject_dept else "과"
+
+        my_swaps = test_swaps[
+            ((test_swaps["교사A"] == teacher_name) | (test_swaps["교사B"] == teacher_name)) &
+            ((test_swaps["원본일자"] == on_date) | (test_swaps["목표일자"] == on_date))
+        ].copy()
+
+        swap_list = []
+        for _, r in my_swaps.iterrows():
+            target_date = str(r.get("목표일자", r.get("원본일자", "")))
+            swap_list.append({
+                "월일": target_date[5:].replace("-", "/") if len(target_date) >= 10 else target_date,
+                "교시": safe_int(r.get("교시B", r.get("교시A", 0))),
+                "과목": str(r.get("과목B", r.get("과목A", ""))),
+                "교사": str(r.get("교사B", r.get("교사A", "")))
+            })
+
+        rows_html = ""
+        max_rows = 6
+        for i in range(max_rows):
+            a = {"월일": "", "교시": "", "학년반": "", "과목": "", "보강교사": ""}
+            s = swap_list[i] if i < len(swap_list) else {"월일": "", "교시": "", "과목": "", "교사": ""}
+            rows_html += f"""
+        <tr>
+            <td style="height:29px;">{a['월일']}</td>
+            <td>{a['교시']}</td>
+            <td>{a['학년반']}</td>
+            <td>{a['과목']}</td>
+            <td>{a['보강교사']}</td>
+            <td>{s['월일']}</td>
+            <td>{s['교시']}</td>
+            <td>{s['과목']}</td>
+            <td>{s['교사']}</td>
+        </tr>"""
+
+        page_html = f"""
+<div class="page">
+    <div class="title">결 · 보 강  계 획 (테스트)</div>
+
+    <table class="top-right">
+        <tr>
+            <td style="width:50%;">수업계</td>
+            <td style="width:50%;">교육과정</td>
+        </tr>
+        <tr>
+            <td style="height:34px;"></td>
+            <td></td>
+        </tr>
+    </table>
+
+    <div class="dept-line">
+        <b>{dept_line}</b> &nbsp;&nbsp; 교 사 : <b>{teacher_name}</b> &nbsp;&nbsp;&nbsp; (인)
+    </div>
+
+    <table class="date-box" style="margin-bottom: 9px;">
+        <tr>
+            <td style="width: 68px; background:#f0f0f0; font-weight:bold;">해당<br>일자</td>
+            <td style="text-align:left; padding-left:10px;">
+                {date_display}<br>
+                <span style="display:inline-block; margin-top:2px;">사유 : 테스트 맞교환</span>
+            </td>
+        </tr>
+    </table>
+
+    <table>
+        <thead>
+            <tr>
+                <th colspan="4" class="section-header">결강수업</th>
+                <th class="section-header">보강수업</th>
+                <th colspan="4" class="section-header">교체수업</th>
+            </tr>
+            <tr class="sub-header">
+                <th style="width:9.5%;">월일</th>
+                <th style="width:7%;">교시</th>
+                <th style="width:10%;">학년반</th>
+                <th style="width:11%;">과목</th>
+                <th style="width:12%;">교사(인)</th>
+                <th style="width:9.5%;">월일</th>
+                <th style="width:7%;">교시</th>
+                <th style="width:11%;">과목</th>
+                <th style="width:13%;">교사(인)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+    </table>
+
+    <div style="margin-top: 13px;">
+        <div style="text-align:center; font-weight:bold; border:1px solid #000; border-bottom:none; padding:5px 0;">
+            추가 기재 사항
+        </div>
+        <div class="note-box"></div>
+    </div>
+
+    <div style="margin-top: 10px; font-size: 10.5px; color:#555; text-align:right;">
+        {SCHOOL_NAME} · {SCHOOL_YEAR}학년도 &nbsp;|&nbsp; 생성시각 {datetime.now().strftime('%Y-%m-%d %H:%M')}
+    </div>
+</div>"""
+        pages.append(page_html)
+
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>테스트 결보강 계획서</title>
+<style>
+    @page {{ size: A4; margin: 12mm 14mm; }}
+    * {{ box-sizing: border-box; }}
+    body {{
+        font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+        font-size: 12.5px;
+        line-height: 1.25;
+        margin: 0;
+        padding: 0;
+        color: #000;
+        background: #fff;
+    }}
+    .page {{
+        padding: 6px 10px;
+        page-break-after: always;
+    }}
+    .page:last-child {{
+        page-break-after: auto;
+    }}
+    table {{
+        border-collapse: collapse;
+        width: 100%;
+        table-layout: fixed;
+    }}
+    th, td {{
+        border: 1px solid #000;
+        padding: 2px 2px;
+        text-align: center;
+        vertical-align: middle;
+        word-break: keep-all;
+    }}
+    .title {{
+        text-align: center;
+        font-size: 22px;
+        font-weight: bold;
+        letter-spacing: 5px;
+        margin: 2px 0 8px 0;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+    }}
+    .top-right {{
+        width: 150px;
+        float: right;
+        margin-top: -36px;
+    }}
+    .top-right td {{
+        height: 26px;
+        font-size: 12px;
+        font-weight: bold;
+    }}
+    .dept-line {{
+        font-size: 13.5px;
+        margin: 4px 0 6px 2px;
+    }}
+    .date-box td {{
+        height: 32px;
+        font-size: 12.5px;
+    }}
+    .section-header {{
+        background-color: #d6e3f0;
+        font-weight: bold;
+        font-size: 12px;
+    }}
+    .sub-header {{
+        background-color: #eef3f9;
+        font-size: 11.5px;
+        font-weight: bold;
+    }}
+    .note-box {{
+        border: 1px solid #000;
+        min-height: 88px;
+        margin-top: 0;
+        padding: 6px;
+    }}
+</style>
+</head>
+<body>
+{''.join(pages)}
+</body>
+</html>"""
+    return html
+
 def build_report_html(norm_date: str) -> str:
     day = WEEKDAY_KR.get(datetime.strptime(norm_date, "%Y-%m-%d").weekday(), "")
     a = st.session_state.absences
