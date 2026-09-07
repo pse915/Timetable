@@ -1,13 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 서라벌여중 시간표·결보강 관리 프로그램
-2026 최종 완성판 (속도 최적화 + 테스트 목록 삭제 버튼)
-- 모든 기존 기능 100% 유지
-- 연계 공강: 2~4인 순환(Cycle) 알고리즘 (학급 담당·과목·시수 완전 보존)
-- 동일학년 1:1 → ⚠ 표시
-- 연계공강 시 "수업계 선생님에게 연락해주세요" 안내
-- 테스트용 탭에 테스트 목록 삭제 버튼 추가
-- 전반적인 속도/메모리 최적화
+2026 최종 통합판
+- 기능: 코드1 (연계 2~4인 순환 + 속도최적화 + 테스트 삭제 버튼 + ⚠ 표시)
+- UI/양식: 코드2 (로그인, 메인페이지, 아이디 추가요청, 결보강 계획서 HTML 양식)
 """
 
 import io
@@ -876,11 +872,10 @@ def apply_cycle_swaps(moves, is_test=False):
     return True
 
 # ==========================================================================================
-# ★ 연계 공강 순환 알고리즘 (속도 최적화 버전)
+# ★ 연계 공강 순환 알고리즘 (속도 최적화)
 # ==========================================================================================
 def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
                            date_b_str, period_b, max_cycle=4, future_days=5, version=0):
-    """속도 최적화: future_days=5, 후보 제한, top-N 강화"""
     original_slot = (normalize_date_str(date_a_str), safe_int(period_a))
     target_slot = (normalize_date_str(date_b_str), safe_int(period_b))
 
@@ -1161,7 +1156,7 @@ def filter_by_owner(df):
     return df[df["입력자"] == current_user()].copy()
 
 # ==========================================================================================
-# 결보강 계획서
+# 결보강 계획서 (코드2 양식 유지)
 # ==========================================================================================
 def build_personal_plan_html(teacher_name: str, on_date: str, use_test: bool = False) -> str:
     try:
@@ -1270,7 +1265,7 @@ def to_excel_bytes(dfs: dict) -> bytes:
     return output.getvalue()
 
 # ==========================================================================================
-# 로그인
+# 로그인 (코드2 양식)
 # ==========================================================================================
 def login_page():
     st.markdown('<div class="login-box">', unsafe_allow_html=True)
@@ -1698,7 +1693,6 @@ if "시간표 변경 테스트용" in tab_map:
         st.caption(f"{dates[0]} ~ {dates[4]}  (테스트 반영됨)")
         st.dataframe(grid, use_container_width=True, height=350, hide_index=True)
 
-        # ★ 테스트 목록 + 삭제 버튼
         if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
             st.dataframe(st.session_state.test_swaps, use_container_width=True, hide_index=True)
@@ -2042,7 +2036,7 @@ if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
                         for _, lesson in lessons.iterrows():
                             actual_p = safe_int(lesson["교시"])
                             base_date = datetime.strptime(d_str, "%Y-%m-%d").date()
-                            for i in range(0, 10):  # 속도 위해 15→10으로 축소
+                            for i in range(0, 10):
                                 td = base_date + timedelta(days=i)
                                 if td.weekday() >= 5:
                                     continue
@@ -2209,4 +2203,4 @@ if "📑 회원별 탭 권한 관리" in tab_map:
                     st.success("모든 탭 차단됨")
                     st.rerun()
 
-st.caption(f"서라벌여중 시간표 관리 시스템 · {current_name()} ({current_user()}) · {current_role()} · 속도최적화판")
+st.caption(f"서라벌여중 시간표 관리 시스템 · {current_name()} ({current_user()}) · {current_role()} · 통합최종판")
