@@ -2,10 +2,9 @@
 """
 서라벌여중 시간표·결보강 관리 프로그램
 2026 최종 완성판
-- 결보강 계획서 이원화 (본인용 / 전체용)
-- 수업교체신청 시트 지원
-- 테스트 탭 → 교체 신청하기 기능
-- 예산 권한 제한, 다중 출장 시작~종료일, 모든 기존 기능 유지
+- 결보강 계획서(본인용) 양식 이미지/PDF와 거의 동일하게 출력
+- 교사 담당과목 자동 연동
+- 모든 기존 기능 유지
 """
 
 import io
@@ -184,6 +183,31 @@ def get_user_allowed_tabs():
         return tabs if tabs else DEFAULT_TABS.get(role, [])
     return DEFAULT_TABS.get(role, [])
 
+def get_teacher_subject(teacher_name: str) -> str:
+    """교사정보 또는 시간표에서 담당과목을 가져옴"""
+    teachers = st.session_state.get("teachers", pd.DataFrame())
+    if not teachers.empty and "교사명" in teachers.columns:
+        row = teachers[teachers["교사명"] == teacher_name]
+        if not row.empty:
+            for col in ["담당과목", "과목", "교과", "전공"]:
+                if col in row.columns:
+                    val = str(row.iloc[0][col]).strip()
+                    if val and val not in ("nan", "None", ""):
+                        return val
+    # 시간표에서 가장 많이 나오는 과목군으로 대체
+    tt = st.session_state.get("timetable", pd.DataFrame())
+    if not tt.empty:
+        sub = tt[tt["교사명"] == teacher_name]
+        if not sub.empty and "과목군" in sub.columns:
+            most = sub["과목군"].value_counts()
+            if not most.empty:
+                return most.index[0]
+        if not sub.empty and "과목" in sub.columns:
+            most = sub["과목"].value_counts()
+            if not most.empty:
+                return subject_group(most.index[0])
+    return ""
+
 # ==========================================================================================
 # Google Sheets
 # ==========================================================================================
@@ -340,7 +364,6 @@ def update_budget(change_amount: int, reason: str = "보강"):
         st.warning(f"예산 업데이트 실패: {e}")
         return get_current_budget()
 
-# ----- 수업교체신청 -----
 SWAP_REQUEST_COLS = [
     "신청ID", "신청자", "신청자이름", "원본일자", "교사A", "요일A", "교시A", "학급A", "과목A",
     "목표일자", "교사B", "요일B", "교시B", "학급B", "과목B", "유형", "신청시각", "상태"
@@ -760,7 +783,7 @@ def recommend_substitutes(day, period, subject, class_name, absent_teacher, on_d
         t_row = teachers[teachers["교사명"] == t]
         rows.append({
             "보강교사": t, "유형": "정규교사", "우선순위": label, "_prio": prio,
-            "담당과목": t_row["담당과목"].iloc[0] if not t_row.empty else "",
+            "담당과목": t_row["담당과목"].iloc[0] if not t_row.empty and "담당과목" in t_row.columns else "",
             "주당시수": load.get(t, 0), "누적보강": cum.get(t, 0), "추천점수": round(score, 1)
         })
     if not rows:
@@ -1019,127 +1042,242 @@ def filter_by_owner(df):
     return df[df["입력자"] == current_user()].copy()
 
 # ==========================================================================================
-# 결보강 계획서 (본인용) + 전체 내역서
+# ★ 결보강 계획서 (양식 이미지/PDF와 거의 동일하게)
 # ==========================================================================================
 def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
-    """사진 양식에 맞춘 본인 결·보강 계획서"""
-    day = WEEKDAY_KR.get(datetime.strptime(on_date, "%Y-%m-%d").weekday(), "")
-    
-    abs_df = st.session_state.absences
+    """예시 이미지 및 양식 PDF와 거의 동일한 레이아웃으로 생성"""
+    try:
+        dt = datetime.strptime(on_date, "%Y-%m-%d")
+        day_kr = WEEKDAY_KR[dt.weekday()]
+        date_display = f"{dt.year}년 {dt.month}월 {dt.day}일 ({day_kr})"
+    except Exception:
+        date_display = on_date
+        day_kr = ""
+
+    # 교사 담당과목
+    subject_dept = get_teacher_subject(teacher_name)
+    if subject_dept:
+        dept_line = f"{subject_dept} 과"
+    else:
+        dept_line = "과"
+
+    # 결강 데이터
+    abs_df = st.session_state.get("absences", pd.DataFrame())
     my_abs = pd.DataFrame()
     if not abs_df.empty:
-        my_abs = abs_df[(abs_df["교사명"] == teacher_name) & (abs_df["일자"] == on_date)]
+        my_abs = abs_df[(abs_df["교사명"] == teacher_name) & (abs_df["일자"] == on_date)].copy()
 
+    # 교체 신청 + 실제 맞교환
     req_df = load_swap_requests()
     my_reqs = pd.DataFrame()
     if not req_df.empty:
-        my_reqs = req_df[(req_df["신청자이름"] == teacher_name) | (req_df["교사A"] == teacher_name)]
-        my_reqs = my_reqs[(my_reqs["원본일자"] == on_date) | (my_reqs["목표일자"] == on_date)]
+        my_reqs = req_df[
+            ((req_df["신청자이름"] == teacher_name) | (req_df["교사A"] == teacher_name)) &
+            ((req_df["원본일자"] == on_date) | (req_df["목표일자"] == on_date))
+        ].copy()
 
-    swaps = st.session_state.swaps
+    swaps = st.session_state.get("swaps", pd.DataFrame())
     my_swaps = pd.DataFrame()
     if not swaps.empty:
-        my_swaps = swaps[(swaps["교사A"] == teacher_name) | (swaps["교사B"] == teacher_name)]
-        my_swaps = my_swaps[(my_swaps["원본일자"] == on_date) | (my_swaps["목표일자"] == on_date)]
+        my_swaps = swaps[
+            ((swaps["교사A"] == teacher_name) | (swaps["교사B"] == teacher_name)) &
+            ((swaps["원본일자"] == on_date) | (swaps["목표일자"] == on_date))
+        ].copy()
 
-    abs_rows = ""
+    reason = ""
+    if not my_abs.empty:
+        reason = str(my_abs.iloc[0].get("사유", "")).strip()
+
+    # 테이블 행 생성 (결강 + 교체)
+    rows_html = ""
+    max_rows = 6  # 양식처럼 빈 행 유지
+
+    # 결강 행
+    abs_list = []
     if not my_abs.empty:
         for _, r in my_abs.iterrows():
-            abs_rows += f"""
-            <tr>
-                <td>{r.get('일자','')}</td>
-                <td>{safe_int(r.get('교시'))}</td>
-                <td>{r.get('학급','')}</td>
-                <td>{r.get('과목','')}</td>
-                <td>{teacher_name}</td>
-                <td></td><td></td><td></td><td></td>
-            </tr>"""
-    else:
-        abs_rows = "<tr><td colspan='9' style='text-align:center;'>해당 일자 결강 없음</td></tr>"
+            abs_list.append({
+                "월일": on_date[5:].replace("-", "/"),
+                "교시": safe_int(r.get("교시")),
+                "학년반": str(r.get("학급", "")),
+                "과목": str(r.get("과목", "")),
+                "교사": teacher_name
+            })
 
-    swap_rows = ""
+    # 교체 행
+    swap_list = []
     for src in [my_reqs, my_swaps]:
         if not src.empty:
             for _, r in src.iterrows():
-                swap_rows += f"""
-                <tr>
-                    <td></td><td></td><td></td><td></td><td></td>
-                    <td>{r.get('목표일자', r.get('원본일자',''))}</td>
-                    <td>{safe_int(r.get('교시B', r.get('교시A', 0)))}</td>
-                    <td>{r.get('과목B', r.get('과목A',''))}</td>
-                    <td>{r.get('교사B', r.get('교사A',''))}</td>
-                </tr>"""
-    if not swap_rows:
-        swap_rows = "<tr><td colspan='9' style='text-align:center;'>교체 신청 내역 없음</td></tr>"
+                target_date = str(r.get("목표일자", r.get("원본일자", "")))
+                swap_list.append({
+                    "월일": target_date[5:].replace("-", "/") if len(target_date) >= 10 else target_date,
+                    "교시": safe_int(r.get("교시B", r.get("교시A", 0))),
+                    "과목": str(r.get("과목B", r.get("과목A", ""))),
+                    "교사": str(r.get("교사B", r.get("교사A", "")))
+                })
 
-    reason = my_abs.iloc[0]["사유"] if not my_abs.empty else ""
+    for i in range(max_rows):
+        a = abs_list[i] if i < len(abs_list) else {"월일": "", "교시": "", "학년반": "", "과목": "", "교사": ""}
+        s = swap_list[i] if i < len(swap_list) else {"월일": "", "교시": "", "과목": "", "교사": ""}
+        rows_html += f"""
+        <tr>
+            <td style="height:26px;">{a['월일']}</td>
+            <td>{a['교시']}</td>
+            <td>{a['학년반']}</td>
+            <td>{a['과목']}</td>
+            <td>{a['교사']}</td>
+            <td></td>
+            <td>{s['월일']}</td>
+            <td>{s['교시']}</td>
+            <td>{s['과목']}</td>
+            <td>{s['교사']}</td>
+        </tr>"""
 
-    html = f"""
-    <!DOCTYPE html>
-    <html lang="ko">
-    <head>
-        <meta charset="utf-8">
-        <title>결·보강 계획서 - {teacher_name}</title>
-        <style>
-            body {{ font-family: '맑은 고딕', 'Malgun Gothic', sans-serif; font-size: 13px; margin: 20px; }}
-            table {{ border-collapse: collapse; width: 100%; }}
-            th, td {{ border: 1px solid #333; padding: 6px 8px; text-align: center; }}
-            th {{ background: #e8eef7; }}
-            .title {{ font-size: 22px; font-weight: bold; text-align: center; margin: 15px 0; }}
-            .header-table td {{ border: 1px solid #333; }}
-        </style>
-    </head>
-    <body>
-        <div class="title">결 · 보강 계획</div>
-        
-        <table class="header-table" style="margin-bottom:12px;">
-            <tr>
-                <td style="width:55%; text-align:left; padding-left:10px;">
-                    과 &nbsp;&nbsp; 교사 : <b>{teacher_name}</b> &nbsp;&nbsp; (인)
-                </td>
-                <td style="width:22%; text-align:center;">수업계</td>
-                <td style="width:23%; text-align:center;">교육과정</td>
-            </tr>
-        </table>
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>결·보강 계획서 - {teacher_name}</title>
+<style>
+    @page {{ size: A4; margin: 12mm 15mm; }}
+    * {{ box-sizing: border-box; }}
+    body {{
+        font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+        font-size: 12.5px;
+        line-height: 1.25;
+        margin: 0;
+        padding: 8px 12px;
+        color: #000;
+        background: #fff;
+    }}
+    table {{
+        border-collapse: collapse;
+        width: 100%;
+        table-layout: fixed;
+    }}
+    th, td {{
+        border: 1px solid #000;
+        padding: 3px 2px;
+        text-align: center;
+        vertical-align: middle;
+        word-break: keep-all;
+    }}
+    .title {{
+        text-align: center;
+        font-size: 22px;
+        font-weight: bold;
+        letter-spacing: 6px;
+        margin: 4px 0 10px 0;
+        text-decoration: underline;
+        text-underline-offset: 4px;
+    }}
+    .top-right {{
+        width: 160px;
+        float: right;
+        margin-top: -38px;
+    }}
+    .top-right td {{
+        height: 28px;
+        font-size: 12px;
+        font-weight: bold;
+    }}
+    .dept-line {{
+        font-size: 13.5px;
+        margin: 6px 0 8px 4px;
+    }}
+    .date-box td {{
+        height: 30px;
+        font-size: 12.5px;
+    }}
+    .section-header {{
+        background-color: #dce6f2;
+        font-weight: bold;
+        font-size: 12px;
+    }}
+    .sub-header {{
+        background-color: #eef3f9;
+        font-size: 11.5px;
+        font-weight: bold;
+    }}
+    .note-box {{
+        border: 1px solid #000;
+        min-height: 85px;
+        margin-top: 4px;
+        padding: 6px;
+    }}
+</style>
+</head>
+<body>
 
-        <table style="margin-bottom:12px;">
-            <tr>
-                <td style="width:12%; background:#f5f5f5;">결강 일자</td>
-                <td style="width:38%;">{on_date} ({day})</td>
-                <td style="width:10%; background:#f5f5f5;">사유</td>
-                <td>{reason}</td>
-            </tr>
-        </table>
+<!-- 제목 + 우측 승인란 -->
+<div class="title">결 · 보 강  계 획</div>
 
-        <table>
-            <thead>
-                <tr>
-                    <th colspan="5">결강수업</th>
-                    <th colspan="4">교체수업</th>
-                </tr>
-                <tr>
-                    <th>월일</th><th>교시</th><th>학년반</th><th>과목</th><th>교사(인)</th>
-                    <th>월일</th><th>교시</th><th>과목</th><th>교사(인)</th>
-                </tr>
-            </thead>
-            <tbody>
-                {abs_rows}
-                {swap_rows}
-            </tbody>
-        </table>
+<table class="top-right">
+    <tr>
+        <td style="width:50%;">수업계</td>
+        <td style="width:50%;">교육과정</td>
+    </tr>
+    <tr>
+        <td style="height:36px;"></td>
+        <td></td>
+    </tr>
+</table>
 
-        <div style="margin-top:20px;">
-            <b>추가 기재 사항</b>
-            <div style="border:1px solid #333; min-height:90px; margin-top:6px; padding:8px;"></div>
-        </div>
+<div class="dept-line">
+    <b>{dept_line}</b> &nbsp;&nbsp; 교 사 : <b>{teacher_name}</b> &nbsp;&nbsp;&nbsp; (인)
+</div>
 
-        <div style="margin-top:25px; font-size:11px; color:#555;">
-            ※ {SCHOOL_NAME} {SCHOOL_YEAR}학년도 결보강 관리 시스템에서 자동 생성<br>
-            생성 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}
-        </div>
-    </body>
-    </html>
-    """
+<!-- 결강 일자 / 사유 -->
+<table class="date-box" style="margin-bottom: 10px;">
+    <tr>
+        <td style="width: 70px; background:#f0f0f0; font-weight:bold;">결강<br>일자</td>
+        <td style="text-align:left; padding-left:10px;">
+            {date_display}<br>
+            <span style="display:inline-block; margin-top:3px;">사유 : {reason}</span>
+        </td>
+    </tr>
+</table>
+
+<!-- 메인 테이블 -->
+<table>
+    <thead>
+        <tr>
+            <th colspan="4" class="section-header">결강수업</th>
+            <th class="section-header">보강수업</th>
+            <th colspan="4" class="section-header">교체수업</th>
+        </tr>
+        <tr class="sub-header">
+            <th style="width:9%;">월일</th>
+            <th style="width:7%;">교시</th>
+            <th style="width:10%;">학년반</th>
+            <th style="width:11%;">과목</th>
+            <th style="width:12%;">교사(인)</th>
+            <th style="width:9%;">월일</th>
+            <th style="width:7%;">교시</th>
+            <th style="width:11%;">과목</th>
+            <th style="width:14%;">교사(인)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {rows_html}
+    </tbody>
+</table>
+
+<!-- 추가 기재 사항 -->
+<div style="margin-top: 14px;">
+    <div style="text-align:center; font-weight:bold; border:1px solid #000; border-bottom:none; padding:4px 0;">
+        추가 기재 사항
+    </div>
+    <div class="note-box"></div>
+</div>
+
+<div style="margin-top: 12px; font-size: 10.5px; color:#555; text-align:right;">
+    {SCHOOL_NAME} · {SCHOOL_YEAR}학년도 &nbsp;|&nbsp; 생성시각 {datetime.now().strftime('%Y-%m-%d %H:%M')}
+</div>
+
+</body>
+</html>"""
     return html
 
 def build_report_html(norm_date: str) -> str:
@@ -1366,19 +1504,20 @@ with st.sidebar:
         st.divider()
         st.subheader("📄 내역서 / 계획서 출력")
 
-        # 모든 사용자용 - 본인 결보강 계획서
+        # 본인용 결보강 계획서 (양식 일치)
         plan_date = st.date_input("계획서 기준일", value=date.today(), key="plan_date")
         if st.button("📋 결보강 계획서 (본인용)", use_container_width=True, type="primary"):
             html = build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
             st.download_button(
-                "HTML 다운로드 (본인 계획서)",
+                "HTML 다운로드 (인쇄 → PDF로 저장 추천)",
                 html.encode("utf-8"),
                 f"결보강계획서_{current_name()}_{plan_date}.html",
                 "text/html",
                 key="dl_personal"
             )
+            st.info("다운로드한 HTML 파일을 브라우저에서 열고 **Ctrl+P → PDF로 저장**하시면 양식과 거의 동일한 PDF가 생성됩니다.")
 
-        # 마스터/교육과정부용 - 전체 내역서
+        # 마스터/교육과정부용 전체 내역서
         if is_edu_or_master():
             rd = st.date_input("전체 내역서 일자", value=date.today(), key="sidebar_rd")
             if st.button("📊 전체 일일 내역서", use_container_width=True):
@@ -1917,7 +2056,7 @@ if "📋 복무 관리 & 판단" in tab_map:
                                         })
                                 if is_free(t_name, tday, p, tds, eff):
                                     for ot in st.session_state.teachers["교사명"].tolist()[:30]:
-                                        if ot != t_name and is_free(ot, day_kr, p, d_str, e_today if 'e_today' in locals() else eff_today):
+                                        if ot != t_name and is_free(ot, day_kr, p, d_str, eff_today):
                                             candidates_linked.append({
                                                 "type": "연계", "date": tds, "day": tday, "period": p,
                                                 "teacher": ot, "lesson": "공강", "score": 30
