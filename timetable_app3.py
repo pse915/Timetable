@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 서라벌여중 시간표·결보강 관리 프로그램
-2026 최종 완성판 (전체 기능 포함)
-- 결보강 계획서 양식 정확히 일치
-- 결강·보강 탭: 해당 시간대 비어있는 모든 교사 검색 (우선순위 유지)
+2026 최종 완성판
+- 결보강 계획서: 보강수업 칸에 '보강 배정된 교사'가 나오도록 수정
+- 모든 기존 기능 유지
 """
 
 import io
@@ -574,7 +574,7 @@ def init_state():
     push_history("초기 상태")
 
 # ==========================================================================================
-# 핵심 로직
+# 핵심 로직 (기존과 동일)
 # ==========================================================================================
 @st.cache_data(show_spinner=False, ttl=180)
 def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: bool = False) -> pd.DataFrame:
@@ -750,11 +750,7 @@ def weekly_load(version=0):
     return tt["교사명"].value_counts().to_dict() if not tt.empty else {}
 
 def recommend_substitutes(day, period, subject, class_name, absent_teacher, on_date, top_n=20, include_part_time=False, e_tt=None):
-    """
-    개선된 보강 추천:
-    - 해당 시간대에 비어있는 모든 교사를 기본적으로 검색
-    - 우선순위는 유지하되 점수 차이를 완화하여 '교환 알고리즘'처럼 보이지 않게 함
-    """
+    """해당 시간대에 비어있는 모든 교사를 검색 (우선순위 유지)"""
     teachers = st.session_state.teachers
     if teachers.empty:
         return pd.DataFrame()
@@ -767,7 +763,6 @@ def recommend_substitutes(day, period, subject, class_name, absent_teacher, on_d
     load = weekly_load(version=st.session_state.get("_data_version", 0))
     max_cum = max(cum.values()) if cum else 0
 
-    # 해당 시간대에 비어있는 모든 교사
     free = [t for t in teachers["교사명"].tolist()
             if t != absent_teacher and not has_duty(t, norm) and is_free(t, day, period, norm, e_tt)]
 
@@ -786,7 +781,6 @@ def recommend_substitutes(day, period, subject, class_name, absent_teacher, on_d
         else:
             prio, label, score = 4, "4순위 · 전체 공강", 20
 
-        # 누적 보강과 시수는 보조 점수만 부여 (강하게 적용하지 않음)
         score += (max_cum - cum.get(t, 0)) * 2 + max(0, 22 - load.get(t, 0)) * 0.3
 
         t_row = teachers[teachers["교사명"] == t]
@@ -1058,9 +1052,15 @@ def filter_by_owner(df):
     return df[df["입력자"] == current_user()].copy()
 
 # ==========================================================================================
-# 결보강 계획서 (양식 정확히 일치)
+# ★ 결보강 계획서 (보강수업 칸에 실제 보강교사 표시)
 # ==========================================================================================
 def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
+    """
+    공식 양식에 맞게:
+    - 결강수업: 결강 정보
+    - 보강수업 교사(인): 실제로 보강 배정된 교사
+    - 교체수업: 교체 신청/맞교환 정보
+    """
     try:
         dt = datetime.strptime(on_date, "%Y-%m-%d")
         day_kr = WEEKDAY_KR[dt.weekday()]
@@ -1076,6 +1076,14 @@ def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
     my_abs = pd.DataFrame()
     if not abs_df.empty:
         my_abs = abs_df[(abs_df["교사명"] == teacher_name) & (abs_df["일자"] == on_date)].copy()
+
+    # 보강 데이터 매칭 (같은 결강ID 또는 일자+교사+교시)
+    subs_df = st.session_state.get("subs", pd.DataFrame())
+    my_subs = pd.DataFrame()
+    if not subs_df.empty:
+        my_subs = subs_df[
+            (subs_df["결강교사"] == teacher_name) & (subs_df["일자"] == on_date)
+        ].copy()
 
     req_df = load_swap_requests()
     my_reqs = pd.DataFrame()
@@ -1095,17 +1103,27 @@ def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
 
     reason = str(my_abs.iloc[0].get("사유", "")).strip() if not my_abs.empty else ""
 
+    # 결강 + 보강 매칭
     abs_list = []
     if not my_abs.empty:
         for _, r in my_abs.iterrows():
+            p = safe_int(r.get("교시"))
+            # 해당 교시에 배정된 보강교사 찾기
+            sub_teacher = ""
+            if not my_subs.empty:
+                match = my_subs[my_subs["교시"] == p]
+                if not match.empty:
+                    sub_teacher = str(match.iloc[0].get("보강교사", "")).strip()
+
             abs_list.append({
                 "월일": on_date[5:].replace("-", "/"),
-                "교시": safe_int(r.get("교시")),
+                "교시": p,
                 "학년반": str(r.get("학급", "")),
                 "과목": str(r.get("과목", "")),
-                "교사": teacher_name
+                "보강교사": sub_teacher          # ← 여기가 핵심 (신청자가 아닌 보강교사)
             })
 
+    # 교체 목록
     swap_list = []
     for src in [my_reqs, my_swaps]:
         if not src.empty:
@@ -1118,10 +1136,11 @@ def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
                     "교사": str(r.get("교사B", r.get("교사A", "")))
                 })
 
+    # 9칸 구조로 행 생성
     rows_html = ""
     max_rows = 6
     for i in range(max_rows):
-        a = abs_list[i] if i < len(abs_list) else {"월일": "", "교시": "", "학년반": "", "과목": "", "교사": ""}
+        a = abs_list[i] if i < len(abs_list) else {"월일": "", "교시": "", "학년반": "", "과목": "", "보강교사": ""}
         s = swap_list[i] if i < len(swap_list) else {"월일": "", "교시": "", "과목": "", "교사": ""}
         rows_html += f"""
         <tr>
@@ -1129,7 +1148,7 @@ def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
             <td>{a['교시']}</td>
             <td>{a['학년반']}</td>
             <td>{a['과목']}</td>
-            <td>{a['교사']}</td>
+            <td>{a['보강교사']}</td>
             <td>{s['월일']}</td>
             <td>{s['교시']}</td>
             <td>{s['과목']}</td>
@@ -1613,7 +1632,7 @@ if "시간강사 관리" in tab_map:
         else:
             st.dataframe(st.session_state.part_time, use_container_width=True)
 
-# ------------------------------------------------------------------ 결강·보강 (개선된 추천)
+# ------------------------------------------------------------------ 결강·보강
 if "결강·보강" in tab_map:
     with tab_map["결강·보강"]:
         st.subheader("결강 등록 & 보강 배정")
