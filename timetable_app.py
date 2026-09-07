@@ -2,7 +2,8 @@
 """
 서라벌여중 시간표·결보강 관리 프로그램
 2026 최종 완성판
-- 결보강 계획서: 보강수업 칸에 '보강 배정된 교사'가 나오도록 수정
+- 1:1 맞교환: 동일 학급 최우선, 동일 학년은 세모(△)
+- 연계 공강 알고리즘 강화 + 루트 표시
 - 모든 기존 기능 유지
 """
 
@@ -12,6 +13,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import gspread
 from gspread.exceptions import APIError, WorksheetNotFound
 from google.oauth2.service_account import Credentials
@@ -261,7 +263,7 @@ def df_to_worksheet(ws, df):
         pass
 
 # ==========================================================================================
-# 아이디 / 권한 / 예산 / 수업교체신청
+# 아이디 / 권한 / 예산
 # ==========================================================================================
 @st.cache_data(ttl=30, show_spinner=False)
 def load_id_sheet():
@@ -361,30 +363,6 @@ def update_budget(change_amount: int, reason: str = "보강"):
         st.warning(f"예산 업데이트 실패: {e}")
         return get_current_budget()
 
-SWAP_REQUEST_COLS = [
-    "신청ID", "신청자", "신청자이름", "원본일자", "교사A", "요일A", "교시A", "학급A", "과목A",
-    "목표일자", "교사B", "요일B", "교시B", "학급B", "과목B", "유형", "신청시각", "상태"
-]
-
-@st.cache_data(ttl=30, show_spinner=False)
-def load_swap_requests():
-    ws = get_worksheet(WORK_SHEET_ID, "수업교체신청")
-    df = df_from_worksheet(ws)
-    if df.empty:
-        return pd.DataFrame(columns=SWAP_REQUEST_COLS)
-    for c in SWAP_REQUEST_COLS:
-        if c not in df.columns:
-            df[c] = ""
-    return df
-
-def save_swap_request(rec: dict):
-    df = load_swap_requests()
-    new = pd.DataFrame([rec])
-    df = pd.concat([df, new], ignore_index=True)
-    ws = get_worksheet(WORK_SHEET_ID, "수업교체신청")
-    df_to_worksheet(ws, df)
-    load_swap_requests.clear()
-
 # ==========================================================================================
 # 히스토리
 # ==========================================================================================
@@ -436,7 +414,6 @@ def _invalidate_all_caches():
     cumulative_sub_count.clear()
     weekly_load.clear()
     load_budget_df.clear()
-    load_swap_requests.clear()
 
 # ==========================================================================================
 # 데이터 로드
@@ -574,7 +551,7 @@ def init_state():
     push_history("초기 상태")
 
 # ==========================================================================================
-# 핵심 로직 (기존과 동일)
+# 핵심 로직
 # ==========================================================================================
 @st.cache_data(show_spinner=False, ttl=180)
 def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: bool = False) -> pd.DataFrame:
@@ -750,7 +727,6 @@ def weekly_load(version=0):
     return tt["교사명"].value_counts().to_dict() if not tt.empty else {}
 
 def recommend_substitutes(day, period, subject, class_name, absent_teacher, on_date, top_n=20, include_part_time=False, e_tt=None):
-    """해당 시간대에 비어있는 모든 교사를 검색 (우선순위 유지)"""
     teachers = st.session_state.teachers
     if teachers.empty:
         return pd.DataFrame()
@@ -852,7 +828,7 @@ def do_swap(a, b, date_a, date_b, is_part_time_purpose=False, is_test=False):
     save_work_data_to_gsheet()
     return True
 
-def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_purpose=False, is_test=False):
+def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_purpose=False, is_test=False, route=""):
     rec = {
         "원본일자": normalize_date_str(date_a), "교사A": a["교사명"], "요일A": a["요일"], "교시A": safe_int(a["교시"]),
         "학급A": a.get("학급", ""), "과목A": a.get("과목", ""),
@@ -860,7 +836,8 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
         "학급B": a.get("학급", ""), "과목B": a.get("과목", ""),
         "유형": "연계 공강 교환", "시간강사구인": "Y" if is_part_time_purpose else "N",
         "등록시각": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "입력자": current_user()
+        "입력자": current_user(),
+        "비고": route
     }
     if is_test:
         st.session_state.test_swaps = pd.concat([st.session_state.get("test_swaps", pd.DataFrame()), pd.DataFrame([rec])], ignore_index=True)
@@ -870,67 +847,162 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
     save_work_data_to_gsheet()
     return True
 
+# ==========================================================================================
+# ★ 개선된 1:1 + 연계 공강 추천 알고리즘
+# ==========================================================================================
 def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, subject_a, date_b_str, period_b, budget_factor=1.0):
+    """
+    개선된 추천:
+    - 1:1 맞교환: 동일 학급(★) > 동일 학년(△) > 기타
+    - 연계 공강: 직접 1:1이 안 될 때 중간 교사를 통해 경로를 만들어 주는 최후의 수단
+    - 루트를 명확히 표시
+    """
     ti = st.session_state.teachers
+    if ti.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
     norm_a = normalize_date_str(date_a_str)
     norm_b = normalize_date_str(date_b_str)
     e_a = get_effective_timetable_for_date(norm_a, st.session_state.get("_data_version", 0))
     e_b = get_effective_timetable_for_date(norm_b, st.session_state.get("_data_version", 0))
-    if ti.empty:
-        return pd.DataFrame(), pd.DataFrame()
+
     p_a = safe_int(period_a)
     p_b = safe_int(period_b)
     day_a = WEEKDAY_KR[datetime.strptime(norm_a, "%Y-%m-%d").weekday()]
     day_b = WEEKDAY_KR[datetime.strptime(norm_b, "%Y-%m-%d").weekday()]
+
     my_class = class_a
     my_grade = grade_of(class_a)
     my_group = subject_group(subject_a)
     cum = cumulative_sub_count(version=st.session_state.get("_data_version", 0))
-    swap_recs, linked_recs = [], []
+
+    swap_recs = []
+    linked_recs = []
+
+    # -------------------------------------------------
+    # 1) 직접 1:1 맞교환 (동일 학급 최우선, 동일 학년 세모)
+    # -------------------------------------------------
     for t_b in ti["교사명"].tolist():
         if t_b == teacher_a or has_duty(t_b, norm_b):
             continue
+
         b_lessons = e_b[(e_b["교사명"] == t_b) & (e_b["교시"] == p_b)] if not e_b.empty else pd.DataFrame()
-        if not b_lessons.empty:
-            for _, b_row in b_lessons.iterrows():
-                if is_free(teacher_a, day_b, p_b, norm_b, e_b) and is_free(t_b, day_a, p_a, norm_a, e_a):
-                    other_class = b_row["학급"]
-                    other_grade = grade_of(other_class)
-                    other_group = subject_group(b_row["과목"])
-                    score = 0
-                    same_class = (other_class == my_class)
-                    same_grade = (other_grade == my_grade)
-                    if same_class:
-                        score += 200
-                    elif same_grade:
-                        score += 100
-                    if other_group == my_group:
-                        score += 40
-                    if norm_b == norm_a:
-                        score += 15
-                    score -= cum.get(t_b, 0) * 3
-                    score *= budget_factor
-                    swap_recs.append({
-                        "유형": "1:1", "교사B": t_b,
-                        "현재 수업": f"{day_b}{p_b}교시 · {other_class} · {b_row['과목']}",
-                        "학급": other_class, "학년": other_grade,
-                        "same_class": same_class, "same_grade": same_grade, "점수": score,
-                        "b_info": {"교사명": t_b, "일자": norm_b, "요일": day_b, "교시": p_b,
-                                   "학급": other_class, "과목": b_row["과목"]}
-                    })
-        if is_free(t_b, day_b, p_b, norm_b, e_b) and is_free(teacher_a, day_b, p_b, norm_b, e_b):
-            score = (40 - cum.get(t_b, 0) * 2) * budget_factor
-            linked_recs.append({
-                "유형": "연계", "교사B": t_b, "현재 수업": f"{day_b}{p_b}교시 공강", "점수": score,
-                "b_info": {"교사명": t_b, "일자": norm_b, "요일": day_b, "교시": p_b,
-                           "학급": class_a, "과목": subject_a}
+        if b_lessons.empty:
+            continue
+
+        for _, b_row in b_lessons.iterrows():
+            # A가 목표 시간에 공강이고, B가 원본 시간에 공강이어야 1:1 가능
+            if not (is_free(teacher_a, day_b, p_b, norm_b, e_b) and is_free(t_b, day_a, p_a, norm_a, e_a)):
+                continue
+
+            other_class = b_row["학급"]
+            other_grade = grade_of(other_class)
+            other_group = subject_group(b_row["과목"])
+
+            same_class = (other_class == my_class)
+            same_grade = (other_grade == my_grade) and not same_class
+
+            score = 0
+            if same_class:
+                score += 300          # 동일 학급 최우선
+                mark = "★ 동일학급"
+            elif same_grade:
+                score += 150          # 동일 학년 (세모)
+                mark = "△ 동일학년"
+            else:
+                score += 30
+                mark = "○ 다른학년"
+
+            if other_group == my_group:
+                score += 40
+            if norm_b == norm_a:
+                score += 15
+            score -= cum.get(t_b, 0) * 3
+            score *= budget_factor
+
+            swap_recs.append({
+                "유형": "1:1",
+                "교사B": t_b,
+                "현재 수업": f"{day_b}{p_b}교시 · {other_class} · {b_row['과목']}",
+                "학급": other_class,
+                "학년": other_grade,
+                "same_class": same_class,
+                "same_grade": same_grade,
+                "mark": mark,
+                "점수": score,
+                "루트": f"{teacher_a}({day_a}{p_a}) ↔ {t_b}({day_b}{p_b})",
+                "b_info": {
+                    "교사명": t_b, "일자": norm_b, "요일": day_b, "교시": p_b,
+                    "학급": other_class, "과목": b_row["과목"]
+                }
             })
+
+    # -------------------------------------------------
+    # 2) 연계 공강 (최후의 수단) - 중간 교사를 통한 경로 탐색
+    # -------------------------------------------------
+    # 목표: teacher_a가 p_b 시간에 수업을 가져가기 위해
+    # 중간 교사(C)를 활용해 공간을 만드는 경로를 찾음
+
+    for t_c in ti["교사명"].tolist():
+        if t_c == teacher_a or has_duty(t_c, norm_b):
+            continue
+
+        # C가 목표 시간(p_b)에 공강인가?
+        if not is_free(t_c, day_b, p_b, norm_b, e_b):
+            continue
+
+        # C가 원본 시간(p_a)에 수업이 있는가? (A와 교환 가능한 수업)
+        c_lessons_at_a = e_a[(e_a["교사명"] == t_c) & (e_a["교시"] == p_a)] if not e_a.empty else pd.DataFrame()
+        if c_lessons_at_a.empty:
+            # C가 원본 시간에도 공강 → 단순 연계 가능
+            if is_free(teacher_a, day_b, p_b, norm_b, e_b):
+                score = (50 - cum.get(t_c, 0) * 2) * budget_factor
+                linked_recs.append({
+                    "유형": "연계",
+                    "교사B": t_c,
+                    "현재 수업": f"{day_b}{p_b}교시 공강",
+                    "점수": score,
+                    "루트": f"{teacher_a} → {t_c} (직접 연계 공강)",
+                    "상세루트": f"① {teacher_a}의 {day_a}{p_a}교시 수업을 {t_c}의 {day_b}{p_b}교시 공강으로 이동",
+                    "b_info": {
+                        "교사명": t_c, "일자": norm_b, "요일": day_b, "교시": p_b,
+                        "학급": class_a, "과목": subject_a
+                    }
+                })
+            continue
+
+        # C가 원본 시간에 수업이 있는 경우 → 2단계 연계 시도
+        for _, c_row in c_lessons_at_a.iterrows():
+            # A가 목표 시간에 공강이어야 함
+            if not is_free(teacher_a, day_b, p_b, norm_b, e_b):
+                continue
+
+            score = (80 - cum.get(t_c, 0) * 2) * budget_factor
+            linked_recs.append({
+                "유형": "연계(2단계)",
+                "교사B": t_c,
+                "현재 수업": f"{day_a}{p_a}교시 · {c_row['학급']} · {c_row['과목']}",
+                "점수": score,
+                "루트": f"{teacher_a} ↔ {t_c} (2단계 연계)",
+                "상세루트": (
+                    f"① {t_c}의 {day_a}{p_a}교시({c_row['학급']} {c_row['과목']}) 수업을 다른 공강으로 이동 후\n"
+                    f"② {teacher_a}의 {day_a}{p_a}교시 수업을 {t_c}의 {day_b}{p_b}교시 공강으로 이동"
+                ),
+                "b_info": {
+                    "교사명": t_c, "일자": norm_b, "요일": day_b, "교시": p_b,
+                    "학급": class_a, "과목": subject_a
+                }
+            })
+
+    # 정렬
     df_swap = (pd.DataFrame(swap_recs)
                .sort_values(["same_class", "same_grade", "점수"], ascending=[False, False, False])
                .reset_index(drop=True) if swap_recs else pd.DataFrame())
+
     df_linked = (pd.DataFrame(linked_recs)
                  .sort_values("점수", ascending=False)
                  .reset_index(drop=True) if linked_recs else pd.DataFrame())
+
     return df_swap, df_linked
 
 # ==========================================================================================
@@ -1052,15 +1124,9 @@ def filter_by_owner(df):
     return df[df["입력자"] == current_user()].copy()
 
 # ==========================================================================================
-# ★ 결보강 계획서 (보강수업 칸에 실제 보강교사 표시)
+# 결보강 계획서
 # ==========================================================================================
-def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
-    """
-    공식 양식에 맞게:
-    - 결강수업: 결강 정보
-    - 보강수업 교사(인): 실제로 보강 배정된 교사
-    - 교체수업: 교체 신청/맞교환 정보
-    """
+def build_personal_plan_html(teacher_name: str, on_date: str, use_test: bool = False) -> str:
     try:
         dt = datetime.strptime(on_date, "%Y-%m-%d")
         day_kr = WEEKDAY_KR[dt.weekday()]
@@ -1077,20 +1143,11 @@ def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
     if not abs_df.empty:
         my_abs = abs_df[(abs_df["교사명"] == teacher_name) & (abs_df["일자"] == on_date)].copy()
 
-    # 보강 데이터 매칭 (같은 결강ID 또는 일자+교사+교시)
     subs_df = st.session_state.get("subs", pd.DataFrame())
     my_subs = pd.DataFrame()
     if not subs_df.empty:
         my_subs = subs_df[
             (subs_df["결강교사"] == teacher_name) & (subs_df["일자"] == on_date)
-        ].copy()
-
-    req_df = load_swap_requests()
-    my_reqs = pd.DataFrame()
-    if not req_df.empty:
-        my_reqs = req_df[
-            ((req_df["신청자이름"] == teacher_name) | (req_df["교사A"] == teacher_name)) &
-            ((req_df["원본일자"] == on_date) | (req_df["목표일자"] == on_date))
         ].copy()
 
     swaps = st.session_state.get("swaps", pd.DataFrame())
@@ -1101,14 +1158,22 @@ def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
             ((swaps["원본일자"] == on_date) | (swaps["목표일자"] == on_date))
         ].copy()
 
+    if use_test:
+        test_swaps = st.session_state.get("test_swaps", pd.DataFrame())
+        if not test_swaps.empty:
+            test_my = test_swaps[
+                ((test_swaps["교사A"] == teacher_name) | (test_swaps["교사B"] == teacher_name)) &
+                ((test_swaps["원본일자"] == on_date) | (test_swaps["목표일자"] == on_date))
+            ].copy()
+            if not test_my.empty:
+                my_swaps = pd.concat([my_swaps, test_my], ignore_index=True)
+
     reason = str(my_abs.iloc[0].get("사유", "")).strip() if not my_abs.empty else ""
 
-    # 결강 + 보강 매칭
     abs_list = []
     if not my_abs.empty:
         for _, r in my_abs.iterrows():
             p = safe_int(r.get("교시"))
-            # 해당 교시에 배정된 보강교사 찾기
             sub_teacher = ""
             if not my_subs.empty:
                 match = my_subs[my_subs["교시"] == p]
@@ -1120,23 +1185,20 @@ def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
                 "교시": p,
                 "학년반": str(r.get("학급", "")),
                 "과목": str(r.get("과목", "")),
-                "보강교사": sub_teacher          # ← 여기가 핵심 (신청자가 아닌 보강교사)
+                "보강교사": sub_teacher
             })
 
-    # 교체 목록
     swap_list = []
-    for src in [my_reqs, my_swaps]:
-        if not src.empty:
-            for _, r in src.iterrows():
-                target_date = str(r.get("목표일자", r.get("원본일자", "")))
-                swap_list.append({
-                    "월일": target_date[5:].replace("-", "/") if len(target_date) >= 10 else target_date,
-                    "교시": safe_int(r.get("교시B", r.get("교시A", 0))),
-                    "과목": str(r.get("과목B", r.get("과목A", ""))),
-                    "교사": str(r.get("교사B", r.get("교사A", "")))
-                })
+    if not my_swaps.empty:
+        for _, r in my_swaps.iterrows():
+            target_date = str(r.get("목표일자", r.get("원본일자", "")))
+            swap_list.append({
+                "월일": target_date[5:].replace("-", "/") if len(target_date) >= 10 else target_date,
+                "교시": safe_int(r.get("교시B", r.get("교시A", 0))),
+                "과목": str(r.get("과목B", r.get("과목A", ""))),
+                "교사": str(r.get("교사B", r.get("교사A", "")))
+            })
 
-    # 9칸 구조로 행 생성
     rows_html = ""
     max_rows = 6
     for i in range(max_rows):
@@ -1291,6 +1353,7 @@ def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
 
 <div style="margin-top: 10px; font-size: 10.5px; color:#555; text-align:right;">
     {SCHOOL_NAME} · {SCHOOL_YEAR}학년도 &nbsp;|&nbsp; 생성시각 {datetime.now().strftime('%Y-%m-%d %H:%M')}
+    {" (테스트 반영)" if use_test else ""}
 </div>
 
 </body>
@@ -1523,7 +1586,7 @@ with st.sidebar:
 
         plan_date = st.date_input("계획서 기준일", value=date.today(), key="plan_date")
         if st.button("📋 결보강 계획서 (본인용)", use_container_width=True, type="primary"):
-            html = build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
+            html = build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"), use_test=False)
             st.download_button(
                 "HTML 다운로드 (인쇄 → PDF로 저장 추천)",
                 html.encode("utf-8"),
@@ -1729,10 +1792,12 @@ if "결강·보강" in tab_map:
                                     add_substitute(cid, head["일자"], head["요일"], p, r.학급, r.과목, head["교사명"], pick, "수동", pr, "")
                                     st.rerun()
 
-# ------------------------------------------------------------------ 시간표 맞교환
+# ------------------------------------------------------------------ 시간표 맞교환 (개선된 추천 표시)
 if "시간표 맞교환 & 변경 추천" in tab_map:
     with tab_map["시간표 맞교환 & 변경 추천"]:
         st.markdown("### 🔄 스마트 시간표 변경 & 맞교환")
+        st.caption("★ = 동일 학급 / △ = 동일 학년 / ○ = 다른 학년   |   연계 공강은 보강 전 최후의 수단입니다.")
+
         col_a, col_b = st.columns(2)
         tlist = st.session_state.teachers["교사명"].tolist()
 
@@ -1768,25 +1833,34 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                 pick_a["교사명"], pick_a["일자"], pick_a["교시"], pick_a["학급"], pick_a["과목"],
                 date_b_str, p_b
             )
-            t1, t2 = st.tabs(["1:1 맞교환 (동일 학급 최우선)", "연계 교환"])
+
+            t1, t2 = st.tabs(["1:1 맞교환 (★동일학급 / △동일학년)", "연계 공강 (최후의 수단)"])
+
             with t1:
                 if df_swap.empty:
-                    st.info("추천 없음")
+                    st.info("조건에 맞는 1:1 맞교환 대상이 없습니다.")
                 else:
                     for idx, row in df_swap.iterrows():
-                        mark = "🏆 동일학급" if row.get("same_class") else ("✅ 같은학년" if row.get("same_grade") else "⚠ 다른학년")
-                        with st.expander(f"{mark} {row['교사B']} ({row['현재 수업']})", expanded=(idx==0)):
-                            if st.button(f"{row['교사B']}와 맞교환", key=f"sw_{idx}"):
+                        with st.expander(f"{row['mark']} {row['교사B']}  |  {row['현재 수업']}  |  점수 {row['점수']:.0f}", expanded=(idx < 3)):
+                            st.markdown(f"**루트**: `{row['루트']}`")
+                            if st.button(f"{row['교사B']}와 1:1 맞교환 실행", key=f"sw_{idx}"):
                                 do_swap(pick_a, row["b_info"], date_a_str, date_b_str, is_pt)
+                                st.success("1:1 맞교환이 등록되었습니다.")
                                 st.rerun()
+
             with t2:
                 if df_linked.empty:
-                    st.info("추천 없음")
+                    st.info("연계 공강 대상이 없습니다.")
                 else:
                     for idx, row in df_linked.iterrows():
-                        with st.expander(f"{row['교사B']} ({row['현재 수업']})", expanded=(idx==0)):
-                            if st.button(f"{row['교사B']}와 연계 교환", key=f"lk_{idx}"):
-                                do_linked_swap(pick_a, row["교사B"], date_a_str, date_b_str, day_b, p_b, is_pt)
+                        with st.expander(f"🔗 {row['유형']} · {row['교사B']}  |  {row['현재 수업']}", expanded=(idx < 2)):
+                            st.markdown(f"**루트 요약**: `{row['루트']}`")
+                            if "상세루트" in row and row["상세루트"]:
+                                st.markdown("**상세 경로**:")
+                                st.code(row["상세루트"], language=None)
+                            if st.button(f"{row['교사B']}와 연계 교환 실행", key=f"lk_{idx}"):
+                                do_linked_swap(pick_a, row["교사B"], date_a_str, date_b_str, day_b, p_b, is_pt, route=row.get("루트", ""))
+                                st.success("연계 교환이 등록되었습니다.")
                                 st.rerun()
 
         show_swaps = filter_by_owner(st.session_state.swaps)
@@ -1816,7 +1890,7 @@ if "통계" in tab_map:
 if "시간표 변경 테스트용" in tab_map:
     with tab_map["시간표 변경 테스트용"]:
         st.subheader("🧪 시간표 변경 테스트용 (저장 안 됨 · 샌드박스)")
-        st.info("테스트 후 「교체 신청하기」 버튼을 누르면 「수업교체신청」 시트에 저장됩니다.")
+        st.info("테스트로 맞교환/연계교환을 적용한 후, 아래에서 **결보강 계획서(본인용)** 를 미리보고 출력할 수 있습니다.")
 
         if st.button("🔄 테스트 상태 초기화", type="secondary"):
             st.session_state.test_swaps = pd.DataFrame()
@@ -1862,21 +1936,22 @@ if "시간표 변경 테스트용" in tab_map:
                     st.info("추천 없음")
                 else:
                     for idx, row in df_swap.iterrows():
-                        mark = "🏆 동일학급" if row.get("same_class") else ("✅ 같은학년" if row.get("same_grade") else "⚠ 다른학년")
-                        with st.expander(f"{mark} {row['교사B']} ({row['현재 수업']})", expanded=(idx==0)):
+                        with st.expander(f"{row.get('mark','')} {row['교사B']} ({row['현재 수업']})", expanded=(idx==0)):
+                            st.markdown(f"**루트**: `{row.get('루트','')}`")
                             if st.button(f"[테스트] {row['교사B']}와 맞교환", key=f"test_sw_{idx}"):
                                 do_swap(pick_a, row["b_info"], date_a_str, date_b_str, is_test=True)
-                                st.success("테스트 맞교환이 적용되었습니다. (저장 안 됨)")
+                                st.success("테스트 맞교환이 적용되었습니다.")
                                 st.rerun()
             with t2:
                 if df_linked.empty:
                     st.info("추천 없음")
                 else:
                     for idx, row in df_linked.iterrows():
-                        with st.expander(f"{row['교사B']} ({row['현재 수업']})", expanded=(idx==0)):
+                        with st.expander(f"🔗 {row['교사B']} ({row['현재 수업']})", expanded=(idx==0)):
+                            st.markdown(f"**루트**: `{row.get('루트','')}`")
                             if st.button(f"[테스트] {row['교사B']}와 연계 교환", key=f"test_lk_{idx}"):
-                                do_linked_swap(pick_a, row["교사B"], date_a_str, date_b_str, day_b, p_b, is_test=True)
-                                st.success("테스트 연계교환이 적용되었습니다. (저장 안 됨)")
+                                do_linked_swap(pick_a, row["교사B"], date_a_str, date_b_str, day_b, p_b, is_test=True, route=row.get("루트",""))
+                                st.success("테스트 연계교환이 적용되었습니다.")
                                 st.rerun()
 
         st.markdown("#### 테스트 적용 후 주간표 미리보기")
@@ -1890,32 +1965,20 @@ if "시간표 변경 테스트용" in tab_map:
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
             st.dataframe(st.session_state.test_swaps, use_container_width=True, hide_index=True)
 
-            if st.button("✅ 교체 신청하기 (수업교체신청 시트로 저장)", type="primary"):
-                for _, row in st.session_state.test_swaps.iterrows():
-                    rec = {
-                        "신청ID": f"REQ-{datetime.now().strftime('%Y%m%d%H%M%S')}-{current_user()}",
-                        "신청자": current_user(),
-                        "신청자이름": current_name(),
-                        "원본일자": row.get("원본일자", ""),
-                        "교사A": row.get("교사A", ""),
-                        "요일A": row.get("요일A", ""),
-                        "교시A": row.get("교시A", ""),
-                        "학급A": row.get("학급A", ""),
-                        "과목A": row.get("과목A", ""),
-                        "목표일자": row.get("목표일자", ""),
-                        "교사B": row.get("교사B", ""),
-                        "요일B": row.get("요일B", ""),
-                        "교시B": row.get("교시B", ""),
-                        "학급B": row.get("학급B", ""),
-                        "과목B": row.get("과목B", ""),
-                        "유형": row.get("유형", "1:1 맞교환"),
-                        "신청시각": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "상태": "신청"
-                    }
-                    save_swap_request(rec)
-                st.success("교체 신청이 「수업교체신청」 시트에 저장되었습니다.")
-                st.session_state.test_swaps = pd.DataFrame()
-                st.rerun()
+        st.divider()
+        st.markdown("### 📋 테스트 반영 결보강 계획서 (본인용) 미리보기 & 출력")
+        plan_date_test = st.date_input("계획서 기준일", value=date.today(), key="test_plan_date")
+        if st.button("📋 결보강 계획서 미리보기 / 출력", type="primary", key="btn_test_plan"):
+            html = build_personal_plan_html(current_name(), plan_date_test.strftime("%Y-%m-%d"), use_test=True)
+            st.success("미리보기가 생성되었습니다.")
+            components.html(html, height=780, scrolling=True)
+            st.download_button(
+                "HTML 다운로드 (인쇄 → PDF 저장 추천)",
+                html.encode("utf-8"),
+                f"결보강계획서_테스트_{current_name()}_{plan_date_test}.html",
+                "text/html",
+                key="dl_test_plan"
+            )
 
 # ------------------------------------------------------------------ 변경된 교사 주간표
 if "변경된 교사 주간표" in tab_map:
@@ -2101,7 +2164,7 @@ if "📋 복무 관리 & 판단" in tab_map:
                                 st.info("조건에 맞는 1:1 대상 없음")
                             else:
                                 for i, c in enumerate(data["one_to_one"]):
-                                    mark = "🏆 동일학급" if c["same_class"] else ("✅ 같은학년" if c["same_grade"] else "⚠ 다른학년")
+                                    mark = "★ 동일학급" if c["same_class"] else ("△ 동일학년" if c["same_grade"] else "○ 다른학년")
                                     st.write(f"{mark} | {c['date']} ({c['day']}) {c['period']}교시 - **{c['teacher']}** ({c['lesson']})")
                                     if st.button("이 수업과 1:1 맞교환 실행", key=f"o2o_{p}_{i}"):
                                         a_info = {"교사명": t_name, "일자": d_str, "요일": day_kr, "교시": p,
