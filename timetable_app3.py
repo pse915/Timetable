@@ -1121,326 +1121,468 @@ def get_teacher_week_view(teacher: str, ref_date: date, use_test=False):
                 origin = get_swap_origin_info(teacher, on_date, p)
                 if origin:
                     cell += f" 🔄 from {origin}"
-                if not absences.empty and ((absences["교사명"] == teacher) & (absences["일자"] == on_date) & (absences["교시"] == p)).any():
-                    cell = f"결강 · {cell}"
+                if not absences.empty and ((absences["일자"] == on_date) & (absences["교사명"] == teacher) & (absences["교시"] == p)).any():
+                    cell = f"[결강] {cell}"
+                if not subs.empty and ((subs["일자"] == on_date) & (subs["보강교사"] == teacher) & (subs["교시"] == p)).any():
+                    cell = f"[보강] {cell}"
                 row[d] = cell
             else:
-                row[d] = ""
+                cell = ""
+                if not pt_df.empty and "시작일" in pt_df.columns:
+                    for _, prow in pt_df.iterrows():
+                        start = normalize_date_str(prow.get("시작일", ""))
+                        end = normalize_date_str(prow.get("종료일", ""))
+                        if start and end and start <= on_date <= end and str(prow.get("대체교사", "")).strip() == teacher:
+                            pt_name = str(prow.get("시간강사명", "")).strip()
+                            if pt_name:
+                                m2 = e_tt[(e_tt["교사명"] == pt_name) & (e_tt["교시"] == p)] if not e_tt.empty else pd.DataFrame()
+                                if not m2.empty:
+                                    r2 = m2.iloc[0]
+                                    cell = f"{pt_name}({teacher}) {r2['학급']} {r2['과목']}"
+                                    break
+                row[d] = cell
         grid.append(row)
-    return pd.DataFrame(grid), [wd.strftime("%Y-%m-%d") for wd in week_dates]
+    return pd.DataFrame(grid), week_dates
 
 def get_changed_teachers_for_week(ref_date: date):
     weekday = ref_date.weekday()
     monday = ref_date - timedelta(days=weekday)
     week_dates = [(monday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(5)]
     changed = set()
-    ver = st.session_state.get("_data_version", 0)
-    for d in week_dates:
-        e_tt = get_effective_timetable_for_date(d, ver)
-        base = st.session_state.timetable
-        day = WEEKDAY_KR[datetime.strptime(d, "%Y-%m-%d").weekday()]
-        base_day = base[base["요일"] == day] if not base.empty else pd.DataFrame()
-        if e_tt.empty and base_day.empty:
-            continue
-        e_set = set(zip(e_tt["교사명"], e_tt["교시"])) if not e_tt.empty else set()
-        b_set = set(zip(base_day["교사명"], base_day["교시"])) if not base_day.empty else set()
-        for t, p in e_set.symmetric_difference(b_set):
-            changed.add(t)
-        for t in e_tt["교사명"].unique() if not e_tt.empty else []:
-            if t not in (base_day["교사명"].unique() if not base_day.empty else []):
-                changed.add(t)
-    return sorted(changed)
+    for df, cols in [(st.session_state.absences, ["교사명"]), (st.session_state.subs, ["결강교사", "보강교사"])]:
+        if not df.empty and "일자" in df.columns:
+            mask = df["일자"].isin(week_dates)
+            for c in cols:
+                if c in df.columns:
+                    changed.update(df.loc[mask, c].dropna().tolist())
+    if not st.session_state.swaps.empty:
+        for col in ["원본일자", "목표일자"]:
+            if col in st.session_state.swaps.columns:
+                mask = st.session_state.swaps[col].isin(week_dates)
+                changed.update(st.session_state.swaps.loc[mask, "교사A"].tolist())
+                changed.update(st.session_state.swaps.loc[mask, "교사B"].tolist())
+    pt = st.session_state.get("part_time", pd.DataFrame())
+    if not pt.empty and "시작일" in pt.columns:
+        for _, r in pt.iterrows():
+            start = normalize_date_str(r.get("시작일", ""))
+            end = normalize_date_str(r.get("종료일", ""))
+            if start and end:
+                for wd in week_dates:
+                    if start <= wd <= end:
+                        if r.get("대체교사"):
+                            changed.add(str(r["대체교사"]).strip())
+                        if r.get("시간강사명"):
+                            changed.add(str(r["시간강사명"]).strip())
+    return sorted(t for t in changed if t)
 
 def filter_by_owner(df):
-    if can_full_data() or df is None or df.empty:
-        return df
-    if "입력자" not in df.columns:
+    if can_full_data() or df.empty or "입력자" not in df.columns:
         return df
     return df[df["입력자"] == current_user()].copy()
 
-def to_excel_bytes(dfs: dict):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for name, df in dfs.items():
-            df.to_excel(writer, sheet_name=name[:31], index=False)
-    return output.getvalue()
-
 # ==========================================================================================
-# 결보강 계획서 HTML (본인용 양식 그대로 사용)
+# ★ 결보강 계획서 (보강수업 칸에 실제 보강교사 표시)
 # ==========================================================================================
-def build_personal_report_html(teacher_name: str, on_date: str = None):
-    """본인용 결보강 계획서 HTML 양식 (기존 코드와 동일)"""
-    norm = normalize_date_str(on_date) if on_date else date.today().strftime("%Y-%m-%d")
+def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
+    """
+    공식 양식에 맞게:
+    - 결강수업: 결강 정보
+    - 보강수업 교사(인): 실제로 보강 배정된 교사
+    - 교체수업: 교체 신청/맞교환 정보
+    """
     try:
-        day = WEEKDAY_KR[datetime.strptime(norm, "%Y-%m-%d").weekday()]
+        dt = datetime.strptime(on_date, "%Y-%m-%d")
+        day_kr = WEEKDAY_KR[dt.weekday()]
+        date_display = f"{dt.year}년 {dt.month}월 {dt.day}일 ({day_kr})"
     except Exception:
-        day = ""
+        date_display = on_date
+        day_kr = ""
 
-    absences = st.session_state.get("absences", pd.DataFrame())
-    subs = st.session_state.get("subs", pd.DataFrame())
+    subject_dept = get_teacher_subject(teacher_name)
+    dept_line = f"{subject_dept} 과" if subject_dept else "과"
+
+    abs_df = st.session_state.get("absences", pd.DataFrame())
+    my_abs = pd.DataFrame()
+    if not abs_df.empty:
+        my_abs = abs_df[(abs_df["교사명"] == teacher_name) & (abs_df["일자"] == on_date)].copy()
+
+    # 보강 데이터 매칭 (같은 결강ID 또는 일자+교사+교시)
+    subs_df = st.session_state.get("subs", pd.DataFrame())
+    my_subs = pd.DataFrame()
+    if not subs_df.empty:
+        my_subs = subs_df[
+            (subs_df["결강교사"] == teacher_name) & (subs_df["일자"] == on_date)
+        ].copy()
+
+    req_df = load_swap_requests()
+    my_reqs = pd.DataFrame()
+    if not req_df.empty:
+        my_reqs = req_df[
+            ((req_df["신청자이름"] == teacher_name) | (req_df["교사A"] == teacher_name)) &
+            ((req_df["원본일자"] == on_date) | (req_df["목표일자"] == on_date))
+        ].copy()
+
     swaps = st.session_state.get("swaps", pd.DataFrame())
+    my_swaps = pd.DataFrame()
+    if not swaps.empty:
+        my_swaps = swaps[
+            ((swaps["교사A"] == teacher_name) | (swaps["교사B"] == teacher_name)) &
+            ((swaps["원본일자"] == on_date) | (swaps["목표일자"] == on_date))
+        ].copy()
 
-    my_abs = absences[(absences["교사명"] == teacher_name) & (absences["일자"] == norm)] if not absences.empty else pd.DataFrame()
-    my_subs = subs[(subs["결강교사"] == teacher_name) & (subs["일자"] == norm)] if not subs.empty else pd.DataFrame()
-    my_swaps_a = swaps[(swaps["교사A"] == teacher_name) & ((swaps["원본일자"] == norm) | (swaps["목표일자"] == norm))] if not swaps.empty else pd.DataFrame()
-    my_swaps_b = swaps[(swaps["교사B"] == teacher_name) & ((swaps["원본일자"] == norm) | (swaps["목표일자"] == norm))] if not swaps.empty else pd.DataFrame()
+    reason = str(my_abs.iloc[0].get("사유", "")).strip() if not my_abs.empty else ""
 
-    html = f"""
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<title>{SCHOOL_NAME} 결보강 계획서 (본인)</title>
-<style>
-    body {{ font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; font-size: 12px; margin: 20px; }}
-    h1 {{ text-align: center; font-size: 18px; margin-bottom: 5px; }}
-    h2 {{ text-align: center; font-size: 14px; margin-top: 0; color: #333; }}
-    .info {{ margin: 10px 0; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
-    th, td {{ border: 1px solid #333; padding: 6px 8px; text-align: center; }}
-    th {{ background: #f0f0f0; font-weight: bold; }}
-    .section {{ margin-top: 20px; font-weight: bold; font-size: 13px; }}
-    .footer {{ margin-top: 30px; text-align: right; font-size: 11px; }}
-</style>
-</head>
-<body>
-<h1>{SCHOOL_NAME}</h1>
-<h2>{SCHOOL_YEAR}학년도 결보강 계획서 (본인용)</h2>
-<div class="info">
-    <b>교사명:</b> {teacher_name} &nbsp;&nbsp; <b>일자:</b> {norm} ({day}) &nbsp;&nbsp; <b>작성자:</b> {current_name()} ({current_user()})
-</div>
+    # 결강 + 보강 매칭
+    abs_list = []
+    if not my_abs.empty:
+        for _, r in my_abs.iterrows():
+            p = safe_int(r.get("교시"))
+            # 해당 교시에 배정된 보강교사 찾기
+            sub_teacher = ""
+            if not my_subs.empty:
+                match = my_subs[my_subs["교시"] == p]
+                if not match.empty:
+                    sub_teacher = str(match.iloc[0].get("보강교사", "")).strip()
 
-<div class="section">■ 결강 내역</div>
-<table>
-    <tr><th>교시</th><th>학급</th><th>과목</th><th>사유</th><th>상세사유</th></tr>
-"""
-    if my_abs.empty:
-        html += "<tr><td colspan='5'>해당 없음</td></tr>"
-    else:
-        for _, r in my_abs.sort_values("교시").iterrows():
-            html += f"<tr><td>{safe_int(r.get('교시',''))}교시</td><td>{r.get('학급','')}</td><td>{r.get('과목','')}</td><td>{r.get('사유','')}</td><td>{r.get('상세사유','')}</td></tr>"
+            abs_list.append({
+                "월일": on_date[5:].replace("-", "/"),
+                "교시": p,
+                "학년반": str(r.get("학급", "")),
+                "과목": str(r.get("과목", "")),
+                "보강교사": sub_teacher          # ← 여기가 핵심 (신청자가 아닌 보강교사)
+            })
 
-    html += """
-</table>
+    # 교체 목록
+    swap_list = []
+    for src in [my_reqs, my_swaps]:
+        if not src.empty:
+            for _, r in src.iterrows():
+                target_date = str(r.get("목표일자", r.get("원본일자", "")))
+                swap_list.append({
+                    "월일": target_date[5:].replace("-", "/") if len(target_date) >= 10 else target_date,
+                    "교시": safe_int(r.get("교시B", r.get("교시A", 0))),
+                    "과목": str(r.get("과목B", r.get("과목A", ""))),
+                    "교사": str(r.get("교사B", r.get("교사A", "")))
+                })
 
-<div class="section">■ 보강 배정 내역</div>
-<table>
-    <tr><th>교시</th><th>학급</th><th>과목</th><th>결강교사</th><th>보강교사</th><th>배정방식</th></tr>
-"""
-    if my_subs.empty:
-        html += "<tr><td colspan='6'>해당 없음</td></tr>"
-    else:
-        for _, r in my_subs.sort_values("교시").iterrows():
-            html += f"<tr><td>{safe_int(r.get('교시',''))}교시</td><td>{r.get('학급','')}</td><td>{r.get('과목','')}</td><td>{r.get('결강교사','')}</td><td><b>{r.get('보강교사','')}</b></td><td>{r.get('배정방식','')}</td></tr>"
-
-    html += """
-</table>
-
-<div class="section">■ 시간표 맞교환 / 변경 내역</div>
-<table>
-    <tr><th>유형</th><th>원본일자</th><th>교사A</th><th>교시A</th><th>학급A</th><th>과목A</th><th>목표일자</th><th>교사B</th><th>교시B</th><th>학급B</th><th>과목B</th></tr>
-"""
-    combined_swaps = pd.concat([my_swaps_a, my_swaps_b]).drop_duplicates() if not my_swaps_a.empty or not my_swaps_b.empty else pd.DataFrame()
-    if combined_swaps.empty:
-        html += "<tr><td colspan='11'>해당 없음</td></tr>"
-    else:
-        for _, r in combined_swaps.iterrows():
-            html += f"""<tr>
-                <td>{r.get('유형','')}</td>
-                <td>{r.get('원본일자','')}</td>
-                <td>{r.get('교사A','')}</td>
-                <td>{safe_int(r.get('교시A',''))}교시</td>
-                <td>{r.get('학급A','')}</td>
-                <td>{r.get('과목A','')}</td>
-                <td>{r.get('목표일자','')}</td>
-                <td>{r.get('교사B','')}</td>
-                <td>{safe_int(r.get('교시B',''))}교시</td>
-                <td>{r.get('학급B','')}</td>
-                <td>{r.get('과목B','')}</td>
-            </tr>"""
-
-    html += f"""
-</table>
-
-<div class="footer">
-    출력일시: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}<br>
-    ※ 이 HTML을 브라우저에서 열고 Ctrl+P → PDF로 저장하시면 양식과 거의 동일한 PDF가 생성됩니다.
-</div>
-</body>
-</html>
-"""
-    return html
-
-def build_test_swaps_report_html(test_df: pd.DataFrame):
-    """테스트 중인 맞교환 목록을 본인용 결보강 계획서 HTML 양식과 동일하게 출력"""
-    if test_df is None or test_df.empty:
-        return "<html><body><p>출력할 테스트 맞교환 목록이 없습니다.</p></body></html>"
-
-    teacher_name = current_name() or current_user() or "테스트 사용자"
-    html = f"""
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<title>{SCHOOL_NAME} 결보강 계획서 (테스트용)</title>
-<style>
-    body {{ font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; font-size: 12px; margin: 20px; }}
-    h1 {{ text-align: center; font-size: 18px; margin-bottom: 5px; }}
-    h2 {{ text-align: center; font-size: 14px; margin-top: 0; color: #333; }}
-    .info {{ margin: 10px 0; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
-    th, td {{ border: 1px solid #333; padding: 6px 8px; text-align: center; }}
-    th {{ background: #f0f0f0; font-weight: bold; }}
-    .section {{ margin-top: 20px; font-weight: bold; font-size: 13px; }}
-    .footer {{ margin-top: 30px; text-align: right; font-size: 11px; }}
-</style>
-</head>
-<body>
-<h1>{SCHOOL_NAME}</h1>
-<h2>{SCHOOL_YEAR}학년도 결보강 계획서 (테스트용 - 현재 테스트 중인 맞교환 목록)</h2>
-<div class="info">
-    <b>작성자:</b> {teacher_name} ({current_user()}) &nbsp;&nbsp; <b>출력일시:</b> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-</div>
-
-<div class="section">■ 테스트 중인 시간표 맞교환 / 변경 내역</div>
-<table>
-    <tr>
-        <th>유형</th>
-        <th>원본일자</th>
-        <th>교사A</th>
-        <th>요일A</th>
-        <th>교시A</th>
-        <th>학급A</th>
-        <th>과목A</th>
-        <th>목표일자</th>
-        <th>교사B</th>
-        <th>요일B</th>
-        <th>교시B</th>
-        <th>학급B</th>
-        <th>과목B</th>
-    </tr>
-"""
-    for _, r in test_df.iterrows():
-        html += f"""<tr>
-            <td>{r.get('유형','')}</td>
-            <td>{r.get('원본일자','')}</td>
-            <td>{r.get('교사A','')}</td>
-            <td>{r.get('요일A','')}</td>
-            <td>{safe_int(r.get('교시A',''))}교시</td>
-            <td>{r.get('학급A','')}</td>
-            <td>{r.get('과목A','')}</td>
-            <td>{r.get('목표일자','')}</td>
-            <td>{r.get('교사B','')}</td>
-            <td>{r.get('요일B','')}</td>
-            <td>{safe_int(r.get('교시B',''))}교시</td>
-            <td>{r.get('학급B','')}</td>
-            <td>{r.get('과목B','')}</td>
+    # 9칸 구조로 행 생성
+    rows_html = ""
+    max_rows = 6
+    for i in range(max_rows):
+        a = abs_list[i] if i < len(abs_list) else {"월일": "", "교시": "", "학년반": "", "과목": "", "보강교사": ""}
+        s = swap_list[i] if i < len(swap_list) else {"월일": "", "교시": "", "과목": "", "교사": ""}
+        rows_html += f"""
+        <tr>
+            <td style="height:29px;">{a['월일']}</td>
+            <td>{a['교시']}</td>
+            <td>{a['학년반']}</td>
+            <td>{a['과목']}</td>
+            <td>{a['보강교사']}</td>
+            <td>{s['월일']}</td>
+            <td>{s['교시']}</td>
+            <td>{s['과목']}</td>
+            <td>{s['교사']}</td>
         </tr>"""
 
-    html += f"""
-</table>
-
-<div class="footer">
-    ※ 이 HTML을 브라우저에서 열고 Ctrl+P → PDF로 저장하시면 양식과 거의 동일한 PDF가 생성됩니다.<br>
-    ※ 본 문서는 「시간표 변경 테스트용」 탭의 현재 테스트 중인 맞교환 목록을 기반으로 생성되었습니다. (저장되지 않은 테스트 데이터)
-</div>
-</body>
-</html>
-"""
-    return html
-
-def build_report_html(on_date: str):
-    """전체 일일 내역서 (기존)"""
-    norm = normalize_date_str(on_date)
-    absences = st.session_state.get("absences", pd.DataFrame())
-    subs = st.session_state.get("subs", pd.DataFrame())
-    day_abs = absences[absences["일자"] == norm] if not absences.empty else pd.DataFrame()
-    day_subs = subs[subs["일자"] == norm] if not subs.empty else pd.DataFrame()
-
-    html = f"""
-<!DOCTYPE html>
+    html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<title>{SCHOOL_NAME} 일일 결보강 내역서</title>
+<meta charset="utf-8">
+<title>결·보강 계획서 - {teacher_name}</title>
 <style>
-    body {{ font-family: 'Malgun Gothic', sans-serif; font-size: 12px; margin: 20px; }}
-    h1 {{ text-align: center; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
-    th, td {{ border: 1px solid #333; padding: 5px; text-align: center; }}
-    th {{ background: #eee; }}
+    @page {{ size: A4; margin: 12mm 14mm; }}
+    * {{ box-sizing: border-box; }}
+    body {{
+        font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+        font-size: 12.5px;
+        line-height: 1.25;
+        margin: 0;
+        padding: 6px 10px;
+        color: #000;
+        background: #fff;
+    }}
+    table {{
+        border-collapse: collapse;
+        width: 100%;
+        table-layout: fixed;
+    }}
+    th, td {{
+        border: 1px solid #000;
+        padding: 2px 2px;
+        text-align: center;
+        vertical-align: middle;
+        word-break: keep-all;
+    }}
+    .title {{
+        text-align: center;
+        font-size: 22px;
+        font-weight: bold;
+        letter-spacing: 5px;
+        margin: 2px 0 8px 0;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+    }}
+    .top-right {{
+        width: 150px;
+        float: right;
+        margin-top: -36px;
+    }}
+    .top-right td {{
+        height: 26px;
+        font-size: 12px;
+        font-weight: bold;
+    }}
+    .dept-line {{
+        font-size: 13.5px;
+        margin: 4px 0 6px 2px;
+    }}
+    .date-box td {{
+        height: 32px;
+        font-size: 12.5px;
+    }}
+    .section-header {{
+        background-color: #d6e3f0;
+        font-weight: bold;
+        font-size: 12px;
+    }}
+    .sub-header {{
+        background-color: #eef3f9;
+        font-size: 11.5px;
+        font-weight: bold;
+    }}
+    .note-box {{
+        border: 1px solid #000;
+        min-height: 88px;
+        margin-top: 0;
+        padding: 6px;
+    }}
 </style>
 </head>
 <body>
-<h1>{SCHOOL_NAME} {SCHOOL_YEAR} 일일 결보강 내역서 ({norm})</h1>
-<div class="section">■ 결강</div>
-<table>
-<tr><th>교사명</th><th>교시</th><th>학급</th><th>과목</th><th>사유</th></tr>
-"""
-    if day_abs.empty:
-        html += "<tr><td colspan='5'>없음</td></tr>"
-    else:
-        for _, r in day_abs.iterrows():
-            html += f"<tr><td>{r.get('교사명','')}</td><td>{safe_int(r.get('교시',''))}</td><td>{r.get('학급','')}</td><td>{r.get('과목','')}</td><td>{r.get('사유','')}</td></tr>"
-    html += """
+
+<div class="title">결 · 보 강  계 획</div>
+
+<table class="top-right">
+    <tr>
+        <td style="width:50%;">수업계</td>
+        <td style="width:50%;">교육과정</td>
+    </tr>
+    <tr>
+        <td style="height:34px;"></td>
+        <td></td>
+    </tr>
 </table>
-<div class="section">■ 보강</div>
-<table>
-<tr><th>결강교사</th><th>보강교사</th><th>교시</th><th>학급</th><th>과목</th></tr>
-"""
-    if day_subs.empty:
-        html += "<tr><td colspan='5'>없음</td></tr>"
-    else:
-        for _, r in day_subs.iterrows():
-            html += f"<tr><td>{r.get('결강교사','')}</td><td><b>{r.get('보강교사','')}</b></td><td>{safe_int(r.get('교시',''))}</td><td>{r.get('학급','')}</td><td>{r.get('과목','')}</td></tr>"
-    html += f"""
+
+<div class="dept-line">
+    <b>{dept_line}</b> &nbsp;&nbsp; 교 사 : <b>{teacher_name}</b> &nbsp;&nbsp;&nbsp; (인)
+</div>
+
+<table class="date-box" style="margin-bottom: 9px;">
+    <tr>
+        <td style="width: 68px; background:#f0f0f0; font-weight:bold;">결강<br>일자</td>
+        <td style="text-align:left; padding-left:10px;">
+            {date_display}<br>
+            <span style="display:inline-block; margin-top:2px;">사유 : {reason}</span>
+        </td>
+    </tr>
 </table>
-<div style="margin-top:20px; text-align:right;">출력: {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>
+
+<table>
+    <thead>
+        <tr>
+            <th colspan="4" class="section-header">결강수업</th>
+            <th class="section-header">보강수업</th>
+            <th colspan="4" class="section-header">교체수업</th>
+        </tr>
+        <tr class="sub-header">
+            <th style="width:9.5%;">월일</th>
+            <th style="width:7%;">교시</th>
+            <th style="width:10%;">학년반</th>
+            <th style="width:11%;">과목</th>
+            <th style="width:12%;">교사(인)</th>
+            <th style="width:9.5%;">월일</th>
+            <th style="width:7%;">교시</th>
+            <th style="width:11%;">과목</th>
+            <th style="width:13%;">교사(인)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {rows_html}
+    </tbody>
+</table>
+
+<div style="margin-top: 13px;">
+    <div style="text-align:center; font-weight:bold; border:1px solid #000; border-bottom:none; padding:5px 0;">
+        추가 기재 사항
+    </div>
+    <div class="note-box"></div>
+</div>
+
+<div style="margin-top: 10px; font-size: 10.5px; color:#555; text-align:right;">
+    {SCHOOL_NAME} · {SCHOOL_YEAR}학년도 &nbsp;|&nbsp; 생성시각 {datetime.now().strftime('%Y-%m-%d %H:%M')}
+</div>
+
 </body>
-</html>
-"""
+</html>"""
     return html
 
+def build_report_html(norm_date: str) -> str:
+    day = WEEKDAY_KR.get(datetime.strptime(norm_date, "%Y-%m-%d").weekday(), "")
+    a = st.session_state.absences
+    s = st.session_state.subs
+    w = st.session_state.swaps
+    def rows_abs():
+        if a.empty or "일자" not in a.columns:
+            return "<tr><td colspan='6'>없음</td></tr>"
+        sub = a[a["일자"] == norm_date]
+        if sub.empty:
+            return "<tr><td colspan='6'>없음</td></tr>"
+        return "".join(
+            f"<tr><td>{r.get('교사명','')}</td><td>{r.get('사유','')}</td><td>{safe_int(r.get('교시'))}</td>"
+            f"<td>{r.get('학급','')}</td><td>{r.get('과목','')}</td><td>{r.get('상세사유','')}</td></tr>"
+            for _, r in sub.iterrows()
+        )
+    def rows_sub():
+        if s.empty or "일자" not in s.columns:
+            return "<tr><td colspan='7'>없음</td></tr>"
+        sub = s[s["일자"] == norm_date]
+        if sub.empty:
+            return "<tr><td colspan='7'>없음</td></tr>"
+        return "".join(
+            f"<tr><td>{safe_int(r.get('교시'))}</td><td>{r.get('학급','')}</td><td>{r.get('과목','')}</td>"
+            f"<td>{r.get('결강교사','')}</td><td><b>{r.get('보강교사','')}</b></td>"
+            f"<td>{r.get('우선순위','')}</td><td>{r.get('비고','')}</td></tr>"
+            for _, r in sub.iterrows()
+        )
+    def rows_swap():
+        if w.empty:
+            return "<tr><td colspan='4'>없음</td></tr>"
+        mask = (w["원본일자"] == norm_date) | (w["목표일자"] == norm_date)
+        sub = w[mask]
+        if sub.empty:
+            return "<tr><td colspan='4'>없음</td></tr>"
+        return "".join(
+            f"<tr><td>{r.get('교사A','')}</td>"
+            f"<td>[{r.get('원본일자')}] {r.get('요일A')} {safe_int(r.get('교시A'))}교시 ↔ "
+            f"[{r.get('목표일자')}] {r.get('요일B')} {safe_int(r.get('교시B'))}교시</td>"
+            f"<td>{r.get('교사B','')}</td><td>{r.get('유형','')}</td></tr>"
+            for _, r in sub.iterrows()
+        )
+    return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<title>{norm_date} 내역서</title>
+<style>
+body{{font-family:'맑은 고딕',sans-serif;font-size:12px}}
+table{{width:100%;border-collapse:collapse}}
+th,td{{border:1px solid #999;padding:5px;text-align:center}}
+th{{background:#eef1f6}}
+</style></head><body>
+<h1 style="text-align:center">결강·보강 변경 내역서</h1>
+<div style="text-align:center">{SCHOOL_YEAR} · {SCHOOL_NAME} · {norm_date} ({day})</div>
+<h3>1. 결강 현황</h3>
+<table><tr><th>교사</th><th>사유</th><th>교시</th><th>학급</th><th>과목</th><th>상세</th></tr>{rows_abs()}</table>
+<h3>2. 보강 배정</h3>
+<table><tr><th>교시</th><th>학급</th><th>과목</th><th>결강교사</th><th>보강교사</th><th>근거</th><th>비고</th></tr>{rows_sub()}</table>
+<h3>3. 맞교환</h3>
+<table><tr><th>교사A</th><th>내용</th><th>교사B</th><th>유형</th></tr>{rows_swap()}</table>
+</body></html>"""
+
+def to_excel_bytes(sheets: dict) -> bytes:
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        for name, df in sheets.items():
+            (df if isinstance(df, pd.DataFrame) else pd.DataFrame(df)).to_excel(w, sheet_name=name[:31], index=False)
+    return buf.getvalue()
+
 # ==========================================================================================
-# 로그인
+# 로그인 페이지
 # ==========================================================================================
-def login_page():
+def show_login_page():
+    if "login_attempts" not in st.session_state:
+        st.session_state.login_attempts = 0
+    if "login_locked" not in st.session_state:
+        st.session_state.login_locked = False
+
     st.markdown('<div class="login-box">', unsafe_allow_html=True)
-    st.title("서라벌여중 시간표 관리")
-    st.caption("아이디를 입력하세요")
-    user_id = st.text_input("아이디", key="login_id")
-    if st.button("로그인", type="primary", use_container_width=True):
-        ids = load_id_sheet()
-        row = ids[ids["아이디"] == user_id.strip()]
-        if row.empty:
-            st.error("등록되지 않은 아이디입니다.")
-            return
-        st.session_state.user_id = user_id.strip()
-        st.session_state.user_name = str(row.iloc[0]["이름"]).strip()
-        st.session_state.user_role = str(row.iloc[0]["권한"]).strip() or ROLE_TEACHER
-        st.session_state.user_allowed_tabs = str(row.iloc[0].get("허용탭", "")).strip()
-        st.session_state.login_ok = True
-        st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.title(f"📘 {SCHOOL_NAME}")
+    st.subheader("시간표 · 결보강 관리 시스템")
+    st.caption(f"{SCHOOL_YEAR}학년도")
 
-    with st.expander("아이디 추가 요청 (게스트)"):
-        with st.form("guest_req"):
-            name = st.text_input("이름")
-            email = st.text_input("이메일")
-            desired = st.text_input("원하는 아이디")
-            memo = st.text_area("메모")
-            if st.form_submit_button("요청"):
-                if name and email and desired:
-                    save_id_request(name, email, desired, memo)
-                    st.success("요청이 접수되었습니다.")
+    if st.session_state.login_locked:
+        st.error(f"🚫 로그인 시도가 {MAX_LOGIN_ATTEMPTS}회를 초과하여 차단되었습니다.")
+        st.stop()
+
+    id_input = st.text_input("아이디", placeholder="아이디를 입력하세요", key="login_id")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("로그인", type="primary", use_container_width=True):
+            uid = id_input.strip()
+            if not uid:
+                st.error("아이디를 입력해주세요.")
+            else:
+                ids = load_id_sheet()
+                match = ids[ids["아이디"].astype(str).str.strip() == uid]
+                if not match.empty:
+                    st.session_state.login_attempts = 0
+                    row = match.iloc[0]
+                    role = str(row["권한"]).strip() or ROLE_TEACHER
+                    name = str(row.get("이름", "")).strip() or uid
+                    allowed = str(row.get("허용탭", "")).strip()
+                    st.session_state.logged_in = True
+                    st.session_state.user_id = uid
+                    st.session_state.user_name = name
+                    st.session_state.user_role = role
+                    st.session_state.user_allowed_tabs = allowed
+                    st.rerun()
                 else:
-                    st.error("필수 항목을 입력하세요.")
+                    st.session_state.login_attempts += 1
+                    remaining = MAX_LOGIN_ATTEMPTS - st.session_state.login_attempts
+                    if st.session_state.login_attempts >= MAX_LOGIN_ATTEMPTS:
+                        st.session_state.login_locked = True
+                        st.error(f"🚫 로그인 실패 {MAX_LOGIN_ATTEMPTS}회 초과로 차단되었습니다.")
+                        st.rerun()
+                    else:
+                        st.error(f"등록되지 않은 아이디입니다. (남은 시도: {remaining}회)")
+    with col2:
+        if st.button("게스트로 입장", use_container_width=True):
+            st.session_state.logged_in = True
+            st.session_state.user_id = "게스트"
+            st.session_state.user_name = "게스트"
+            st.session_state.user_role = ROLE_GUEST
+            st.session_state.user_allowed_tabs = ""
+            st.session_state.login_attempts = 0
+            st.rerun()
 
-if "login_ok" not in st.session_state:
-    st.session_state.login_ok = False
+    if st.session_state.login_attempts > 0:
+        st.warning(f"현재 로그인 실패 횟수: {st.session_state.login_attempts} / {MAX_LOGIN_ATTEMPTS}")
 
-if not st.session_state.login_ok:
-    login_page()
+    st.divider()
+    st.markdown("#### 📝 아이디 추가 요청 (게스트용)")
+    with st.form("id_request_form"):
+        name = st.text_input("이름 *")
+        email = st.text_input("이메일 *")
+        desired = st.text_input("추가하고 싶은 아이디 *")
+        memo = st.text_area("메모 (요청 사유 등)")
+        submitted = st.form_submit_button("요청 제출", type="primary")
+        if submitted:
+            if not (name and email and desired):
+                st.error("이름, 이메일, 아이디는 필수입니다.")
+            else:
+                save_id_request(name, email, desired, memo)
+                st.success("요청이 정상적으로 접수되었습니다.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ==========================================================================================
+# 앱 시작
+# ==========================================================================================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.user_id = None
+    st.session_state.user_name = ""
+    st.session_state.user_role = ROLE_GUEST
+    st.session_state.user_allowed_tabs = ""
+
+if not st.session_state.logged_in:
+    show_login_page()
     st.stop()
 
 init_state()
@@ -1449,46 +1591,88 @@ init_state()
 # 사이드바
 # ==========================================================================================
 with st.sidebar:
-    st.markdown(f"**{current_name()}** ({current_user()})")
-    st.caption(current_role())
-    if st.button("로그아웃"):
+    st.markdown(f"**아이디** : `{current_user()}`")
+    st.markdown(f"**이름** : `{current_name()}`")
+    st.markdown(f"**권한** : `{current_role()}`")
+    if st.button("로그아웃", use_container_width=True):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.rerun()
 
     st.divider()
-    if st.button("↩ 실행 취소 (Undo)"):
-        if undo():
-            st.success("취소됨")
-            st.rerun()
-        else:
-            st.info("더 이상 취소할 작업이 없습니다.")
-    if st.button("↪ 다시 실행 (Redo)"):
-        if redo():
-            st.success("다시 실행됨")
-            st.rerun()
-        else:
-            st.info("더 이상 다시 실행할 작업이 없습니다.")
 
-    st.divider()
-    st.markdown("### 📄 결보강 계획서 (본인용)")
-    my_date = st.date_input("본인 계획서 일자", value=date.today(), key="my_report_d")
-    if st.button("본인 결보강 계획서 HTML 다운로드", use_container_width=True):
-        html = build_personal_report_html(current_name() or current_user(), my_date.strftime("%Y-%m-%d"))
-        st.download_button("HTML 다운로드", html.encode("utf-8"), f"결보강계획서_{current_name()}_{my_date}.html", "text/html")
-        st.info("이 HTML을 브라우저에서 열고 Ctrl+P → PDF로 저장하시면 양식과 거의 동일한 PDF가 생성됩니다.")
+    if current_role() != ROLE_GUEST:
+        st.header("데이터")
+        if can_full_data() or is_teacher():
+            if st.button("🔄 원본 시간표 다시 불러오기", use_container_width=True):
+                load_timetable_from_gsheet.clear()
+                ti, tt = load_timetable_from_gsheet()
+                st.session_state.teachers = ti
+                st.session_state.timetable = tt
+                _invalidate_all_caches()
+                st.rerun()
+            if st.button("🔄 작업 내역 다시 불러오기", use_container_width=True):
+                load_work_data_from_gsheet.clear()
+                absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
+                st.session_state.absences = ensure_input_user(absences)
+                st.session_state.subs = ensure_input_user(subs)
+                st.session_state.swaps = ensure_input_user(swaps)
+                st.session_state.part_time = ensure_part_time_columns(part_time)
+                st.session_state.duties = ensure_duty_columns(duties)
+                _invalidate_all_caches()
+                st.rerun()
+            if st.button("💾 현재 작업 저장", use_container_width=True, type="primary"):
+                if save_work_data_to_gsheet():
+                    st.success("저장 완료")
 
-    if is_edu_or_master():
-        rd = st.date_input("전체 내역서 일자", value=date.today(), key="sidebar_rd")
-        if st.button("📊 전체 일일 내역서", use_container_width=True):
-            html = build_report_html(rd.strftime("%Y-%m-%d"))
-            st.download_button("HTML 다운로드 (전체)", html.encode("utf-8"), f"내역서_{rd}.html", "text/html")
-            xls = to_excel_bytes({
-                "결강": st.session_state.absences[st.session_state.absences["일자"] == rd.strftime("%Y-%m-%d")] if not st.session_state.absences.empty else pd.DataFrame(),
-                "보강": st.session_state.subs[st.session_state.subs["일자"] == rd.strftime("%Y-%m-%d")] if not st.session_state.subs.empty else pd.DataFrame(),
-                "맞교환": st.session_state.swaps
-            })
-            st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx")
+        st.divider()
+        c1, c2 = st.columns(2)
+        if c1.button("↩ Undo", use_container_width=True):
+            if undo():
+                save_work_data_to_gsheet()
+                st.rerun()
+        if c2.button("↪ Redo", use_container_width=True):
+            if redo():
+                save_work_data_to_gsheet()
+                st.rerun()
+
+        st.divider()
+        st.metric("등록 교사", len(st.session_state.teachers))
+        st.metric("누적 보강", len(st.session_state.subs))
+
+        if is_edu_or_master():
+            try:
+                curr_budget = get_current_budget()
+                st.metric("보강비 잔액", f"{curr_budget:,.0f}원")
+            except Exception:
+                pass
+
+        st.divider()
+        st.subheader("📄 내역서 / 계획서 출력")
+
+        plan_date = st.date_input("계획서 기준일", value=date.today(), key="plan_date")
+        if st.button("📋 결보강 계획서 (본인용)", use_container_width=True, type="primary"):
+            html = build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
+            st.download_button(
+                "HTML 다운로드 (인쇄 → PDF로 저장 추천)",
+                html.encode("utf-8"),
+                f"결보강계획서_{current_name()}_{plan_date}.html",
+                "text/html",
+                key="dl_personal"
+            )
+            st.info("다운로드한 HTML을 브라우저에서 열고 Ctrl+P → PDF로 저장하시면 양식과 거의 동일한 PDF가 생성됩니다.")
+
+        if is_edu_or_master():
+            rd = st.date_input("전체 내역서 일자", value=date.today(), key="sidebar_rd")
+            if st.button("📊 전체 일일 내역서", use_container_width=True):
+                html = build_report_html(rd.strftime("%Y-%m-%d"))
+                st.download_button("HTML 다운로드 (전체)", html.encode("utf-8"), f"내역서_{rd}.html", "text/html")
+                xls = to_excel_bytes({
+                    "결강": st.session_state.absences[st.session_state.absences["일자"] == rd.strftime("%Y-%m-%d")] if not st.session_state.absences.empty else pd.DataFrame(),
+                    "보강": st.session_state.subs[st.session_state.subs["일자"] == rd.strftime("%Y-%m-%d")] if not st.session_state.subs.empty else pd.DataFrame(),
+                    "맞교환": st.session_state.swaps
+                })
+                st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx")
 
 if current_role() == ROLE_GUEST:
     st.title("게스트 모드")
@@ -1673,7 +1857,6 @@ if "결강·보강" in tab_map:
                                     pr = cand.loc[cand["보강교사"] == pick, "우선순위"].iloc[0]
                                     add_substitute(cid, head["일자"], head["요일"], p, r.학급, r.과목, head["교사명"], pick, "수동", pr, "")
                                     st.rerun()
-
 # ------------------------------------------------------------------ 시간표 맞교환
 if "시간표 맞교환 & 변경 추천" in tab_map:
     with tab_map["시간표 맞교환 & 변경 추천"]:
@@ -1740,6 +1923,7 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
 
         show_swaps = filter_by_owner(st.session_state.swaps)
         st.dataframe(show_swaps, use_container_width=True, hide_index=True)
+
 
 # ------------------------------------------------------------------ 통계
 if "통계" in tab_map:
@@ -1829,6 +2013,7 @@ if "시간표 변경 테스트용" in tab_map:
                                 apply_cycle_swaps(cyc["moves"], is_test=True)
                                 st.success(f"테스트 {cyc['length']}인 순환이 적용되었습니다. (저장 안 됨)")
                                 st.rerun()
+
 
         st.markdown("#### 테스트 적용 후 주간표 미리보기")
         t_preview = st.selectbox("미리볼 교사", tlist, key="test_preview_t")
