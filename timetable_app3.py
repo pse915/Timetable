@@ -2202,11 +2202,10 @@ if "시간표 변경 테스트용" in tab_map:
         st.subheader("🧪 시간표 변경 테스트용 (저장 안 됨 · 샌드박스)")
         st.info("연계공강(순환) 시 **수업계 선생님에게 연락해주세요**")
 
-if st.button("🔄 테스트 상태 초기화", type="secondary"):
-    st.session_state.test_swaps = pd.DataFrame()
-    st.session_state["test_has_cycle"] = False         # ← 추가
-    st.success("테스트 상태가 초기화되었습니다.")
-    st.rerun()
+        if st.button("🔄 테스트 상태 초기화", type="secondary"):
+            st.session_state.test_swaps = pd.DataFrame()
+            st.success("테스트 상태가 초기화되었습니다.")
+            st.rerun()
 
         col_a, col_b = st.columns(2)
         tlist = st.session_state.teachers["교사명"].tolist()
@@ -2249,12 +2248,10 @@ if st.button("🔄 테스트 상태 초기화", type="secondary"):
                     for idx, row in df_swap.iterrows():
                         mark = "🏆 동일학급" if row.get("same_class") else ("⚠ 같은학년" if row.get("same_grade") else "⚠ 다른학년")
                         with st.expander(f"{mark} {row['교사B']} ({row['현재 수업']})", expanded=(idx==0)):
-                          if st.button(f"[테스트] 이 순환 적용", key=f"test_cyc_{idx}"):
-    apply_cycle_swaps(cyc["moves"], is_test=True)
-    st.session_state["test_has_cycle"] = True          # ← 추가
-    st.success(f"테스트 {cyc['length']}인 순환이 적용되었습니다. (저장 안 됨)")
-    st.rerun()
-    
+                            if st.button(f"[테스트] {row['교사B']}와 맞교환", key=f"test_sw_{idx}"):
+                                do_swap(pick_a, row["b_info"], date_a_str, date_b_str, is_test=True)
+                                st.success("테스트 맞교환이 적용되었습니다. (저장 안 됨)")
+                                st.rerun()
             with t2:
                 st.caption(cycle_msg)
                 if not cycles:
@@ -2280,28 +2277,23 @@ if st.button("🔄 테스트 상태 초기화", type="secondary"):
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
             st.dataframe(st.session_state.test_swaps, use_container_width=True, hide_index=True)
 
-           col_btn1, col_btn2 = st.columns(2)
-with col_btn1:
-    # 연계 순환이 포함되어 있으면 안내문만 표시
-    if st.session_state.get("test_has_cycle", False):
-        st.warning("연계 순환 교환은 교육과정부로 문의 바랍니다")
-    else:
-        if st.button("현재 테스트 중인 맞교환 목록 결보강 계획서 출력하기", type="primary", key="test_report_btn"):
-            html = build_test_swaps_report_html(st.session_state.test_swaps)
-            st.download_button(
-                "HTML 다운로드 (테스트 결보강 계획서)",
-                html.encode("utf-8"),
-                f"테스트_결보강계획서_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
-                "text/html",
-                key="test_html_dl"
-            )
-            st.info("이 HTML을 브라우저에서 열고 Ctrl+P → PDF로 저장하시면 양식과 거의 동일한 PDF가 생성됩니다.")
-with col_btn2:
-    if st.button("현재 테스트 중인 맞교환 목록 전체 삭제하기", key="test_clear_btn"):
-        st.session_state.test_swaps = pd.DataFrame()
-        st.session_state["test_has_cycle"] = False     # ← 추가
-        st.success("테스트 중인 맞교환 목록이 전체 삭제되었습니다.")
-        st.rerun()
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("현재 테스트 중인 맞교환 목록 결보강 계획서 출력하기", type="primary", key="test_report_btn"):
+                    html = build_test_swaps_report_html(st.session_state.test_swaps)
+                    st.download_button(
+                        "HTML 다운로드 (테스트 결보강 계획서)",
+                        html.encode("utf-8"),
+                        f"테스트_결보강계획서_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                        "text/html",
+                        key="test_html_dl"
+                    )
+                    st.info("이 HTML을 브라우저에서 열고 Ctrl+P → PDF로 저장하시면 양식과 거의 동일한 PDF가 생성됩니다.")
+            with col_btn2:
+                if st.button("현재 테스트 중인 맞교환 목록 전체 삭제하기", key="test_clear_btn"):
+                    st.session_state.test_swaps = pd.DataFrame()
+                    st.success("테스트 중인 맞교환 목록이 전체 삭제되었습니다.")
+                    st.rerun()
 
 # ------------------------------------------------------------------ 변경된 교사 주간표
 if "변경된 교사 주간표" in tab_map:
