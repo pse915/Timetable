@@ -2257,13 +2257,13 @@ if "📋 복무 관리 & 판단" in tab_map:
                                     if st.button("연계 교환 실행", key=f"lnk_{p}_{i}"):
                                         a_info = {"교사명": t_name, "일자": d_str, "요일": day_kr, "교시": p,
                                                   "학급": data["my_class"], "과목": data["my_subject"]}
-                                             do_linked_swap(a_info, c["teacher"], d_str, c["date"], c["day"], c["period"])
+                                        do_linked_swap(a_info, c["teacher"], d_str, c["date"], c["day"], c["period"])
                                         st.success("연계 교환 등록 완료!")
                                         st.session_state.pop("_duty_search_cache", None)
                                         st.rerun()
                 else:
                     st.info("위에서 **검색 실행** 버튼을 눌러주세요.")
-
+                    
 # ------------------------------------------------------------------ 다중 출장·전체 조정 추천
 if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
     with tab_map["🛠️ 다중 출장·전체 조정 추천"]:
