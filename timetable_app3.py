@@ -60,6 +60,8 @@ SUBJECT_GROUP = {
 }
 
 ROLE_MASTER = "마스터"
+
+
 ROLE_EDU = "교육과정부"
 ROLE_TEACHER = "일반교사"
 ROLE_GUEST = "게스트"
@@ -1490,7 +1492,7 @@ def build_test_swaps_report_html(test_swaps: pd.DataFrame) -> str:
 
         page_html = f"""
 <div class="page">
-    <div class="title">결 · 보 강  계 획 (테스트)</div>
+    <div class="title">결 · 보 강  계 획 </div>
 
     <table class="top-right">
         <tr>
@@ -1512,7 +1514,7 @@ def build_test_swaps_report_html(test_swaps: pd.DataFrame) -> str:
             <td style="width: 68px; background:#f0f0f0; font-weight:bold;">해당<br>일자</td>
             <td style="text-align:left; padding-left:10px;">
                 {date_display}<br>
-                <span style="display:inline-block; margin-top:2px;">사유 : 테스트 맞교환</span>
+                <span style="display:inline-block; margin-top:2px;">사유 : </span>
             </td>
         </tr>
     </table>
@@ -1558,7 +1560,7 @@ def build_test_swaps_report_html(test_swaps: pd.DataFrame) -> str:
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>테스트 결보강 계획서</title>
+<title> 결보강 계획서</title>
 <style>
     @page {{ size: A4; margin: 12mm 14mm; }}
     * {{ box-sizing: border-box; }}
