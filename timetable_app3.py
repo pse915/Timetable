@@ -1429,11 +1429,11 @@ def build_personal_plan_html(teacher_name: str, on_date: str) -> str:
     return html
 
 def build_test_swaps_report_html(test_swaps: pd.DataFrame) -> str:
-    """테스트용 맞교환 목록을 받아, 로그인한 본인 기준으로만 결보강 계획서를 생성"""
+    """테스트용 맞교환 목록을 받아, 로그인한 본인 기준으로 결보강 계획서를 단 1페이지만 생성"""
     if test_swaps.empty:
         return "<html><body><p>테스트 중인 맞교환 내역이 없습니다.</p></body></html>"
 
-    # ===== 핵심 수정 1: 로그인 한 본인 이름만 사용 =====
+    # 로그인 한 본인 이름
     my_name = current_name().strip()
     if not my_name:
         my_name = current_user()
@@ -1446,122 +1446,72 @@ def build_test_swaps_report_html(test_swaps: pd.DataFrame) -> str:
     if my_swaps.empty:
         return f"<html><body><p>{my_name} 선생님의 테스트 맞교환 내역이 없습니다.</p></body></html>"
 
-    # 본인 + 관련 일자만 수집
-    pairs = set()
+    # ===== 핵심: 원본일자 중 가장 빠른 날짜 하나만 사용 (무조건 1페이지) =====
+    origin_dates = []
     for _, r in my_swaps.iterrows():
-        da = str(r.get("원본일자", ""))
-        db = str(r.get("목표일자", ""))
-        if da:
-            pairs.add((my_name, da))
-        if db:
-            pairs.add((my_name, db))
+        da = str(r.get("원본일자", "")).strip()
+        if da and str(r.get("교사A", "")).strip() == my_name:
+            origin_dates.append(da)
 
-    pages = []
-    for teacher_name, on_date in sorted(pairs):
-        try:
-            dt = datetime.strptime(on_date, "%Y-%m-%d")
-            day_kr = WEEKDAY_KR[dt.weekday()]
-            date_display = f"{dt.year}년 {dt.month}월 {dt.day}일 ({day_kr})"
-        except Exception:
-            date_display = on_date
-            day_kr = ""
+    if not origin_dates:
+        # 혹시 교사A가 아닌 경우 대비
+        for _, r in my_swaps.iterrows():
+            da = str(r.get("원본일자", "")).strip()
+            if da:
+                origin_dates.append(da)
 
-        subject_dept = get_teacher_subject(teacher_name)
-        dept_line = f"{subject_dept} 과" if subject_dept else "과"
+    if not origin_dates:
+        return f"<html><body><p>{my_name} 선생님의 결강 대상 일자가 없습니다.</p></body></html>"
 
-        # 해당 일자에 본인이 관련된 교환만
-        day_swaps = my_swaps[
-            (my_swaps["원본일자"] == on_date) | (my_swaps["목표일자"] == on_date)
-        ].copy()
+    # 날짜 정렬 후 가장 빠른 날짜 하나만 선택
+    on_date = sorted(set(origin_dates))[0]
+    teacher_name = my_name
 
-        # ===== 핵심 수정 2: 결강수업(원본) + 교체수업 정보를 제대로 채움 =====
-        absence_list = []   # 결강수업 (왼쪽)
-        swap_list = []      # 교체수업 (오른쪽)
+    try:
+        dt = datetime.strptime(on_date, "%Y-%m-%d")
+        day_kr = WEEKDAY_KR[dt.weekday()]
+        date_display = f"{dt.year}년 {dt.month}월 {dt.day}일 ({day_kr})"
+    except Exception:
+        date_display = on_date
+        day_kr = ""
 
-        for _, r in day_swaps.iterrows():
-            is_A = str(r.get("교사A", "")) == teacher_name
-            is_B = str(r.get("교사B", "")) == teacher_name
+    subject_dept = get_teacher_subject(teacher_name)
+    dept_line = f"{subject_dept} 과" if subject_dept else "과"
 
-            if is_A and str(r.get("원본일자", "")) == on_date:
-                # 내가 A이고 오늘이 원본일자 → 내 원본 수업이 결강
-                absence_list.append({
-                    "월일": on_date[5:].replace("-", "/") if len(on_date) >= 10 else on_date,
-                    "교시": safe_int(r.get("교시A", 0)),
-                    "학년반": str(r.get("학급A", "")),
-                    "과목": str(r.get("과목A", "")),
-                    "보강교사": ""          # 1:1 교환이므로 보강교사 칸은 비움
-                })
-                # 상대방 수업이 교체수업
-                target_date = str(r.get("목표일자", ""))
-                swap_list.append({
-                    "월일": target_date[5:].replace("-", "/") if len(target_date) >= 10 else target_date,
-                    "교시": safe_int(r.get("교시B", 0)),
-                    "과목": str(r.get("과목B", "")),
-                    "교사": str(r.get("교사B", ""))
-                })
+    # 해당 원본일자 교환만
+    day_swaps = my_swaps[my_swaps["원본일자"] == on_date].copy()
 
-            elif is_B and str(r.get("목표일자", "")) == on_date:
-                # 내가 B이고 오늘이 목표일자 → 상대(A)의 원본이 내 결강으로 보임
-                absence_list.append({
-                    "월일": on_date[5:].replace("-", "/") if len(on_date) >= 10 else on_date,
-                    "교시": safe_int(r.get("교시B", 0)),
-                    "학년반": str(r.get("학급B", "")),
-                    "과목": str(r.get("과목B", "")),
-                    "보강교사": ""
-                })
-                origin_date = str(r.get("원본일자", ""))
-                swap_list.append({
-                    "월일": origin_date[5:].replace("-", "/") if len(origin_date) >= 10 else origin_date,
-                    "교시": safe_int(r.get("교시A", 0)),
-                    "과목": str(r.get("과목A", "")),
-                    "교사": str(r.get("교사A", ""))
-                })
+    absence_list = []
+    swap_list = []
 
-            elif is_A and str(r.get("목표일자", "")) == on_date:
-                # 내가 A인데 오늘이 목표일자인 경우 (상대 입장)
-                absence_list.append({
-                    "월일": on_date[5:].replace("-", "/") if len(on_date) >= 10 else on_date,
-                    "교시": safe_int(r.get("교시B", 0)),
-                    "학년반": str(r.get("학급B", "")),
-                    "과목": str(r.get("과목B", "")),
-                    "보강교사": ""
-                })
-                origin_date = str(r.get("원본일자", ""))
-                swap_list.append({
-                    "월일": origin_date[5:].replace("-", "/") if len(origin_date) >= 10 else origin_date,
-                    "교시": safe_int(r.get("교시A", 0)),
-                    "과목": str(r.get("과목A", "")),
-                    "교사": str(r.get("교사A", ""))
-                })
+    for _, r in day_swaps.iterrows():
+        if str(r.get("교사A", "")) == teacher_name:
+            absence_list.append({
+                "월일": on_date[5:].replace("-", "/") if len(on_date) >= 10 else on_date,
+                "교시": safe_int(r.get("교시A", 0)),
+                "학년반": str(r.get("학급A", "")),
+                "과목": str(r.get("과목A", "")),
+                "보강교사": ""
+            })
+            target_date = str(r.get("목표일자", ""))
+            swap_list.append({
+                "월일": target_date[5:].replace("-", "/") if len(target_date) >= 10 else target_date,
+                "교시": safe_int(r.get("교시B", 0)),
+                "과목": str(r.get("과목B", "")),
+                "교사": str(r.get("교사B", ""))
+            })
 
-            elif is_B and str(r.get("원본일자", "")) == on_date:
-                # 내가 B이고 오늘이 원본일자
-                absence_list.append({
-                    "월일": on_date[5:].replace("-", "/") if len(on_date) >= 10 else on_date,
-                    "교시": safe_int(r.get("교시A", 0)),
-                    "학년반": str(r.get("학급A", "")),
-                    "과목": str(r.get("과목A", "")),
-                    "보강교사": ""
-                })
-                target_date = str(r.get("목표일자", ""))
-                swap_list.append({
-                    "월일": target_date[5:].replace("-", "/") if len(target_date) >= 10 else target_date,
-                    "교시": safe_int(r.get("교시B", 0)),
-                    "과목": str(r.get("과목B", "")),
-                    "교사": str(r.get("교사B", ""))
-                })
-
-        # 행 생성 (최대 6행)
-        rows_html = ""
-        max_rows = 6
-        for i in range(max_rows):
-            a = absence_list[i] if i < len(absence_list) else {
-                "월일": "", "교시": "", "학년반": "", "과목": "", "보강교사": ""
-            }
-            s = swap_list[i] if i < len(swap_list) else {
-                "월일": "", "교시": "", "과목": "", "교사": ""
-            }
-            rows_html += f"""
+    # 행 생성
+    rows_html = ""
+    max_rows = 6
+    for i in range(max_rows):
+        a = absence_list[i] if i < len(absence_list) else {
+            "월일": "", "교시": "", "학년반": "", "과목": "", "보강교사": ""
+        }
+        s = swap_list[i] if i < len(swap_list) else {
+            "월일": "", "교시": "", "과목": "", "교사": ""
+        }
+        rows_html += f"""
         <tr>
             <td style="height:29px;">{a['월일']}</td>
             <td>{a['교시']}</td>
@@ -1574,7 +1524,7 @@ def build_test_swaps_report_html(test_swaps: pd.DataFrame) -> str:
             <td>{s['교사']}</td>
         </tr>"""
 
-        page_html = f"""
+    page_html = f"""
 <div class="page">
     <div class="title">결 · 보 강  계 획 </div>
 
@@ -1638,8 +1588,8 @@ def build_test_swaps_report_html(test_swaps: pd.DataFrame) -> str:
         {SCHOOL_NAME} · {SCHOOL_YEAR}학년도 &nbsp;|&nbsp; 생성시각 {datetime.now().strftime('%Y-%m-%d %H:%M')}
     </div>
 </div>"""
-        pages.append(page_html)
 
+    # 페이지를 하나만 넣음
     html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -1722,7 +1672,7 @@ def build_test_swaps_report_html(test_swaps: pd.DataFrame) -> str:
 </style>
 </head>
 <body>
-{''.join(pages)}
+{page_html}
 </body>
 </html>"""
     return html
