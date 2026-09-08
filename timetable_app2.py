@@ -1764,6 +1764,12 @@ def show_login_page():
         st.session_state.login_locked = False
 
     st.markdown('<div class="login-box">', unsafe_allow_html=True)
+
+    # ===== 구글 드라이브 이미지 =====
+    IMAGE_URL = "https://drive.google.com/uc?export=view&id=19NFmq5vzkAyhYBW9h-l7sHcbnp6r0qSj"
+    st.image(IMAGE_URL, use_container_width=True)
+    # ==============================
+
     st.title(f"📘 {SCHOOL_NAME}")
     st.subheader("시간표 · 결보강 관리 시스템")
     st.caption(f"{SCHOOL_YEAR}학년도")
