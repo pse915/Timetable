@@ -2796,4 +2796,4 @@ if "📑 회원별 탭 권한 관리" in tab_map:
                     st.success("모든 탭 차단됨")
                     st.rerun()
 
-st.caption(f"서라벌여중 시간표 관리 시스템20260908v1.0.0.1 · {current_name()} ({current_user()}) · {current_role()}")
+st.caption(f"서라벌여중 시간표 관리 시스템20260908v1.0.0.9 · {current_name()} ({current_user()}) · {current_role()}")
