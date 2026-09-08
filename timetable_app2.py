@@ -1765,10 +1765,17 @@ def show_login_page():
 
     st.markdown('<div class="login-box">', unsafe_allow_html=True)
 
-    # ===== 구글 드라이브 이미지 =====
+    # ===== 구글 드라이브 이미지 (수정된 부분) =====
     IMAGE_URL = "https://i.imgur.com/Gl0YDO3.jpeg"
-    st.image(IMAGE_URL, use_container_width=True)
-    # ==============================
+    st.markdown(
+        f"""
+        <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;">
+            <img src="{IMAGE_URL}" width="150" style="object-fit: contain;">
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+    # ============================================
 
     st.title(f"📘 {SCHOOL_NAME}")
     st.subheader("시간표 · 결보강 관리 시스템")
