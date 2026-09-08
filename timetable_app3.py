@@ -44,7 +44,7 @@ WEEKDAY_KR = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "�
 TIMETABLE_SHEET_ID = "1jZhTHyJ8vKXn6tkoFXfY_f52-pj6eQTdVvRCo3cCmBA"
 WORK_SHEET_ID = "1g1B1cyZG_tfRn3AD1NZzr30YxYNYFewJeZYdos2obpU"
 
-MAX_HISTORY = 6
+MAX_HISTORY = 5
 ABSENCE_REASONS = ["병가", "연가", "출장", "공가", "조퇴", "외출", "연수", "특별휴가", "기타"]
 MAX_LOGIN_ATTEMPTS = 5
 SUB_COST = 10000
@@ -897,7 +897,7 @@ def apply_cycle_swaps(moves, is_test=False):
 # ★★★ 연계 공강 순환 알고리즘 (속도 최적화 + 과목 정확 기록)
 # ==========================================================================================
 def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
-                           date_b_str, period_b, max_cycle=4, future_days=7, version=0):
+                           date_b_str, period_b, max_cycle=3, future_days=7, version=0):
     """학급 시수·담당·과목 완전 보존 2~4인 순환. 속도 최적화됨."""
     original_slot = (normalize_date_str(date_a_str), safe_int(period_a))
     target_slot = (normalize_date_str(date_b_str), safe_int(period_b))
