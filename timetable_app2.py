@@ -1763,9 +1763,7 @@ def show_login_page():
     if "login_locked" not in st.session_state:
         st.session_state.login_locked = False
 
-    st.markdown('<div class="login-box">', unsafe_allow_html=True)
-
-    # ===== 구글 드라이브 이미지 (수정된 부분) =====
+    # ===== 구글 드라이브 이미지 =====
     IMAGE_URL = "https://i.imgur.com/Gl0YDO3.jpeg"
     st.markdown(
         f"""
@@ -1775,7 +1773,7 @@ def show_login_page():
         """, 
         unsafe_allow_html=True
     )
-    # ============================================
+    # ==============================
 
     st.title(f"📘 {SCHOOL_NAME}")
     st.subheader("시간표 · 결보강 관리 시스템")
@@ -1843,7 +1841,6 @@ def show_login_page():
             else:
                 save_id_request(name, email, desired, memo)
                 st.success("요청이 정상적으로 접수되었습니다.")
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================================================================
 # 앱 시작
