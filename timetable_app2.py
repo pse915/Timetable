@@ -1766,7 +1766,7 @@ def show_login_page():
     st.markdown('<div class="login-box">', unsafe_allow_html=True)
 
     # ===== 구글 드라이브 이미지 =====
-    IMAGE_URL = "https://drive.google.com/file/d/19NFmq5vzkAyhYBW9h-l7sHcbnp6r0qSj"
+    IMAGE_URL = "https://i.imgur.com/Gl0YDO3.jpeg"
     st.image(IMAGE_URL, use_container_width=True)
     # ==============================
 
