@@ -438,6 +438,9 @@ def _invalidate_all_caches():
     class_matrix.clear()
     cumulative_sub_count.clear()
     weekly_load.clear()
+    duty_index.clear()
+    effective_groups_grades.clear()
+    lessons_by_teacher_period.clear()
     load_budget_df.clear()
     load_swap_requests.clear()
 
@@ -691,6 +694,15 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
         df = pd.DataFrame(columns=["교사명", "요일", "교시", "과목", "학급", "과목군", "원본교사"])
     return df
 
+def _build_busy_index(e_tt: pd.DataFrame) -> dict:
+    """교사별 사용중 교시 집합을 한 번에 만들어 반복 스캔을 제거 (속도 최적화)."""
+    idx = defaultdict(set)
+    if e_tt is None or e_tt.empty:
+        return idx
+    for t, p in zip(e_tt["교사명"], e_tt["교시"]):
+        idx[str(t).strip()].add(safe_int(p))
+    return idx
+
 def get_swap_origin_info(teacher: str, on_date: str, period: int) -> str:
     norm_date = normalize_date_str(on_date)
     if not norm_date:
@@ -709,29 +721,39 @@ def get_swap_origin_info(teacher: str, on_date: str, period: int) -> str:
         return f"{row.get('요일B','')}{safe_int(row.get('교시B',0))}({row.get('교사A','')})"
     return ""
 
-def has_duty(teacher: str, on_date: str, period: int = None) -> bool:
+@st.cache_data(show_spinner=False)
+def duty_index(version: int = 0) -> dict:
+    """(교사, 일자) -> 사용중 교시 집합. has_duty를 매번 전체 스캔하던 것을 O(1) 조회로 개선."""
     duties = st.session_state.duties
+    idx = defaultdict(set)
     if duties.empty:
-        return False
+        return idx
+    for r in duties.itertuples(index=False):
+        t = str(r.교사명).strip()
+        d = normalize_date_str(r.일자)
+        idx[(t, d)].add(safe_int(r.교시))
+    return idx
+
+def has_duty(teacher: str, on_date: str, period: int = None) -> bool:
     norm = normalize_date_str(on_date)
-    mask = (duties["교사명"] == teacher) & (duties["일자"] == norm)
-    if not mask.any():
+    idx = duty_index(st.session_state.get("_data_version", 0))
+    periods = idx.get((teacher, norm))
+    if not periods:
         return False
     if period is None:
         return True
-    periods = duties.loc[mask, "교시"].tolist()
     return 0 in periods or safe_int(period) in periods
 
-def is_free(teacher: str, day: str, period: int, on_date: str = None, e_tt=None) -> bool:
+def is_free(teacher: str, day: str, period: int, on_date: str = None, e_tt=None, busy_idx=None) -> bool:
     p = safe_int(period)
     norm = normalize_date_str(on_date)
     if has_duty(teacher, norm, p):
         return False
-    if e_tt is None:
-        e_tt = get_effective_timetable_for_date(norm, st.session_state.get("_data_version", 0))
-    if not e_tt.empty and ((e_tt["교사명"] == teacher) & (e_tt["교시"] == p)).any():
-        return False
-    return True
+    if busy_idx is None:
+        if e_tt is None:
+            e_tt = get_effective_timetable_for_date(norm, st.session_state.get("_data_version", 0))
+        busy_idx = _build_busy_index(e_tt)
+    return p not in busy_idx.get(teacher, set())
 
 @st.cache_data(show_spinner=False)
 def cumulative_sub_count(start_date=None, end_date=None, version=0):
@@ -752,6 +774,28 @@ def weekly_load(version=0):
     tt = st.session_state.timetable
     return tt["교사명"].value_counts().to_dict() if not tt.empty else {}
 
+@st.cache_data(show_spinner=False)
+def effective_groups_grades(on_date: str, version: int = 0) -> dict:
+    """교사별 (담당 과목군 집합, 담당 학년 집합)을 한 번에 계산 (교사 수 x 전체스캔 반복 제거)."""
+    e_tt = get_effective_timetable_for_date(on_date, version)
+    idx = {}
+    if not e_tt.empty:
+        for t, sub in e_tt.groupby("교사명"):
+            idx[str(t).strip()] = (set(sub["과목군"]), {grade_of(c) for c in sub["학급"]})
+    return idx
+
+@st.cache_data(show_spinner=False)
+def lessons_by_teacher_period(on_date: str, version: int = 0) -> dict:
+    """(교사, 교시) -> [해당 슬롯 수업 dict, ...]. 매 반복마다 전체 시간표를 필터링하지 않도록 인덱싱."""
+    e_tt = get_effective_timetable_for_date(on_date, version)
+    idx = defaultdict(list)
+    if not e_tt.empty:
+        for r in e_tt.itertuples(index=False):
+            idx[(str(r.교사명).strip(), safe_int(r.교시))].append({
+                "학급": r.학급, "과목": r.과목, "과목군": getattr(r, "과목군", "")
+            })
+    return idx
+
 def recommend_substitutes(day, period, subject, class_name, absent_teacher, on_date, top_n=20, include_part_time=False, e_tt=None):
     """해당 시간대에 비어있는 모든 교사를 검색 (우선순위 유지)"""
     teachers = st.session_state.teachers
@@ -762,18 +806,19 @@ def recommend_substitutes(day, period, subject, class_name, absent_teacher, on_d
         e_tt = get_effective_timetable_for_date(norm, st.session_state.get("_data_version", 0))
     grp = subject_group(subject)
     grade = grade_of(class_name)
-    cum = cumulative_sub_count(version=st.session_state.get("_data_version", 0))
-    load = weekly_load(version=st.session_state.get("_data_version", 0))
+    ver = st.session_state.get("_data_version", 0)
+    cum = cumulative_sub_count(version=ver)
+    load = weekly_load(version=ver)
     max_cum = max(cum.values()) if cum else 0
 
+    busy_idx = _build_busy_index(e_tt)
+    gg = effective_groups_grades(norm, ver)
     free = [t for t in teachers["교사명"].tolist()
-            if t != absent_teacher and not has_duty(t, norm) and is_free(t, day, period, norm, e_tt)]
+            if t != absent_teacher and is_free(t, day, period, norm, busy_idx=busy_idx)]
 
     rows = []
     for t in free:
-        my = e_tt[e_tt["교사명"] == t] if not e_tt.empty else pd.DataFrame()
-        my_groups = set(my["과목군"]) if not my.empty else set()
-        my_grades = {grade_of(c) for c in my["학급"]} if not my.empty else set()
+        my_groups, my_grades = gg.get(t, (set(), set()))
 
         if grp in my_groups and grade in my_grades:
             prio, label, score = 1, "1순위 · 동일 과목 & 동일 학년", 100
@@ -919,6 +964,7 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
     candidates = sorted(set(candidates))
 
     e_cache = {d: get_effective_timetable_for_date(d, version) for d in candidates}
+    busy_cache = {d: _build_busy_index(e_cache[d]) for d in candidates}
 
     class_slots = {}
     for d in candidates:
@@ -939,10 +985,12 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
         return [], "목표 슬롯에 학급 수업 없음 (공강 생성 금지)"
 
     day_b = WEEKDAY_KR[datetime.strptime(date_b_str, "%Y-%m-%d").weekday()]
-    if not is_free(teacher_a, day_b, period_b, date_b_str, e_cache.get(date_b_str)):
+    if not is_free(teacher_a, day_b, period_b, date_b_str, busy_idx=busy_cache.get(date_b_str)):
         return [], "교사A 목표시간 수업 있음"
 
     slots_list = list(class_slots.keys())
+    # 날짜별 요일을 미리 계산해 두어 반복적인 strptime 호출을 제거
+    day_of = {d: WEEKDAY_KR[datetime.strptime(d, "%Y-%m-%d").weekday()] for d in candidates}
     free_moves = defaultdict(list)
     for from_s, info in class_slots.items():
         t = info["teacher"]
@@ -950,8 +998,8 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
             if to_s == from_s:
                 continue
             to_date, to_p = to_s
-            to_day = WEEKDAY_KR[datetime.strptime(to_date, "%Y-%m-%d").weekday()]
-            if is_free(t, to_day, to_p, to_date, e_cache.get(to_date)):
+            to_day = day_of.get(to_date) or WEEKDAY_KR[datetime.strptime(to_date, "%Y-%m-%d").weekday()]
+            if is_free(t, to_day, to_p, to_date, busy_idx=busy_cache.get(to_date)):
                 free_moves[from_s].append(to_s)
 
     cycles = []
@@ -1022,37 +1070,46 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
     cum = cumulative_sub_count(version=ver)
     swap_recs = []
 
-    for t_b in ti["교사명"].tolist():
-        if t_b == teacher_a or has_duty(t_b, norm_b):
-            continue
-        b_lessons = e_b[(e_b["교사명"] == t_b) & (e_b["교시"] == p_b)] if not e_b.empty else pd.DataFrame()
-        if not b_lessons.empty:
-            for _, b_row in b_lessons.iterrows():
-                if is_free(teacher_a, day_b, p_b, norm_b, e_b) and is_free(t_b, day_a, p_a, norm_a, e_a):
-                    other_class = b_row["학급"]
-                    other_grade = grade_of(other_class)
-                    other_group = subject_group(b_row["과목"])
-                    score = 0
-                    same_class = (other_class == my_class)
-                    same_grade = (other_grade == my_grade)
-                    if same_class:
-                        score += 200
-                    elif same_grade:
-                        score += 100
-                    if other_group == my_group:
-                        score += 40
-                    if norm_b == norm_a:
-                        score += 15
-                    score -= cum.get(t_b, 0) * 3
-                    score *= budget_factor
-                    swap_recs.append({
-                        "유형": "1:1", "교사B": t_b,
-                        "현재 수업": f"{day_b}{p_b}교시 · {other_class} · {b_row['과목']}",
-                        "학급": other_class, "학년": other_grade,
-                        "same_class": same_class, "same_grade": same_grade, "점수": score,
-                        "b_info": {"교사명": t_b, "일자": norm_b, "요일": day_b, "교시": p_b,
-                                   "학급": other_class, "과목": b_row["과목"]}
-                    })
+    busy_a = _build_busy_index(e_a)
+    busy_b = _build_busy_index(e_b)
+    # teacher_a가 목표 시간에 비어있는지는 t_b와 무관하게 항상 같은 값이므로 루프 밖에서 한 번만 계산
+    teacher_a_free_at_b = is_free(teacher_a, day_b, p_b, norm_b, busy_idx=busy_b)
+    lbp_b = lessons_by_teacher_period(norm_b, ver)
+
+    if teacher_a_free_at_b:
+        for t_b in ti["교사명"].dropna().unique().tolist():
+            if t_b == teacher_a or has_duty(t_b, norm_b):
+                continue
+            b_lessons = lbp_b.get((t_b, p_b), [])
+            if not b_lessons:
+                continue
+            if not is_free(t_b, day_a, p_a, norm_a, busy_idx=busy_a):
+                continue
+            for b_row in b_lessons:
+                other_class = b_row["학급"]
+                other_grade = grade_of(other_class)
+                other_group = subject_group(b_row["과목"])
+                score = 0
+                same_class = (other_class == my_class)
+                same_grade = (other_grade == my_grade)
+                if same_class:
+                    score += 200
+                elif same_grade:
+                    score += 100
+                if other_group == my_group:
+                    score += 40
+                if norm_b == norm_a:
+                    score += 15
+                score -= cum.get(t_b, 0) * 3
+                score *= budget_factor
+                swap_recs.append({
+                    "유형": "1:1", "교사B": t_b,
+                    "현재 수업": f"{day_b}{p_b}교시 · {other_class} · {b_row['과목']}",
+                    "학급": other_class, "학년": other_grade,
+                    "same_class": same_class, "same_grade": same_grade, "점수": score,
+                    "b_info": {"교사명": t_b, "일자": norm_b, "요일": day_b, "교시": p_b,
+                               "학급": other_class, "과목": b_row["과목"]}
+                })
 
     df_swap = (pd.DataFrame(swap_recs)
                .sort_values(["same_class", "same_grade", "점수"], ascending=[False, False, False])
@@ -1067,37 +1124,37 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
 # ==========================================================================================
 # 뷰 헬퍼
 # ==========================================================================================
+def _all_slot_columns():
+    return [f"{d}{p}" for d in DAYS for p in range(1, PERIODS_PER_DAY.get(d, 7) + 1)]
+
 @st.cache_data(show_spinner=False)
 def teacher_matrix(version=0):
+    """교사 x (요일+교시) 표. 이전에는 교사수 x 슬롯수(최대 33)만큼 매번 전체 시간표를 필터링해
+    O(교사수 x 슬롯수 x 전체행수)의 속도였던 것을 pivot_table 한 번으로 O(전체행수)에 계산하도록 개선."""
     tt = st.session_state.timetable
     if tt.empty:
         return pd.DataFrame()
-    teachers = sorted(tt["교사명"].unique())
-    rows = []
-    for t in teachers:
-        row = {"교사명": t}
-        for d in DAYS:
-            for p in range(1, PERIODS_PER_DAY.get(d, 7) + 1):
-                m = tt[(tt["교사명"] == t) & (tt["요일"] == d) & (tt["교시"] == p)]
-                row[f"{d}{p}"] = f"{m.iloc[0]['학급']} {m.iloc[0]['과목']}" if not m.empty else ""
-        rows.append(row)
-    return pd.DataFrame(rows)
+    tt2 = tt.copy()
+    tt2["_slot"] = tt2["요일"].astype(str) + tt2["교시"].astype(int).astype(str)
+    tt2["_val"] = tt2["학급"].astype(str) + " " + tt2["과목"].astype(str)
+    pivot = tt2.pivot_table(index="교사명", columns="_slot", values="_val", aggfunc="first")
+    pivot = pivot.reindex(columns=_all_slot_columns())
+    pivot = pivot.fillna("").sort_index()
+    return pivot.reset_index()
 
 @st.cache_data(show_spinner=False)
 def class_matrix(version=0):
+    """학급 x (요일+교시) 표. teacher_matrix와 동일한 이유로 pivot_table 기반으로 개선."""
     tt = st.session_state.timetable
     if tt.empty:
         return pd.DataFrame()
-    classes = sorted(tt["학급"].unique())
-    rows = []
-    for c in classes:
-        row = {"학급": c}
-        for d in DAYS:
-            for p in range(1, PERIODS_PER_DAY.get(d, 7) + 1):
-                m = tt[(tt["학급"] == c) & (tt["요일"] == d) & (tt["교시"] == p)]
-                row[f"{d}{p}"] = f"{m.iloc[0]['교사명']} {m.iloc[0]['과목']}" if not m.empty else ""
-        rows.append(row)
-    return pd.DataFrame(rows)
+    tt2 = tt.copy()
+    tt2["_slot"] = tt2["요일"].astype(str) + tt2["교시"].astype(int).astype(str)
+    tt2["_val"] = tt2["교사명"].astype(str) + " " + tt2["과목"].astype(str)
+    pivot = tt2.pivot_table(index="학급", columns="_slot", values="_val", aggfunc="first")
+    pivot = pivot.reindex(columns=_all_slot_columns())
+    pivot = pivot.fillna("").sort_index()
+    return pivot.reset_index()
 
 def get_teacher_week_view(teacher: str, ref_date: date, use_test=False):
     weekday = ref_date.weekday()
@@ -2414,7 +2471,9 @@ if "📋 복무 관리 & 판단" in tab_map:
                         date_list = [base_date + timedelta(days=i) for i in range(0, future_days+1) if (base_date + timedelta(days=i)).weekday() < 5]
                         ver = st.session_state.get("_data_version", 0)
                         e_cache = {td.strftime("%Y-%m-%d"): get_effective_timetable_for_date(td.strftime("%Y-%m-%d"), ver) for td in date_list}
+                        busy_cache = {d: _build_busy_index(e_cache[d]) for d in e_cache}
                         e_today = e_cache.get(d_str, pd.DataFrame())
+                        busy_today = busy_cache.get(d_str, {})
                         my_lessons = e_today[e_today["교사명"] == t_name] if not e_today.empty else pd.DataFrame()
                         duty_periods = set()
                         if "전체" in sel.get("교시표시", ""):
@@ -2440,26 +2499,28 @@ if "📋 복무 관리 & 판단" in tab_map:
                                 tds = td.strftime("%Y-%m-%d")
                                 tday = WEEKDAY_KR[td.weekday()]
                                 e_tt = e_cache[tds]
+                                busy_tds = busy_cache.get(tds, {})
+                                t_name_free_here = is_free(t_name, tday, p, tds, busy_idx=busy_tds)
                                 others = e_tt[(e_tt["교시"] == p) & (e_tt["교사명"] != t_name)] if not e_tt.empty else pd.DataFrame()
-                                for o in others.itertuples():
-                                    if is_free(t_name, tday, p, tds, e_tt) and is_free(o.교사명, day_kr, p, d_str, e_today):
-                                        other_class = o.학급
-                                        other_grade = grade_of(other_class)
-                                        same_class = (other_class == my_class)
-                                        same_grade = (other_grade == my_grade)
-                                        score = 0
-                                        if same_class: score += 200
-                                        elif same_grade: score += 100
-                                        if subject_group(o.과목) == my_group: score += 40
-                                        if tds == d_str: score += 15
-                                        candidates_1to1.append({
-                                            "type": "1:1", "date": tds, "day": tday, "period": p,
-                                            "teacher": o.교사명, "lesson": f"{other_class} {o.과목}",
-                                            "same_class": same_class, "same_grade": same_grade, "score": score
-                                        })
-                                if is_free(t_name, tday, p, tds, e_tt):
+                                if t_name_free_here:
+                                    for o in others.itertuples():
+                                        if is_free(o.교사명, day_kr, p, d_str, busy_idx=busy_today):
+                                            other_class = o.학급
+                                            other_grade = grade_of(other_class)
+                                            same_class = (other_class == my_class)
+                                            same_grade = (other_grade == my_grade)
+                                            score = 0
+                                            if same_class: score += 200
+                                            elif same_grade: score += 100
+                                            if subject_group(o.과목) == my_group: score += 40
+                                            if tds == d_str: score += 15
+                                            candidates_1to1.append({
+                                                "type": "1:1", "date": tds, "day": tday, "period": p,
+                                                "teacher": o.교사명, "lesson": f"{other_class} {o.과목}",
+                                                "same_class": same_class, "same_grade": same_grade, "score": score
+                                            })
                                     for ot in st.session_state.teachers["교사명"].tolist()[:30]:
-                                        if ot != t_name and is_free(ot, day_kr, p, d_str, e_today):
+                                        if ot != t_name and is_free(ot, day_kr, p, d_str, busy_idx=busy_today):
                                             candidates_linked.append({
                                                 "type": "연계", "date": tds, "day": tday, "period": p,
                                                 "teacher": ot, "lesson": "공강", "score": 30
