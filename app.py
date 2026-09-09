@@ -1,259 +1,346 @@
-
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
-# 페이지 기본 설정
+# 1. 페이지 및 레이아웃 기본 설정
 st.set_page_config(
-    page_title="가족 의사소통 & 갈등 해결 마스터",
-    page_icon="💖",
+    page_title="나 전달법 마스터: 대화의 신",
+    page_icon="💬",
     layout="centered"
 )
 
-# ================= gspread 직접 연동 구글 시트 저장 함수 =================
-def submit_to_google_sheet(std_id, name, score):
+# 2. 커스텀 CSS (캐릭터 카드 & 말풍선 UI 디자인)
+st.markdown("""
+<style>
+    .char-card {
+        background-color: #f8fafc;
+        border: 2px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 16px;
+        text-align: center;
+        margin-bottom: 12px;
+    }
+    .char-avatar {
+        font-size: 50px;
+        margin-bottom: -10px;
+    }
+    .char-name {
+        font-weight: bold;
+        color: #334155;
+        font-size: 16px;
+    }
+    .speech-bubble {
+        position: relative;
+        background: #e0f2fe;
+        border-radius: 12px;
+        padding: 16px;
+        color: #0369a1;
+        font-weight: 600;
+        font-size: 15px;
+        border: 1px solid #bae6fd;
+        margin-bottom: 16px;
+    }
+    .stButton>button {
+        border-radius: 10px;
+        font-size: 15px;
+        padding: 10px 16px;
+        transition: all 0.2s ease;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# 3. 구글 시트 연동 함수
+def submit_to_google_sheet(std_id, name, score, title):
     sheet_url = "https://docs.google.com/spreadsheets/d/1IiG4q_CY6yUPUqnrvb0O-YWteqmti3qxLdoovxMLXYI/edit?usp=sharing"
     
     try:
-        # Streamlit Secrets에서 GCP 서비스 계정 정보 로드
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         creds = Credentials.from_service_account_info(
             st.secrets["gcp_service_account"], 
             scopes=scopes
         )
         client = gspread.authorize(creds)
-        
-        # 구글 시트 열기 (첫 번째 시트)
         sheet = client.open_by_url(sheet_url).sheet1
         
-        # 제출 일시, 학번, 이름, 점수 행 추가
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        sheet.append_row([now_str, std_id, name, score])
+        sheet.append_row([now_str, std_id, name, score, title])
         return True
-        
     except Exception as e:
-        st.error(f"구글 시트 전송 실패: {e}")
+        st.error(f"구글 시트 저장 실패: {e}")
         return False
 
-# ================= 질문 데이터베이스 =================
+# 4. 10개 시나리오 퀴즈 데이터베이스
 QUESTIONS = [
     {
-        "cat": "1단계: 나-전달법 (행동 묘사)",
-        "dialogue": "동생이 허락 없이 학용품을 가져가 잃어버린 상황!",
-        "q": "비난이나 평가 없이 상대방의 '행동'만 객관적으로 표현한 것은?",
+        "stage": "STAGE 1",
+        "cat": "1단계: 비난 없는 '객관적 행동 묘사'",
+        "char_name": "동생 민지 (15세)",
+        "avatar": "👧",
+        "dialogue": "언니! 내 옷 허락 없이 입고 나갔다가 떡볶이 국물 묻혀서 돌아온 상황!",
+        "q": "동생의 자존감을 상하게 하지 않으면서, 주관적 평가나 비난 없이 '상황 사실'만 객관적으로 말한 문장은?",
         "options": [
-            ("1. 너는 왜 매번 허락도 없이 남의 물건을 마음대로 건드리니?", False),
-            ("2. 내 허락 없이 필통에서 학용품을 가져가서 잃어버렸어.", True),
-            ("3. 넌 항상 정리정돈도 안 하고 무책임한 태도를 보이더라.", False),
-            ("4. 남의 물건을 몰래 가져가는 건 정말 나쁜 행동이야.", False),
-            ("5. 네가 자꾸 내 물건을 건드리니까 내가 항상 화가 나는 거야.", False)
+            {"text": "1. 넌 도대체 왜 매번 남의 옷을 네 마음대로 입고 나가니?", "correct": False, "exp": "❌ '매번~'이나 '네 마음대로'는 비난과 판단이 섞인 '너-전달법'입니다."},
+            {"text": "2. 내 허락 없이 옷을 입고 나가서 옷에 국물을 묻혀왔어.", "correct": True, "exp": "⭕ 정답! 감정이나 비판을 덜어내고 일어난 '행동 사실'만 명확히 묘사했습니다."},
+            {"text": "3. 너처럼 무책임하고 남 생각 안 하는 애는 처음 본다.", "correct": False, "exp": "❌ 상대방의 인격을 공격하는 전형적인 나쁜 대화법입니다."},
+            {"text": "4. 남의 옷을 망가뜨리는 건 정말 예의가 아닌 행동이야.", "correct": False, "exp": "❌ 도덕적 훈계와 비판이 앞서면 상대는 방어 태세를 취하게 됩니다."}
         ]
     },
     {
-        "cat": "2단계: 나-전달법 (영향 및 감정)",
-        "dialogue": "형(누나)이 약속 시간에 30분 넘게 연락도 없이 늦게 온 상황!",
-        "q": "나에게 미친 '영향과 솔직한 감정'을 올바르게 표현한 것은?",
+        "stage": "STAGE 2",
+        "cat": "2단계: 구체적 '영향 및 감정 표현'",
+        "char_name": "친구 태양 (17세)",
+        "avatar": "👦",
+        "dialogue": "중요한 조별 과제 모임에 연락도 없이 40분이나 늦게 도착한 친구!",
+        "q": "친구에게 나에게 미친 '구체적 영향'과 '나의 솔직한 감정'을 올바르게 전달하는 문장은?",
         "options": [
-            ("1. 오랫동안 혼자 기다리면서 걱정되고 내 시간이 허비되어 속상했어.", True),
-            ("2. 너 진짜 시간 개념이 없구나. 약속을 왜 하자고 했니?", False),
-            ("3. 너 때문에 오늘 내 하루 기분을 완전히 다 망쳐버렸어.", False),
-            ("4. 다음부터 늦으면 나도 똑같이 늦게 나갈 테니 알아서 해.", False),
-            ("5. 약속 하나 제대로 못 지키면서 무슨 중요한 일을 하겠다는 거니?", False)
+            {"text": "1. 40분 동안 연락이 안 돼서 혹시 무슨 일이 생겼나 걱정됐고, 발표 준비 시간이 부족해져서 초조했어.", "correct": True, "exp": "⭕ 정답! 내가 겪은 불이익(영향)과 솔직하게 느낀 기분(감정)을 솔직하게 털어놓았습니다."},
+            {"text": "2. 너 진짜 시간 개념이 없구나. 약속을 왜 하자고 했니?", "correct": False, "exp": "❌ 상대의 성격과 태도를 단정 짓고 비난하는 '너-전달법'입니다."},
+            {"text": "3. 너 때문에 우리 조 발표 준비 완전히 망쳤으니까 책임져.", "correct": False, "exp": "❌ 책임을 상대에게 전가하면 친구는 반발심만 느끼게 됩니다."},
+            {"text": "4. 다음부터 늦으면 나도 약속 장소에 안 나갈 테니까 알아서 해.", "correct": False, "exp": "❌ 감정적 협박이나 통보는 갈등을 더 악화시킵니다."}
         ]
     },
     {
-        "cat": "3단계: 나-전달법 (바라는 사항)",
-        "dialogue": "부모님이 내 의견을 묻지 않고 주말 일정을 일방적으로 정하셨을 때!",
-        "q": "상대방에게 올바르게 '바라는 사항'을 요청하는 문장은?",
+        "stage": "STAGE 3",
+        "cat": "3단계: 긍정적 '바라는 사항(요청)'",
+        "char_name": "아버지 (48세)",
+        "avatar": "👨",
+        "dialogue": "내 의사는 묻지도 않고 주말에 친척 집 방문 일정을 일방적으로 통보하신 상황!",
+        "q": "부모님께 예의를 지키면서 내가 '원하는 바'를 바람직하게 요청하는 문장은?",
         "options": [
-            ("1. 부모님 마음대로 하실 거면 앞으로 저한테 아무것도 묻지 마세요.", False),
-            ("2. 제 일정과 의견도 먼저 물어봐 주시고 함께 결정해 주셨으면 좋겠어요.", True),
-            ("3. 이번 결정 취소 안 해주시면 저 주말에 집 나가서 안 들어올 거예요.", False),
-            ("4. 제발 저 좀 그만 괴롭히시고 그냥 제 일에 신경 꺼주세요.", False),
-            ("5. 부모님의 결정 방식은 완전히 잘못되었으니 당장 수정해 주세요.", False)
+            {"text": "1. 제 일정은 왜 안 물어보세요? 저 주말에 절대로 안 갈 거예요.", "correct": False, "exp": "❌ 반발심만 드러내어 부모님과의 대화가 단절될 수 있습니다."},
+            {"text": "2. 제 계획도 미리 물어봐 주시고, 일정을 정할 때 함께 이야기해 주셨으면 좋겠어요.", "correct": True, "exp": "⭕ 정답! 부모님을 존중하면서도 내가 바라는 변화(수용 가능한 요청)를 명확히 제시했습니다."},
+            {"text": "3. 부모님 마음대로 하실 거면 앞으로 저한테 아무것도 요구하지 마세요.", "correct": False, "exp": "❌ 비꼬는 태도는 갈등 해결에 아무런 도움이 되지 않습니다."},
+            {"text": "4. 친척 집 가는 것보다 제 수행평가가 훨씬 중요하거든요?", "correct": False, "exp": "❌ 상대의 가치를 폄하하는 말투는 감정싸움을 유발합니다."}
         ]
     },
     {
-        "cat": "4단계: 너-전달법 → 나-전달법 변환",
-        "dialogue": "너-전달법: \"너는 왜 내가 말할 때마다 폰만 보고 딴청이니?\"",
-        "q": "위 '너-전달법'을 올바른 '나-전달법'으로 바꾼 것은?",
+        "stage": "STAGE 4",
+        "cat": "4단계: '너-전달법'을 '나-전달법'으로 완벽 변환",
+        "char_name": "어머니 (46세)",
+        "avatar": "👩",
+        "dialogue": "너-전달법: \"너는 왜 엄마가 말할 때마다 폰만 보고 딴청이니?\"",
+        "q": "위의 공격적인 '너-전달법'을 나-전달법의 3요소(행동-영향/감정-바람)에 맞게 바꾼 것은?",
         "options": [
-            ("1. 폰 좀 그만 보고 사람 얼굴을 보며 대화하는 예의를 갖춰라.", False),
-            ("2. 내가 말할 때 스마트폰을 보면 내 말을 경청받지 못하는 느낌이 들어 서운해.", True),
-            ("3. 너는 스마트폰 중독이라 사람과 제대로 된 대화가 불가능하구나.", False),
-            ("4. 앞으로 대화할 때는 네 스마트폰을 전부 압수해야겠어.", False),
-            ("5. 내가 말하는데 폰을 계속 보면 너랑 다시는 대화 안 할 거야.", False)
+            {"text": "1. 엄마가 이야기할 때 스마트폰을 계속 보시면 제 말이 무시당하는 느낌이 들어 서운해요. 제 눈을 보고 이야기해 주세요.", "correct": True, "exp": "⭕ 정답! 행동(폰 봄), 영향/감정(무시당하는 느낌, 서운함), 바람(눈 보고 대화)이 완성되었습니다."},
+            {"text": "2. 엄마야말로 대화할 때 스마트폰 좀 치우고 예의를 지켜주세요.", "correct": False, "exp": "❌ 지적과 명령조는 상대의 방어 기제를 자극합니다."},
+            {"text": "3. 엄마가 계속 스마트폰만 보니까 저도 대화하기 싫어져요.", "correct": False, "exp": "❌ 단순한 거부 의사 표현일 뿐 건설적인 대화가 아닙니다."},
+            {"text": "4. 스마트폰 중독이신 것 같은데 사용 시간 좀 줄이세요.", "correct": False, "exp": "❌ 진단과 비난이 섞여 상대의 기분을 해치게 됩니다."}
         ]
     },
     {
-        "cat": "5단계: 나-전달법 3요소 완성",
-        "dialogue": "\"네가 연락 없이 약속에 늦어서(행동), 기다리며 걱정되고 속상했어(영향/감정).\"",
-        "q": "이 문장 뒤에 이어질 마지막 '바라는 사항'으로 가장 적절한 것은?",
+        "stage": "STAGE 5",
+        "cat": "5단계: 공감과 나-전달법의 조화",
+        "char_name": "남동생 현우 (13세)",
+        "avatar": "👦",
+        "dialogue": "내가 게임하는 동안 옆에서 계속 시끄럽게 소리를 지르며 장난치는 동생!",
+        "q": "동생과의 갈등을 평화롭게 해결하기 위한 가장 성숙한 나-전달법 표현은?",
         "options": [
-            ("1. 앞으로는 늦을 것 같으면 미리 나에게 연락을 해주면 좋겠어.", True),
-            ("2. 다음부터 한 번만 더 늦으면 너랑 다시는 안 놀아.", False),
-            ("3. 너도 똑같이 30분 동안 길거리에서 기다려 봐야 정신 차리지?", False),
-            ("4. 앞으로 너와의 모든 일정은 내가 전부 취소하도록 할게.", False),
-            ("5. 늦은 시간만큼 네가 맛있는 걸 사서 정식으로 사과하면 좋겠어.", False)
+            {"text": "1. 네가 신나서 기분 좋은 건 알겠는데(공감), 큰 소리를 내면 집중하기가 힘들어서 스트레스를 받아. 조금만 조용히 놀아줄래?", "correct": True, "exp": "⭕ 정답! 상대의 상황에 공감해 준 뒤 나의 영향과 바람을 말하면 수용률이 높아집니다."},
+            {"text": "2. 야! 너 진짜 산만하다. 당장 네 방으로 나가!", "correct": False, "exp": "❌ 일방적인 명령과 인격 비하는 동생의 반발을 부릅니다."},
+            {"text": "3. 네가 자꾸 시끄럽게 구니까 내가 게임에서 지는 거잖아!", "correct": False, "exp": "❌ 자신의 실패 원인을 모두 남 탓으로 돌리는 대화입니다."},
+            {"text": "4. 너 한 번만 더 소리 지르면 컴퓨터 전원 꺼버린다.", "correct": False, "exp": "❌ 위협과 협박은 진정한 행동 변화를 이끌어낼 수 없습니다."}
         ]
     },
     {
-        "cat": "6단계: 경청과 공감",
-        "dialogue": "가족 구성원이 시험이나 일로 마음처럼 되지 않아 우울하다고 고민할 때!",
-        "q": "경청과 공감의 바람직한 대화 태도는 무엇일까요?",
+        "stage": "STAGE 6",
+        "cat": "6단계: 비언어적 표현의 일치",
+        "char_name": "짝꿍 지유 (17세)",
+        "avatar": "👧",
+        "dialogue": "말로는 \"네 생각도 이해해~\"라고 하지만, 팔짱을 끼고 인상을 찌푸리며 한숨을 쉬는 상황!",
+        "q": "나-전달법을 사용할 때 언어적 메시지만큼 중요한 '비언어적 태도'로 가장 올바른 것은?",
         "options": [
-            ("1. 상대방의 평소 생활 습관과 잘못된 점을 즉시 지적해 준다.", False),
-            ("2. 말하는 중간에 개입하여 나의 더 안 좋았던 경험담을 이야기한다.", False),
-            ("3. 비판이나 성급한 조언 전에 상대방이 느꼈을 좌절감에 먼저 공감해 준다.", True),
-            ("4. 별일 아니라는 듯 대수롭지 않게 넘기며 빠르게 주제를 바꾼다.", False),
-            ("5. 해결책을 제시하기 위해 상대방의 말을 끊고 논리적으로 질문한다.", False)
+            {"text": "1. 상대방을 제압할 수 있도록 강렬한 눈빛과 비꼬는 말투를 유지한다.", "correct": False, "exp": "❌ 공격적인 태도는 언어 표현과 상관없이 갈등을 증폭시킵니다."},
+            {"text": "2. 진정성 전달을 위해 말의 내용과 표정, 억양, 시선 등의 비언어적 표현을 일치시킨다.", "correct": True, "exp": "⭕ 정답! 언어 표현과 비언어적 표현이 일치해야 상대방이 진심으로 받아들입니다."},
+            {"text": "3. 내 감정을 숨기기 위해 로봇처럼 무표정과 기계적인 목소리로 대화한다.", "correct": False, "exp": "❌ 영혼 없는 대화는 오히려 상대를 거부하거나 무시하는 느낌을 줍니다."},
+            {"text": "4. 말만 나-전달법 공식을 지키면 한숨이나 팔짱 같은 포즈는 상관없다.", "correct": False, "exp": "❌ 대화에서 비언어적 요소가 차지하는 비중은 약 70%에 달합니다."}
         ]
     },
     {
-        "cat": "7단계: 나-전달법과 비언어적 표현",
-        "dialogue": "나-전달법으로 말하지만 표정은 찌푸리고 팔짱을 끼고 있는 상황!",
-        "q": "나-전달법을 사용할 때 비언어적 표현(표정, 말투, 시선)의 올바른 태도는?",
+        "stage": "STAGE 7",
+        "cat": "7단계: '과장된 단어' 배제하기",
+        "char_name": "형 준호 (18세)",
+        "avatar": "👦",
+        "dialogue": "방 청소를 하다가 형이 다 쓴 휴지갑을 책상 위에 그대로 두고 나간 상황!",
+        "q": "나-전달법에서 습관적으로 쓰기 쉬운 '과장/단정 단어'를 빼고 사실만 말한 표현은?",
         "options": [
-            ("1. 말의 내용보다 상대를 제압하는 강한 눈빛과 억양이 중요하다.", False),
-            ("2. 말만 나-전달법으로 한다면 비꼬는 말투나 표정은 상관없다.", False),
-            ("3. 진정성 전달을 위해 언어적 메시지와 비언어적 표현을 일치시켜야 한다.", True),
-            ("4. 감정을 숨기기 위해 무표정한 얼굴과 기계적인 목소리를 유지한다.", False),
-            ("5. 상대방이 미안함을 느끼도록 가벼운 한숨을 쉬며 말하는 것이 좋다.", False)
+            {"text": "1. 형은 '항상', '단 한 번도' 자기 쓰레기를 치운 적이 없잖아.", "correct": False, "exp": "❌ '항상', '매번', '절대' 같은 일반화 단어는 상대를 억울하게 만들어 반발을 부릅니다."},
+            {"text": "2. 책상 위에 다 쓴 휴지갑이 올려져 있어서 치우느라 내 공부 흐름이 깨졌어. 다 쓴 건 휴지통에 버려줘.", "correct": True, "exp": "⭕ 정답! '항상'이라는 과장 없이, 이번에 일어난 특정 상황과 영향만 객관적으로 말했습니다."},
+            {"text": "3. 형은 도대체 정리정돈 개념이라는 게 있기는 해?", "correct": False, "exp": "❌ 상대의 습관과 인성을 단정 짓는 감정적 공격입니다."},
+            {"text": "4. 내가 형 하인이야? 형 쓰레기는 형이 알아서 버려.", "correct": False, "exp": "❌ 도발적인 질문은 건설적인 갈등 해결을 방해합니다."}
         ]
     },
     {
-        "cat": "8단계: 성격 유형별 대화 (사고형 T)",
-        "dialogue": "원칙과 논리적 사실 관계를 중시하는 '사고형(T)' 아빠와의 대화!",
-        "q": "T형 가족 구성원과 갈등을 해결할 때 가장 효과적인 대화법은?",
+        "stage": "STAGE 8",
+        "cat": "8단계: 감정형(F) 상대와의 대화법",
+        "char_name": "친구 유진 (17세)",
+        "avatar": "👩",
+        "dialogue": "시험을 망쳐서 너무 속상하고 눈물이 난다며 마음을 털어놓는 친구!",
+        "q": "마음의 공감을 중시하는 감정형(F) 친구의 마음을 열어주는 올바른 나-전달법 대화는?",
         "options": [
-            ("1. 감정적으로 눈물을 흘리며 내 기분만 알아달라고 호소한다.", False),
-            ("2. 객관적인 사실과 이유를 차분하고 논리적으로 설명한다.", True),
-            ("3. 상대방의 논리적 오류를 계속 지적하며 언쟁에서 이기려 한다.", False),
-            ("4. 논리적인 대화는 무의미하므로 대화를 완전히 포기한다.", False),
-            ("5. 상대방의 서운한 점을 지적하며 감정적인 대답을 강요한다.", False)
+            {"text": "1. 네가 열심히 준비했는데 결과가 안 나와서 얼마나 속상할지 느끼니 나도 마음이 아프다.", "correct": True, "exp": "⭕ 정답! 옳고 그름이나 논리적 조언보다 상대의 슬픈 감정에 먼저 깊이 공감해 주었습니다."},
+            {"text": "2. 울어봤자 성적이 올라가지 않아. 공부 방법을 분석해서 해결책을 찾자.", "correct": False, "exp": "❌ 감정이 격해진 상태에서의 조기 해결책 제시나 논리적 분석은 상처를 줄 수 있습니다."},
+            {"text": "3. 평소에 딴짓할 때 알아봤어. 다음부터는 오답 노트 작성 잘해라.", "correct": False, "exp": "❌ 상대의 약점을 지적하고 지적하는 평가적 태도입니다."},
+            {"text": "4. 겨우 시험 하나 가지고 왜 그래? 다음 시험 준비나 해.", "correct": False, "exp": "❌ 상대의 감정을 가볍게 여기고 축소하는 대화는 소통을 차단합니다."}
         ]
     },
     {
-        "cat": "9단계: 성격 유형별 대화 (감정형 F)",
-        "dialogue": "관계와 공감, 마음의 공유를 중시하는 '감정형(F)' 동생과의 대화!",
-        "q": "F형 가족 구성원의 마음을 열 수 있는 바람직한 대화법은?",
+        "stage": "STAGE 9",
+        "cat": "9단계: 사고형(T) 상대와의 대화법",
+        "char_name": "삼촌 (35세)",
+        "avatar": "👨",
+        "dialogue": "원칙과 논리, 객관적 사실관계를 가장 중요하게 생각하는 삼촌과의 대화!",
+        "q": "논리적이고 이성적인 사고형(T) 상대와 갈등을 조정할 때 가장 효과적인 나-전달법은?",
         "options": [
-            ("1. 옳고 그름을 따지기 전에 상대방이 느꼈을 감정과 입장을 인정해 준다.", True),
-            ("2. 상대방의 감정은 비이성적이라며 차갑게 사실만 지적한다.", False),
-            ("3. 감정적인 이야기에는 응하지 않고 빠른 해결책만 제시한다.", False),
-            ("4. 동조해 주는 척하면서 은근히 상대방의 잘못을 깨닫게 한다.", False),
-            ("5. 상대방의 감정 표현을 장난으로 넘기며 분위기를 전환한다.", False)
+            {"text": "1. 무작정 서운하다고 떼를 쓰며 내 감정만 이해해달라고 호소한다.", "correct": False, "exp": "❌ 논리적 근거 없는 감정적 호소는 사고형 상대에게 설득력이 떨어집니다."},
+            {"text": "2. 구체적인 사실 관계와 상황의 원인을 차분하고 논리적으로 설명하며 바라는 점을 전달한다.", "correct": True, "exp": "⭕ 정답! 객관적 사실과 타당한 이유를 명확히 제시할 때 설득과 수용이 잘 이뤄집니다."},
+            {"text": "3. 삼촌의 논리적 오류를 하나하나 지적하며 말싸움에서 이기려 한다.", "correct": False, "exp": "❌ 논쟁에서 이기려 들면 갈등 해결이 아닌 자존심 싸움으로 변질됩니다."},
+            {"text": "4. 말이 안 통하는 사람이라 단정 짓고 대화를 완전히 멈춘다.", "correct": False, "exp": "❌ 대화 포기는 갈등을 방치하고 관계를 악화시킵니다."}
         ]
     },
     {
-        "cat": "10단계: 가족 갈등 해결 4단계",
-        "dialogue": "가족 회의에서 갈등을 올바르게 해결하는 체계적인 4단계 프로세스!",
-        "q": "가족 갈등을 해결하는 올바른 순서로 가장 적절한 것은?",
+        "stage": "STAGE 10",
+        "cat": "10단계: 가족 갈등 해결 4단계 프로세스",
+        "char_name": "가족 전체 (4인)",
+        "avatar": "👨‍👩‍👧‍👦",
+        "dialogue": "가족 회의에서 집안일 분담으로 생긴 갈등을 민주적으로 해결하려는 상황!",
+        "q": "기술가정 시간에 배운 '가족 갈등 해결 4단계'의 올바른 순서는?",
         "options": [
-            ("1. 갈등 확인 → 해결 방법 탐색 → 해결 방법 결정 → 실행 및 평가", True),
-            ("2. 해결 방법 결정 → 갈등 확인 → 실행 및 평가 → 해결 방법 탐색", False),
-            ("3. 갈등 확인 → 실행 및 평가 → 해결 방법 탐색 → 해결 방법 결정", False),
-            ("4. 해결 방법 탐색 → 갈등 확인 → 해결 방법 결정 → 실행 및 평가", False),
-            ("5. 갈등 확인 → 해결 방법 결정 → 해결 방법 탐색 → 실행 및 평가", False)
+            {"text": "1. 갈등 확인 ➔ 해결 방안 탐색 ➔ 최선의 방안 결정 ➔ 실행 및 평가", "correct": True, "exp": "⭕ 정답! 문제를 명확히 한 뒤 대안을 찾고, 합의하여 실행한 후 평가하는 것이 정석입니다."},
+            {"text": "2. 최선의 방안 결정 ➔ 갈등 확인 ➔ 실행 및 평가 ➔ 해결 방안 탐색", "correct": False, "exp": "❌ 문제를 확인하기도 전에 결정부터 내리는 오류입니다."},
+            {"text": "3. 해결 방안 탐색 ➔ 갈등 확인 ➔ 실행 및 평가 ➔ 최선의 방안 결정", "correct": False, "exp": "❌ 순서가 엉켜 합리적인 의사결정이 불가능합니다."},
+            {"text": "4. 갈등 확인 ➔ 실행 및 평가 ➔ 해결 방안 탐색 ➔ 최선의 방안 결정", "correct": False, "exp": "❌ 실행을 대안 탐색보다 먼저 할 수 없습니다."}
         ]
     }
 ]
 
-# ================= 세션 상태 초기화 =================
+# 5. 세션 상태 관리
 if "q_idx" not in st.session_state:
     st.session_state.q_idx = 0
 if "score" not in st.session_state:
     st.session_state.score = 0
 if "combo" not in st.session_state:
     st.session_state.combo = 0
-if "feedback" not in st.session_state:
-    st.session_state.feedback = None
+if "selected_exp" not in st.session_state:
+    st.session_state.selected_exp = None
+if "is_correct" not in st.session_state:
+    st.session_state.is_correct = None
 if "submitted" not in st.session_state:
     st.session_state.submitted = False
 
-# ================= UI 레이아웃 =================
-st.title("👨‍👩‍👧‍👦 가족 의사소통 & 갈등 해결 마스터")
+# 6. 메인 UI 헤더 및 상태창
+st.title("💬 나 전달법 마스터: 대화의 신")
+st.caption("🏫 기술가정 대화법 프로젝트 | 상처 주지 않고 내 마음을 지혜롭게 전달하기")
 
-# 상단 진행률 및 게이지
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.progress(st.session_state.score / 100)
-with col2:
-    st.metric("가족 화목도", f"{st.session_state.score}%")
+# 화목도 게이지 및 스코어 (10문항 = 총 100점)
+score_percent = st.session_state.score
+col_g1, col_g2 = st.columns([3, 1])
+with col_g1:
+    st.progress(score_percent / 100)
+with col_g2:
+    st.metric("가족/친구 화목도", f"{score_percent}%")
 
 st.divider()
 
-# 퀴즈 진행 중 (0~9번 문제)
+# 7. 게임 진행 화면 (0~9번 문제)
 if st.session_state.q_idx < len(QUESTIONS):
-    q_data = QUESTIONS[st.session_state.q_idx]
+    q = QUESTIONS[st.session_state.q_idx]
 
-    col_cat, col_combo = st.columns([3, 1])
-    with col_cat:
-        st.caption(f"📍 STAGE {st.session_state.q_idx + 1}. {q_data['cat']}")
-    with col_combo:
+    # 스테이지 타이틀 & 콤보
+    col_st1, col_st2 = st.columns([3, 1])
+    with col_st1:
+        st.subheader(f"🚩 {q['stage']}: {q['cat']}")
+    with col_st2:
         if st.session_state.combo > 1:
-            st.write(f"🔥 **{st.session_state.combo} COMBO!**")
+            st.markdown(f"🔥 **{st.session_state.combo} COMBO!**")
 
-    st.info(f"💬 **[상황]** {q_data['dialogue']}")
+    # 캐릭터 아바타 & 상황 말풍선
+    st.markdown(f"""
+    <div class="char-card">
+        <div class="char-avatar">{q['avatar']}</div>
+        <div class="char-name">{q['char_name']}</div>
+    </div>
+    <div class="speech-bubble">
+        "{q['dialogue']}"
+    </div>
+    """, unsafe_allow_html=True)
 
-    if st.session_state.feedback:
-        fb_type, fb_text = st.session_state.feedback
-        if fb_type == "success":
-            st.success(fb_text)
+    # 발문
+    st.write(f"**❓ 질문:** {q['q']}")
+
+    # 선택지 및 해설 영역
+    if st.session_state.selected_exp is None:
+        for idx, opt in enumerate(q["options"]):
+            if st.button(opt["text"], key=f"btn_{st.session_state.q_idx}_{idx}", use_container_width=True):
+                st.session_state.selected_exp = opt["exp"]
+                st.session_state.is_correct = opt["correct"]
+                if opt["correct"]:
+                    st.session_state.score += 10
+                    st.session_state.combo += 1
+                else:
+                    st.session_state.combo = 0
+                st.rerun()
+    else:
+        # 정답/오답 피드백
+        if st.session_state.is_correct:
+            st.success(st.session_state.selected_exp)
         else:
-            st.error(fb_text)
+            st.error(st.session_state.selected_exp)
 
-    st.subheader(q_data["q"])
-
-    for idx, (opt_text, is_correct) in enumerate(q_data["options"]):
-        if st.button(opt_text, key=f"q_{st.session_state.q_idx}_opt_{idx}", use_container_width=True):
-            if is_correct:
-                st.session_state.score += 10
-                st.session_state.combo += 1
-                st.session_state.feedback = ("success", f"🎉 정답! 가족 화목도 UP! ({st.session_state.combo}연속 성공!)")
-            else:
-                st.session_state.combo = 0
-                st.session_state.feedback = ("error", "💔 오답! 상처주는 대화법입니다.")
-
+        if st.button("다음 문제로 이동 ➔", type="primary", use_container_width=True):
             st.session_state.q_idx += 1
+            st.session_state.selected_exp = None
+            st.session_state.is_correct = None
             st.rerun()
 
-# 결과 제출 화면
+# 8. 최종 결과 및 구글 시트 저장 화면
 else:
-    if st.session_state.feedback:
-        fb_type, fb_text = st.session_state.feedback
-        if fb_type == "success":
-            st.success(fb_text)
-        else:
-            st.error(fb_text)
-
     st.balloons()
-    st.header("🏆 학습 완료! 결과를 제출하세요")
-    st.subheader(f"최종 가족 화목도: {st.session_state.score}점 / 100점")
+    st.header("🏆 학습 완료! 성적표 및 소통 칭호")
+    
+    # 점수별 칭호 부여
+    final_score = st.session_state.score
+    if final_score == 100:
+        badge = "🥇 소통의 신 (마스터)"
+    elif final_score >= 80:
+        badge = "🥈 따뜻한 대화가 (전문가)"
+    elif final_score >= 60:
+        badge = "🥉 공감 노력파 (수련생)"
+    else:
+        badge = "🌱 대화 초보자 (재도전 필요)"
 
+    col_res1, col_res2 = st.columns(2)
+    with col_res1:
+        st.metric("최종 점수", f"{final_score}점 / 100점")
+    with col_res2:
+        st.metric("획득 칭호", badge)
+
+    st.divider()
+
+    # 데이터 제출 폼
     if not st.session_state.submitted:
-        with st.form("submit_form"):
-            std_id = st.text_input("학번", placeholder="예: 10101")
-            name = st.text_input("이름", placeholder="예: 홍길동")
-            submit_btn = st.form_submit_button("구글 시트에 제출", use_container_width=True)
+        st.subheader("📝 수행평가 결과 구글 시트 제출")
+        with st.form("result_form"):
+            std_id = st.text_input("학번 (예: 10101)", placeholder="학번 5자리를 입력하세요")
+            name = st.text_input("이름", placeholder="이름을 입력하세요")
+            submit_btn = st.form_submit_button("구글 시트에 제출하기", use_container_width=True)
 
             if submit_btn:
                 if std_id and name:
-                    with st.spinner("구글 시트에 전송 중..."):
-                        success = submit_to_google_sheet(std_id, name, st.session_state.score)
-                    if success:
+                    with st.spinner("선생님 구글 시트로 안전하게 전송 중..."):
+                        ok = submit_to_google_sheet(std_id, name, final_score, badge)
+                    if ok:
                         st.session_state.submitted = True
                         st.rerun()
                 else:
-                    st.warning("학번과 이름을 모두 입력해 주세요!")
+                    st.warning("학번과 이름을 모두 정확히 입력해 주세요!")
     else:
-        st.success("✨ 구글 시트에 성공적으로 기록되었습니다!")
-
+        st.success("🎉 선생님 구글 시트에 제출되었습니다!")
         if st.button("🔄 처음부터 다시 풀기", use_container_width=True):
             st.session_state.q_idx = 0
             st.session_state.score = 0
             st.session_state.combo = 0
-            st.session_state.feedback = None
+            st.session_state.selected_exp = None
+            st.session_state.is_correct = None
             st.session_state.submitted = False
             st.rerun()
