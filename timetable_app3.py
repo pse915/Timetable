@@ -2269,6 +2269,67 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
             extra_days = st.slider("미래 추가 검색 일수", 0, 14, 7, key="week_extra_days")
 
             if st.button("이 수업의 주간 1:1 위치 검색", type="primary", key="btn_gen_matrix"):
+        st.markdown("#### 1. 교사 선택 — 전체 시간표 매트릭스에서 한 명 선택")
+        teacher_pick_df = teacher_matrix().copy()
+        if teacher_pick_df.empty:
+            st.warning("교사 시간표 데이터가 없습니다.")
+            st.stop()
+        teacher_pick_df.insert(0, "선택", False)
+        edited_teachers = st.data_editor(
+            teacher_pick_df,
+            hide_index=True,
+            use_container_width=True,
+            height=420,
+            key="week_1to1_teacher_matrix",
+            column_config={"선택": st.column_config.CheckboxColumn("선택", default=False)},
+            disabled=[c for c in teacher_pick_df.columns if c != "선택"]
+        )
+        picked_teachers = edited_teachers.loc[edited_teachers["선택"], "교사명"].tolist()
+        if len(picked_teachers) != 1:
+            st.info("위 매트릭스에서 교사 한 명만 체크하세요.")
+        else:
+            week_teacher = picked_teachers[0]
+
+        orig_date = st.date_input("원본 날짜", value=date.today(), key="week_1to1_orig_date")
+
+        day_kr = WEEKDAY_KR[orig_date.weekday()]
+        ver = st.session_state.get("_data_version", 0)
+        e_orig = get_effective_timetable_for_date(orig_date.strftime("%Y-%m-%d"), ver)
+
+        my_lessons = (
+            e_orig[(e_orig["교사명"] == week_teacher) & (e_orig["요일"] == day_kr)].sort_values("교시")
+            if len(picked_teachers) == 1 else pd.DataFrame()
+        )
+
+        if len(picked_teachers) == 1 and my_lessons.empty:
+            st.warning(f"{week_teacher} 선생님의 {orig_date} ({day_kr}) 수업이 없습니다.")
+        elif not my_lessons.empty:
+            st.markdown("#### 2. 원본 수업 선택 — 해당 날짜의 수업표에서 한 건 선택")
+            lesson_pick_df = my_lessons[["교시", "학급", "과목"]].copy()
+            lesson_pick_df.insert(0, "선택", False)
+            edited_lessons = st.data_editor(
+                lesson_pick_df,
+                hide_index=True,
+                use_container_width=True,
+                key=f"week_1to1_lesson_matrix_{week_teacher}_{orig_date.isoformat()}",
+                column_config={"선택": st.column_config.CheckboxColumn("선택", default=False)},
+                disabled=["교시", "학급", "과목"]
+            )
+            picked_lessons = edited_lessons[edited_lessons["선택"]]
+            if len(picked_lessons) != 1:
+                st.info("위 수업표에서 원본 수업 한 건만 체크하세요.")
+                picked_lessons = pd.DataFrame()
+
+            if not picked_lessons.empty:
+                lesson = picked_lessons.iloc[0]
+                orig_period = safe_int(lesson["교시"])
+
+                st.info(f"**원본 수업**: {day_kr} {orig_period}교시 · {lesson['학급']} · {lesson['과목']}")
+
+                st.caption("🏆 동일 학급 후보만 검색합니다.")
+                extra_days = st.slider("미래 추가 검색 일수", 0, 14, 7, key="week_extra_days")
+
+            if not picked_lessons.empty and st.button("이 수업의 주간 1:1 위치 검색", type="primary", key="btn_gen_matrix"):
                 with st.spinner("검색 중..."):
                     df_all = get_weekly_1to1_swap_table(week_teacher, orig_date, future_days=extra_days, version=ver)
 
@@ -2279,6 +2340,8 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                         df_week = df_all[mask].copy()
                         if only_same_class and not df_week.empty:
                             df_week = df_week[df_week["동일학급"] == "🏆"]
+                        # 이 화면은 동일 학급 간 1:1 교환만 허용한다.
+                        df_week = df_week[df_week["동일학급"] == "🏆"]
                         df_week = df_week.reset_index(drop=True)
 
                     st.session_state["_single_week_df"] = df_week
