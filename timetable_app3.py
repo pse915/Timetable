@@ -2316,7 +2316,11 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
 
                         for idx, (_, row) in enumerate(day_df.iterrows()):
                             with cols[idx % 4]:
-                                btn_label = f"{row['이동교시'] if '이동교시' in row else row['원본교시']}교시\n{row['상대교사']}\n{row['상대수업']}"
+                                target_period = row["이동교시"] if "이동교시" in row.index else row["원본교시"]
+                                btn_label = (
+                                    f"{row['이동희망일']} ({row['이동요일']}) {target_period}교시\n"
+                                    f"{row['상대교사']}\n{row['상대수업']}"
+                                )
                                 if st.button(btn_label, key=f"apply_{day}_{idx}_{row['상대교사']}", use_container_width=True):
                                     a_info = {
                                         "교사명": orig["teacher"],
@@ -2330,7 +2334,7 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                                         "교사명": row["상대교사"],
                                         "일자": row["이동희망일"],
                                         "요일": row["이동요일"],
-                                        "교시": safe_int(row["원본교시"]),
+                                        "교시": safe_int(row["이동교시"] if "이동교시" in row.index else row["원본교시"]),
                                         "학급": str(row["상대수업"]).split()[0] if " " in str(row["상대수업"]) else "",
                                         "과목": " ".join(str(row["상대수업"]).split()[1:]) if " " in str(row["상대수업"]) else str(row["상대수업"])
                                     }
