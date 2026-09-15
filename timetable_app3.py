@@ -694,6 +694,46 @@ def _effective_swap_origin_info(teacher: str, on_date: str, period: int, use_tes
                     return f"{date_a} {period_a}교시의 {teacher_b}와 연계교환"
     return ""
 
+def _effective_sub_origin_info(teacher: str, on_date: str, period: int) -> str:
+    """해당 날짜·교시에 이 교사가 보강으로 배정된 경우 보강 이력을 반환한다."""
+    norm = normalize_date_str(on_date)
+    teacher = str(teacher).strip()
+    period = safe_int(period)
+    if not norm or not teacher or period <= 0:
+        return ""
+
+    subs = st.session_state.get("subs", pd.DataFrame())
+    if subs is None or subs.empty:
+        return ""
+
+    mask = (
+        (subs["일자"].astype(str).map(normalize_date_str) == norm)
+        & (subs["교시"].apply(safe_int) == period)
+        & (subs["보강교사"].astype(str).str.strip() == teacher)
+    )
+    matches = subs[mask]
+    if matches.empty:
+        return ""
+
+    row = matches.iloc[-1]
+    absent_teacher = str(row.get("결강교사", "")).strip()
+    method = str(row.get("배정방식", "")).strip()
+    priority = str(row.get("우선순위", "")).strip()
+    memo = str(row.get("비고", "")).strip()
+
+    parts = []
+    if absent_teacher:
+        parts.append(f"{absent_teacher} 결강 → {teacher} 보강")
+    else:
+        parts.append(f"{teacher} 보강 배정")
+    if method:
+        parts.append(f"배정방식: {method}")
+    if priority:
+        parts.append(f"우선순위: {priority}")
+    if memo:
+        parts.append(f"비고: {memo}")
+    return " / ".join(parts)
+
 
 @st.cache_data(show_spinner=False, ttl=180)
 def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: bool = False) -> pd.DataFrame:
@@ -1596,9 +1636,15 @@ def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = 
             day_tt = daily_timetables[day_kr]
             for period in range(1, PERIODS_PER_DAY.get(day_kr, 7) + 1):
                 found = day_tt[(day_tt["교사명"] == teacher_name) & (day_tt["교시"] == period)]
-                row[f"{day_kr}{period}"] = (
-                    f"{found.iloc[0]['학급']} {found.iloc[0]['과목']}" if not found.empty else ""
-                )
+                if not found.empty:
+                    lesson = found.iloc[0]
+                    cell = f"{lesson['학급']} {lesson['과목']}"
+                    sub_info = _effective_sub_origin_info(teacher_name, day_date.strftime("%Y-%m-%d"), period)
+                    if sub_info:
+                        cell = f"[보강] {cell}  ·  {sub_info}"
+                    row[f"{day_kr}{period}"] = cell
+                else:
+                    row[f"{day_kr}{period}"] = ""
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -1642,10 +1688,11 @@ def get_teacher_week_view(teacher: str, ref_date: date, use_test=False):
                 origin = get_swap_origin_info(teacher, on_date, p)
                 if origin:
                     cell += f" 🔄 from {origin}"
+                sub_info = _effective_sub_origin_info(teacher, on_date, p)
+                if sub_info:
+                    cell = f"[보강] {cell} · {sub_info}"
                 if not absences.empty and ((absences["일자"] == on_date) & (absences["교사명"] == teacher) & (absences["교시"] == p)).any():
                     cell = f"[결강] {cell}"
-                if not subs.empty and ((subs["일자"] == on_date) & (subs["보강교사"] == teacher) & (subs["교시"] == p)).any():
-                    cell = f"[보강] {cell}"
                 row[d] = cell
             else:
                 cell = ""
@@ -2630,6 +2677,7 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         week_anchor = st.date_input("검색 기준 주", value=date.today(), key="week_1to1_week_anchor")
         ver = st.session_state.get("_data_version", 0)
         lesson_matrix = effective_teacher_matrix(week_anchor, ver, use_test=False).copy()
+        st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 시간강사 대체는 교사명(원본교사) 형태")
 
         if lesson_matrix.empty:
             st.warning("교사 시간표 데이터가 없습니다.")
@@ -2680,10 +2728,13 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                             st.session_state["_single_cycle_context"] = cycle_context
                             st.session_state["_single_show_extended_cycles"] = False
                         origin_info = _effective_swap_origin_info(week_teacher, orig_date_str, orig_period, use_test=False)
+                        sub_info = _effective_sub_origin_info(week_teacher, orig_date_str, orig_period)
+                        info_lines = [f"**현재 적용 수업**: {orig_date_str} ({day_kr}) {orig_period}교시 · {lesson['학급']} · {lesson['과목']}"]
                         if origin_info:
-                            st.info(f"**현재 적용 수업**: {orig_date_str} ({day_kr}) {orig_period}교시 · {lesson['학급']} · {lesson['과목']}  \n🔄 변경 이력: {origin_info}")
-                        else:
-                            st.info(f"**현재 적용 수업**: {orig_date_str} ({day_kr}) {orig_period}교시 · {lesson['학급']} · {lesson['과목']}")
+                            info_lines.append(f"🔄 교환 변경 이력: {origin_info}")
+                        if sub_info:
+                            info_lines.append(f"🟢 보강 처리 이력: {sub_info}")
+                        st.info("  \n".join(info_lines))
                         st.caption("🏆 동일 학급 후보만 자동 검색합니다.")
                         df_week = get_single_lesson_1to1_candidates(
                             week_teacher, orig_date.strftime("%Y-%m-%d"), orig_period,
@@ -2863,6 +2914,7 @@ if "시간표 변경 테스트용" in tab_map:
         test_week_anchor = st.date_input("테스트 검색 기준 주", value=date.today(), key="test_week_anchor")
         ver = st.session_state.get("_data_version", 0)
         test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
+        st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
         test_pick_a = None
         if test_matrix.empty:
             st.warning("테스트용 시간표 데이터가 없습니다.")
@@ -2898,10 +2950,13 @@ if "시간표 변경 테스트용" in tab_map:
                             "교시": test_period, "학급": test_lesson["학급"], "과목": test_lesson["과목"]
                         }
                         origin_info = _effective_swap_origin_info(test_teacher, test_date_str, test_period, use_test=True)
+                        sub_info = _effective_sub_origin_info(test_teacher, test_date_str, test_period)
+                        info_lines = [f"**현재 적용 테스트 수업**: {test_date_str} ({test_day}) {test_period}교시 · {test_lesson['학급']} · {test_lesson['과목']}"]
                         if origin_info:
-                            st.info(f"**현재 적용 테스트 수업**: {test_date_str} ({test_day}) {test_period}교시 · {test_lesson['학급']} · {test_lesson['과목']}  \n🔄 변경 이력: {origin_info}")
-                        else:
-                            st.info(f"**현재 적용 테스트 수업**: {test_date_str} ({test_day}) {test_period}교시 · {test_lesson['학급']} · {test_lesson['과목']}")
+                            info_lines.append(f"🔄 교환 변경 이력: {origin_info}")
+                        if sub_info:
+                            info_lines.append(f"🟢 보강 처리 이력: {sub_info}")
+                        st.info("  \n".join(info_lines))
                 else:
                     st.info("교사명이나 빈칸이 아닌 수업 셀을 클릭하세요.")
             else:
@@ -3003,6 +3058,7 @@ if "변경된 교사 주간표" in tab_map:
             st.info(f"변경 교사 {len(changed)}명: {', '.join(changed)}")
             for t in changed:
                 with st.expander(f"👤 {t}", expanded=False):
+                    st.caption("🔄 교환 이력 / 🟢 보강 처리 이력이 각 수업 칸에 표시됩니다.")
                     grid, _ = get_teacher_week_view(t, ref)
                     st.dataframe(grid, use_container_width=True, hide_index=True)
 
