@@ -640,29 +640,17 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
             for sw in test_swaps[mask].itertuples(index=False):
                 t_a, p_a = str(sw.교사A).strip(), safe_int(sw.교시A)
                 t_b, p_b = str(sw.교사B).strip(), safe_int(sw.교시B)
-                typ = str(getattr(sw, "유형", "")).strip()
                 s_a = str(getattr(sw, "과목A", "")).strip()
                 c_a = str(getattr(sw, "학급A", "")).strip()
-                s_b = str(getattr(sw, "과목B", "")).strip()
-                c_b = str(getattr(sw, "학급B", "")).strip()
-                # 실제(비테스트) 교환 처리와 동일하게 '유형'을 구분해야 함.
-                # 연계(순환) 교환은 A가 옮겨간 자리에 B가 그대로 들어오는 1:1 구조가 아니므로,
-                # 유형을 구분하지 않으면 순환의 다른 이동 기록이 잘못 덮어써지는 문제가 있었음.
                 if sw.원본일자 == norm:
                     current.pop((t_a, p_a), None)
-                    if typ in ["1:1 맞교환", "1:1맞교환", "직접1:1"] and t_b:
+                    if t_b:
                         current[(t_b, p_a)] = {"교사명": t_b, "요일": day, "교시": p_a,
-                                               "과목": s_b or s_a, "학급": c_b or c_a,
-                                               "과목군": subject_group(s_b or s_a), "원본교사": ""}
-                if sw.목표일자 == norm:
-                    if typ in ["1:1 맞교환", "1:1맞교환", "직접1:1"]:
-                        current.pop((t_b, p_b), None)
-                        if t_a and p_b:
-                            current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
-                                                   "과목": s_a, "학급": c_a, "과목군": subject_group(s_a), "원본교사": ""}
-                    elif "연계" in typ and t_a and p_b:
-                        current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
                                                "과목": s_a, "학급": c_a, "과목군": subject_group(s_a), "원본교사": ""}
+                if sw.목표일자 == norm and t_a and p_b:
+                    current.pop((t_b, p_b), None)
+                    current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
+                                           "과목": s_a, "학급": c_a, "과목군": subject_group(s_a), "원본교사": ""}
 
     subs = st.session_state.subs
     if not subs.empty:
@@ -702,27 +690,21 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
         df = pd.DataFrame(columns=["교사명", "요일", "교시", "과목", "학급", "과목군", "원본교사"])
     return df
 
-def get_swap_origin_info(teacher: str, on_date: str, period: int, use_test: bool = False) -> str:
+def get_swap_origin_info(teacher: str, on_date: str, period: int) -> str:
     norm_date = normalize_date_str(on_date)
     if not norm_date:
         return ""
     swaps = st.session_state.get("swaps", pd.DataFrame())
-    frames = [swaps] if not swaps.empty else []
-    if use_test:
-        test_swaps = st.session_state.get("test_swaps", pd.DataFrame())
-        if not test_swaps.empty:
-            frames.append(test_swaps)
-    if not frames:
+    if swaps.empty:
         return ""
-    all_swaps = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
     p = safe_int(period)
-    mask1 = (all_swaps["목표일자"] == norm_date) & (all_swaps["교사A"] == teacher) & (all_swaps["교시B"] == p)
+    mask1 = (swaps["목표일자"] == norm_date) & (swaps["교사A"] == teacher) & (swaps["교시B"] == p)
     if mask1.any():
-        row = all_swaps[mask1].iloc[0]
+        row = swaps[mask1].iloc[0]
         return f"{row.get('요일A','')}{safe_int(row.get('교시A',0))}({row.get('교사B','')})"
-    mask2 = (all_swaps["원본일자"] == norm_date) & (all_swaps["교사B"] == teacher) & (all_swaps["교시A"] == p)
+    mask2 = (swaps["원본일자"] == norm_date) & (swaps["교사B"] == teacher) & (swaps["교시A"] == p)
     if mask2.any():
-        row = all_swaps[mask2].iloc[0]
+        row = swaps[mask2].iloc[0]
         return f"{row.get('요일B','')}{safe_int(row.get('교시B',0))}({row.get('교사A','')})"
     return ""
 
@@ -1168,7 +1150,7 @@ def get_teacher_week_view(teacher: str, ref_date: date, use_test=False):
                     cell = f"{r['교사명']}({r['원본교사']}) {r['학급']} {r['과목']}"
                 else:
                     cell = f"{r['학급']} {r['과목']}"
-                origin = get_swap_origin_info(teacher, on_date, p, use_test=use_test)
+                origin = get_swap_origin_info(teacher, on_date, p)
                 if origin:
                     cell += f" 🔄 from {origin}"
                 if not absences.empty and ((absences["일자"] == on_date) & (absences["교사명"] == teacher) & (absences["교시"] == p)).any():
@@ -2306,19 +2288,7 @@ if "시간표 변경 테스트용" in tab_map:
                                 st.rerun()
 
         st.markdown("#### 테스트 적용 후 주간표 미리보기")
-        my_teacher_name = current_name()
-        if is_edu_or_master():
-            # 관리자/교육과정부는 다른 교사 시간표도 확인할 수 있어야 하므로 선택은 유지하되,
-            # 기본값은 본인 이름으로 맞춰준다.
-            default_idx = tlist.index(my_teacher_name) if my_teacher_name in tlist else 0
-            t_preview = st.selectbox("미리볼 교사", tlist, index=default_idx, key="test_preview_t")
-        else:
-            # 일반교사는 본인 시간표만 미리볼 수 있도록 고정 (다른 사람 시간표 열람 방지)
-            t_preview = my_teacher_name
-            if t_preview in tlist:
-                st.caption(f"👤 **{t_preview}** 선생님의 시간표")
-            else:
-                st.warning("로그인한 이름과 일치하는 교사 정보를 찾을 수 없습니다. 관리자에게 문의하세요.")
+        t_preview = st.selectbox("미리볼 교사", tlist, key="test_preview_t")
         ref_preview = st.date_input("미리보기 기준일", value=date.today(), key="test_preview_d")
         grid, dates = get_teacher_week_view(t_preview, ref_preview, use_test=True)
         st.caption(f"{dates[0]} ~ {dates[4]}  (테스트 반영됨)")
