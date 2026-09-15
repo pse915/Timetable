@@ -434,6 +434,7 @@ def _invalidate_all_caches():
     st.session_state._data_version = st.session_state.get("_data_version", 0) + 1
     get_effective_timetable_for_date.clear()
     get_single_lesson_1to1_candidates.clear()
+    get_single_lesson_linked_cycles.clear()
     effective_teacher_matrix.clear()
     teacher_matrix.clear()
     class_matrix.clear()
@@ -1263,6 +1264,70 @@ def get_single_lesson_1to1_candidates(
     return pd.DataFrame(results).sort_values(
         ["점수", "이동희망일", "상대교사"], ascending=[False, True, True]
     ).reset_index(drop=True) if results else pd.DataFrame()
+
+@st.cache_data(show_spinner=False, ttl=180)
+def get_single_lesson_linked_cycles(
+    teacher: str, orig_date_str: str, orig_period: int,
+    orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0
+):
+    """1:1 후보가 없을 때만 사용할, 선택 수업용 연계 순환 후보 탐색."""
+    source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
+    source_str = source_date.strftime("%Y-%m-%d")
+    monday = source_date - timedelta(days=source_date.weekday())
+    search_dates = [monday + timedelta(days=i) for i in range(5)]
+    if future_days > 0:
+        friday = search_dates[-1]
+        search_dates.extend(
+            friday + timedelta(days=i)
+            for i in range(1, future_days + 1)
+            if (friday + timedelta(days=i)).weekday() < 5
+        )
+
+    ver = version or st.session_state.get("_data_version", 0)
+    target_slots = []
+    for target_date in search_dates:
+        target_str = target_date.strftime("%Y-%m-%d")
+        if target_str == source_str:
+            continue
+        target_day = WEEKDAY_KR[target_date.weekday()]
+        target_tt = get_effective_timetable_for_date(target_str, ver)
+        if target_tt.empty:
+            continue
+        class_lessons = target_tt[target_tt["학급"] == orig_class]
+        for _, row in class_lessons.iterrows():
+            target_period = safe_int(row["교시"])
+            if is_free(teacher, target_day, target_period, target_str, target_tt):
+                # 같은 교시·가까운 날짜·같은 과목군을 우선으로, 탐색 수를 제한한다.
+                priority = (
+                    0 if target_period == orig_period else 1,
+                    abs((target_date - source_date).days),
+                    0 if subject_group(str(row["과목"])) == subject_group(orig_subject) else 1
+                )
+                target_slots.append((priority, target_str, target_period))
+
+    if not target_slots:
+        return [], "연계 순환을 시작할 수 있는 빈 시간대가 없습니다."
+
+    target_slots.sort()
+    all_cycles, seen_paths = [], set()
+    # 최대 10개 목표 슬롯만 검사해, 1:1 실패 시에도 화면 반응을 유지한다.
+    for _, target_str, target_period in target_slots[:10]:
+        cycles, _ = find_cycle_linked_swaps(
+            teacher, source_str, orig_period, orig_class, orig_subject,
+            target_str, target_period, max_cycle=4, future_days=future_days, version=ver
+        )
+        for cycle in cycles:
+            cycle_key = tuple((m["teacher"], m["from_date"], m["from_period"], m["to_date"], m["to_period"]) for m in cycle["moves"])
+            if cycle_key not in seen_paths:
+                seen_paths.add(cycle_key)
+                all_cycles.append(cycle)
+        if len(all_cycles) >= 6:
+            break
+
+    all_cycles.sort(key=lambda c: (c["length"], -c["score"]))
+    if not all_cycles:
+        return [], "조건을 만족하는 연계 순환 경로가 없습니다."
+    return all_cycles[:6], f"{len(all_cycles)}개 연계 순환 경로 발견"
 # ==========================================================================================
 # 뷰 헬퍼
 # ==========================================================================================
@@ -2381,6 +2446,8 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                         st.warning("선택한 셀의 수업을 해당 날짜 시간표에서 찾을 수 없습니다.")
                         st.session_state.pop("_single_week_df", None)
                         st.session_state.pop("_single_orig", None)
+                        st.session_state.pop("_single_linked_cycles", None)
+                        st.session_state.pop("_single_linked_cycle_msg", None)
                     else:
                         lesson = selected_lesson.iloc[0]
                         st.info(f"**원본 수업**: {orig_date.strftime('%Y-%m-%d')} ({day_kr}) {orig_period}교시 · {lesson['학급']} · {lesson['과목']}")
@@ -2390,8 +2457,18 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                             str(lesson["학급"]), str(lesson["과목"]),
                             future_days=extra_days, version=ver
                         )
+                        if df_week.empty:
+                            linked_cycles, linked_cycle_msg = get_single_lesson_linked_cycles(
+                                week_teacher, orig_date.strftime("%Y-%m-%d"), orig_period,
+                                str(lesson["학급"]), str(lesson["과목"]),
+                                future_days=extra_days, version=ver
+                            )
+                        else:
+                            linked_cycles, linked_cycle_msg = [], ""
 
                         st.session_state["_single_week_df"] = df_week
+                        st.session_state["_single_linked_cycles"] = linked_cycles
+                        st.session_state["_single_linked_cycle_msg"] = linked_cycle_msg
                         st.session_state["_single_orig"] = {
                             "teacher": week_teacher,
                             "date": orig_date.strftime("%Y-%m-%d"),
@@ -2404,6 +2481,8 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                     st.info("교사명이나 빈칸이 아닌, 수업 내용이 적힌 셀을 클릭하세요.")
                     st.session_state.pop("_single_week_df", None)
                     st.session_state.pop("_single_orig", None)
+                    st.session_state.pop("_single_linked_cycles", None)
+                    st.session_state.pop("_single_linked_cycle_msg", None)
             else:
                 st.info("시간표 매트릭스에서 원본 수업 셀 하나를 클릭하세요.")
 
@@ -2412,7 +2491,27 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                 orig = st.session_state["_single_orig"]
 
                 if dfw.empty:
-                    st.warning("이 수업을 옮길 수 있는 1:1 교환이 없습니다.")
+                    st.warning("동일 학급 1:1 교환 후보가 없습니다.")
+                    linked_cycles = st.session_state.get("_single_linked_cycles", [])
+                    linked_cycle_msg = st.session_state.get("_single_linked_cycle_msg", "")
+                    st.markdown("#### 🔗 연계 순환 교환 (1:1 후보 없을 때만 표시)")
+                    st.caption(linked_cycle_msg)
+                    if not linked_cycles:
+                        st.info("조건을 만족하는 연계 순환 경로가 없습니다.")
+                    else:
+                        for idx, cyc in enumerate(linked_cycles):
+                            with st.expander(
+                                f"{'✅' if cyc['length'] == 2 else '🔗'} {cyc['length']}인 순환 · 점수 {cyc['score']}",
+                                expanded=(idx == 0)
+                            ):
+                                st.markdown(f"**경로**: `{cyc['path_desc']}`")
+                                st.caption("학급의 담당교사·과목·시수가 보존되는 순환 교환입니다.")
+                                if st.button("이 순환 적용하기", key=f"matrix_cyc_{idx}"):
+                                    apply_cycle_swaps(cyc["moves"], is_test=False)
+                                    st.session_state.pop("_single_week_df", None)
+                                    st.session_state.pop("_single_linked_cycles", None)
+                                    st.success(f"{cyc['length']}인 순환 교환이 등록되었습니다.")
+                                    st.rerun()
                 else:
                     st.success(f"총 {len(dfw)}건의 가능한 위치")
 
@@ -2470,67 +2569,6 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                     except:
                         pass
-
-        st.divider()
-        col_a, col_b = st.columns(2)
-        tlist = st.session_state.teachers["교사명"].tolist()
-
-        with col_a:
-            st.markdown("#### 1️⃣ 원본 수업")
-            date_a = st.date_input("원본 날짜", value=date.today(), key="sw_da")
-            date_a_str = date_a.strftime("%Y-%m-%d")
-            day_a = WEEKDAY_KR[date_a.weekday()]
-            t_a = st.selectbox("교사 A", tlist, key="sw_ta")
-            ver = st.session_state.get("_data_version", 0)
-            e_a = get_effective_timetable_for_date(date_a_str, ver)
-            sub_a = e_a[(e_a["교사명"] == t_a) & (e_a["요일"] == day_a)].sort_values("교시")
-            pick_a = None
-            if not sub_a.empty:
-                opts = [f"{safe_int(r.교시)}교시 · {r.학급} · {r.과목}" for r in sub_a.itertuples()]
-                sel = st.selectbox("변경할 수업", opts, key="sw_la")
-                row = sub_a.iloc[opts.index(sel)]
-                pick_a = {"교사명": t_a, "일자": date_a_str, "요일": day_a, "교시": safe_int(row.교시),
-                          "학급": row.학급, "과목": row.과목}
-
-        with col_b:
-            st.markdown("#### 2️⃣ 이동 희망 시간")
-            date_b = st.date_input("이동 희망 날짜", value=date.today(), key="sw_db")
-            date_b_str = date_b.strftime("%Y-%m-%d")
-            day_b = WEEKDAY_KR[date_b.weekday()]
-            p_b = st.selectbox("희망 교시", list(range(1, PERIODS_PER_DAY.get(day_b, 7)+1)), key="sw_pb")
-
-        is_pt = st.checkbox("시간강사 구인 목적")
-
-        if pick_a:
-            st.subheader(f"{pick_a['교시']}교시 → {date_b_str} {p_b}교시")
-            df_swap, cycles, cycle_msg = get_target_time_recommendations(
-                pick_a["교사명"], pick_a["일자"], pick_a["교시"], pick_a["학급"], pick_a["과목"],
-                date_b_str, p_b
-            )
-            t1, t2 = st.tabs(["1:1 맞교환 (동일 학급 최우선)", "연계 순환 교환 (2~4인)"])
-            with t1:
-                if df_swap.empty:
-                    st.info("추천 없음")
-                else:
-                    for idx, row in df_swap.iterrows():
-                        mark = "🏆 동일학급" if row.get("same_class") else ("⚠ 같은학년" if row.get("same_grade") else "⚠ 다른학년")
-                        with st.expander(f"{mark} {row['교사B']} ({row['현재 수업']})", expanded=(idx==0)):
-                            if st.button(f"{row['교사B']}와 맞교환", key=f"sw_{idx}"):
-                                do_swap(pick_a, row["b_info"], date_a_str, date_b_str, is_pt)
-                                st.rerun()
-            with t2:
-                st.caption(cycle_msg)
-                if not cycles:
-                    st.info("조건을 만족하는 순환 경로가 없습니다.")
-                else:
-                    for idx, cyc in enumerate(cycles):
-                        with st.expander(f"{'✅' if cyc['length']==2 else '🔗'} {cyc['length']}인 순환 · 점수 {cyc['score']}", expanded=(idx==0)):
-                            st.markdown(f"**경로**: `{cyc['path_desc']}`")
-                            st.caption("학급의 담당교사·과목·시수가 완전히 보존됩니다.")
-                            if st.button(f"이 순환 적용하기", key=f"cyc_{idx}"):
-                                apply_cycle_swaps(cyc["moves"], is_test=False)
-                                st.success(f"{cyc['length']}인 순환 교환이 등록되었습니다.")
-                                st.rerun()
 
         show_swaps = filter_by_owner(st.session_state.swaps)
         st.dataframe(show_swaps, use_container_width=True, hide_index=True)
