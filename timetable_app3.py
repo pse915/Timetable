@@ -1095,16 +1095,25 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
     return df_swap, cycles, msg
 def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 0, version: int = 0) -> pd.DataFrame:
     """
-    선택한 교사의 해당 주(월~금) 수업 전체에 대해
-    가능한 1:1 맞교환 후보를 표 형태로 반환.
+    선택한 교사의 해당 주 + 미래 며칠 동안
+    가능한 1:1 맞교환 후보를 모두 반환 (원본일자 컬럼 포함)
     """
-    # 해당 주 월요일 구하기
     weekday = ref_date.weekday()
     monday = ref_date - timedelta(days=weekday)
     week_dates = [(monday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(5)]
 
     ver = version or st.session_state.get("_data_version", 0)
     results = []
+
+    # 검색할 모든 날짜 (해당 주 + 미래)
+    search_dates = week_dates[:]
+    if future_days > 0:
+        last = datetime.strptime(week_dates[-1], "%Y-%m-%d").date()
+        for i in range(1, future_days + 1):
+            nd = last + timedelta(days=i)
+            if nd.weekday() < 5:
+                search_dates.append(nd.strftime("%Y-%m-%d"))
+    search_dates = sorted(set(search_dates))
 
     for d_str in week_dates:
         day_kr = WEEKDAY_KR[datetime.strptime(d_str, "%Y-%m-%d").weekday()]
@@ -1120,39 +1129,41 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
             my_grade = grade_of(my_class)
             my_group = subject_group(my_subj)
 
-            # 같은 주의 다른 날 + (옵션) 미래 며칠까지 탐색
-            search_dates = week_dates[:]
-            if future_days > 0:
-                last = datetime.strptime(week_dates[-1], "%Y-%m-%d").date()
-                for i in range(1, future_days + 1):
-                    nd = last + timedelta(days=i)
-                    if nd.weekday() < 5:
-                        search_dates.append(nd.strftime("%Y-%m-%d"))
-
             for td_str in search_dates:
                 if td_str == d_str:
                     continue
+
                 tday = WEEKDAY_KR[datetime.strptime(td_str, "%Y-%m-%d").weekday()]
                 e_b = get_effective_timetable_for_date(td_str, ver)
+                if e_b.empty:
+                    continue
 
-                # 같은 교시에 수업이 있는 다른 교사 찾기
-                others = e_b[(e_b["교시"] == p) & (e_b["교사명"] != teacher)] if not e_b.empty else pd.DataFrame()
+                # 같은 교시에 수업이 있는 다른 교사
+                others = e_b[(e_b["교시"] == p) & (e_b["교사명"] != teacher)]
                 for _, o in others.iterrows():
-                    if not (is_free(teacher, tday, p, td_str, e_b) and
-                            is_free(str(o["교사명"]), day_kr, p, d_str, e_tt)):
+                    # 서로 공강인지 확인
+                    if not is_free(teacher, tday, p, td_str, e_b):
+                        continue
+                    if not is_free(str(o["교사명"]), day_kr, p, d_str, e_tt):
                         continue
 
                     other_class = str(o["학급"]).strip()
                     other_grade = grade_of(other_class)
                     same_class  = (other_class == my_class)
                     same_grade  = (other_grade == my_grade)
+
                     score = 0
-                    if same_class: score += 200
-                    elif same_grade: score += 100
-                    if subject_group(str(o["과목"])) == my_group: score += 40
-                    if td_str[:7] == d_str[:7]: score += 10   # 같은 달 가산
+                    if same_class:
+                        score += 200
+                    elif same_grade:
+                        score += 100
+                    if subject_group(str(o["과목"])) == my_group:
+                        score += 40
+                    if td_str[:7] == d_str[:7]:
+                        score += 10
 
                     results.append({
+                        "원본일자": d_str,
                         "원본요일": day_kr,
                         "원본교시": p,
                         "원본학급": my_class,
@@ -1168,7 +1179,12 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                     })
 
     if not results:
-        return pd.DataFrame()
+        # 빈 결과여도 컬럼은 유지
+        return pd.DataFrame(columns=[
+            "원본일자", "원본요일", "원본교시", "원본학급", "원본과목",
+            "이동희망일", "이동요일", "상대교사", "상대수업",
+            "동일학급", "동학년", "점수"
+        ])
 
     df = pd.DataFrame(results)
     df = df.sort_values("_sort").drop(columns=["_sort"]).reset_index(drop=True)
@@ -2212,10 +2228,9 @@ if "결강·보강" in tab_map:
 if "시간표 맞교환 & 변경 추천" in tab_map:
     with tab_map["시간표 맞교환 & 변경 추천"]:
         st.markdown("### 🔄 스마트 시간표 변경 & 맞교환")
-                          # ========== 단일 수업 기준 주간 1:1 매트릭스 (오류 수정 + 수업 있는 교시만) ==========
+                                # ========== 단일 수업 → 주간 1:1 매트릭스 (버그 수정 완료) ==========
         st.markdown("### 📅 단일 수업 → 주간 1:1 가능 매트릭스")
 
-        # 1. 원본 수업 선택
         col1, col2 = st.columns([2, 1.5])
         with col1:
             week_teacher = st.selectbox(
@@ -2234,7 +2249,6 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         ver = st.session_state.get("_data_version", 0)
         e_orig = get_effective_timetable_for_date(orig_date.strftime("%Y-%m-%d"), ver)
 
-        # ★ 그날 실제 수업이 있는 교시만 추출
         my_lessons = e_orig[
             (e_orig["교사명"] == week_teacher) &
             (e_orig["요일"] == day_kr)
@@ -2243,9 +2257,8 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         if my_lessons.empty:
             st.warning(f"{week_teacher} 선생님의 {orig_date} ({day_kr}) 수업이 없습니다.")
         else:
-            # 교시 선택 (수업 있는 것만)
             period_opts = []
-            period_map = {}  # 표시용 → 실제 행
+            period_map = {}
             for _, r in my_lessons.iterrows():
                 p = safe_int(r["교시"])
                 label = f"{p}교시 · {r['학급']} · {r['과목']}"
@@ -2262,27 +2275,29 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
 
             st.info(f"**원본 수업**: {day_kr} {orig_period}교시 · {lesson['학급']} · {lesson['과목']}")
 
-            only_same_class = st.checkbox("🏆 동일 학급만 보기", value=True, key="week_only_same")
-            extra_days = st.slider("미래 추가 검색 일수", 0, 14, 0, key="week_extra_days")
+            only_same_class = st.checkbox("🏆 동일 학급만 보기", value=False, key="week_only_same")  # 기본값을 False로 변경
+            extra_days = st.slider("미래 추가 검색 일수", 0, 14, 7, key="week_extra_days")
 
             if st.button("이 수업의 주간 1:1 매트릭스 생성", type="primary", key="btn_gen_matrix"):
                 with st.spinner("검색 중..."):
                     df_all = get_weekly_1to1_swap_table(
-                        week_teacher, orig_date, future_days=extra_days
+                        week_teacher, orig_date, future_days=extra_days, version=ver
                     )
 
-                    # ★ 빈 DataFrame 또는 컬럼 없을 때 안전하게 처리
-                    if df_all is None or df_all.empty or "원본일자" not in df_all.columns:
+                    # 안전하게 필터
+                    if df_all.empty or "원본일자" not in df_all.columns:
                         df_week = pd.DataFrame()
                     else:
                         mask = (
                             (df_all["원본일자"] == orig_date.strftime("%Y-%m-%d")) &
                             (df_all["원본교시"] == orig_period)
                         )
-                        df_week = df_all[mask].reset_index(drop=True)
+                        df_week = df_all[mask].copy()
 
                         if only_same_class and not df_week.empty:
-                            df_week = df_week[df_week["동일학급"] == "🏆"].reset_index(drop=True)
+                            df_week = df_week[df_week["동일학급"] == "🏆"]
+
+                        df_week = df_week.reset_index(drop=True)
 
                     st.session_state["_single_week_df"] = df_week
                     st.session_state["_single_orig"] = {
@@ -2293,32 +2308,26 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                         "class": str(lesson["학급"]),
                         "subject": str(lesson["과목"])
                     }
-                    st.session_state.pop("_selected_cell", None)
 
-            # 결과 표시
             if "_single_week_df" in st.session_state:
                 dfw = st.session_state["_single_week_df"]
                 orig = st.session_state["_single_orig"]
 
                 if dfw.empty:
-                    st.info("이 수업을 옮길 수 있는 1:1 교환이 없습니다.")
+                    st.warning("이 수업을 옮길 수 있는 1:1 교환이 없습니다.")
+                    st.caption("※ 동일 학급 필터를 끄고 다시 검색해 보세요. 또는 미래 일수를 늘려보세요.")
                 else:
                     st.success(f"총 {len(dfw)}건의 가능한 위치 발견")
 
-                    # -------------------------------------------------
-                    # 매트릭스 생성
-                    # -------------------------------------------------
-                    weekday = orig_date.weekday()
-                    monday = orig_date - timedelta(days=weekday)
+                    # 매트릭스 만들기
                     day_names = ["월", "화", "수", "목", "금"]
-
                     cell_content = {d: {p: [] for p in range(1, 8)} for d in day_names}
                     cell_data = {}
 
                     for _, row in dfw.iterrows():
                         tday = row["이동요일"]
                         tp = safe_int(row["원본교시"])
-                        if tday in cell_content and tp in cell_content[tday]:
+                        if tday in cell_content:
                             label = f"{row['상대교사']} ({row['상대수업']})"
                             cell_content[tday][tp].append(label)
                             key = (tday, tp)
@@ -2326,51 +2335,34 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                                 cell_data[key] = []
                             cell_data[key].append(row)
 
-                    matrix = {}
-                    for d in day_names:
-                        matrix[d] = {}
-                        for p in range(1, 8):
-                            items = cell_content[d][p]
-                            matrix[d][p] = "\n".join(items) if items else ""
-
+                    matrix = {d: {p: "\n".join(cell_content[d][p]) if cell_content[d][p] else "" 
+                                  for p in range(1, 8)} for d in day_names}
                     matrix_df = pd.DataFrame(matrix).T
                     matrix_df.columns = [f"{p}교시" for p in range(1, 8)]
-                    matrix_df.index.name = "요일"
 
                     st.markdown("#### 📊 주간 가능 위치 매트릭스")
-                    st.caption("아래에서 이동할 요일·교시를 선택하면 적용 버튼이 나타납니다.")
                     st.dataframe(matrix_df, use_container_width=True, height=280)
 
-                    # -------------------------------------------------
-                    # 셀 선택 → 적용 버튼
-                    # -------------------------------------------------
+                    # 선택 후 적용
                     st.markdown("##### 이동할 시간 선택")
-                    sel_col1, sel_col2 = st.columns(2)
-                    with sel_col1:
-                        sel_day = st.selectbox("이동 요일", day_names, key="sel_day_matrix")
-                    with sel_col2:
-                        sel_period = st.selectbox("이동 교시", list(range(1, 8)), key="sel_p_matrix")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        sel_day = st.selectbox("이동 요일", day_names, key="sel_day_m")
+                    with c2:
+                        sel_period = st.selectbox("이동 교시", list(range(1, 8)), key="sel_p_m")
 
-                    selected_key = (sel_day, sel_period)
-                    candidates = cell_data.get(selected_key, [])
+                    candidates = cell_data.get((sel_day, sel_period), [])
 
                     if candidates:
-                        st.success(f"**{sel_day} {sel_period}교시** 로 이동 가능한 상대 {len(candidates)}명")
-
+                        st.success(f"**{sel_day} {sel_period}교시** 가능 상대 {len(candidates)}명")
                         if len(candidates) == 1:
                             chosen = candidates[0]
-                            st.write(f"상대: **{chosen['상대교사']}** ({chosen['상대수업']})")
                         else:
                             opts = [f"{c['상대교사']} ({c['상대수업']})" for c in candidates]
-                            chosen_idx = st.radio(
-                                "상대 교사 선택",
-                                range(len(opts)),
-                                format_func=lambda i: opts[i],
-                                key="radio_partner"
-                            )
-                            chosen = candidates[chosen_idx]
+                            idx = st.radio("상대 선택", range(len(opts)), format_func=lambda i: opts[i], key="radio_c")
+                            chosen = candidates[idx]
 
-                        if st.button("✅ 이 교환 적용하기", type="primary", key="btn_apply_selected_cell"):
+                        if st.button("✅ 이 교환 적용하기", type="primary", key="btn_apply_m"):
                             a_info = {
                                 "교사명": orig["teacher"],
                                 "일자": orig["date"],
@@ -2387,34 +2379,23 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                                 "학급": str(chosen["상대수업"]).split()[0] if " " in str(chosen["상대수업"]) else "",
                                 "과목": " ".join(str(chosen["상대수업"]).split()[1:]) if " " in str(chosen["상대수업"]) else str(chosen["상대수업"])
                             }
-
                             if do_swap(a_info, b_info, orig["date"], chosen["이동희망일"]):
-                                st.success(f"✅ {orig['teacher']} ↔ {chosen['상대교사']} 맞교환 등록 완료!")
-                                for k in ["_single_week_df", "_single_orig"]:
-                                    st.session_state.pop(k, None)
+                                st.success("맞교환 등록 완료!")
+                                st.session_state.pop("_single_week_df", None)
                                 st.rerun()
-                            else:
-                                st.error("등록 실패")
                     else:
-                        st.info(f"{sel_day} {sel_period}교시에는 가능한 교환이 없습니다.")
+                        st.info(f"{sel_day} {sel_period}교시에는 후보가 없습니다.")
 
                     # 엑셀
-                    st.divider()
                     try:
-                        xls = to_excel_bytes({"상세후보": dfw, "매트릭스": matrix_df.reset_index()})
-                        st.download_button(
-                            "📥 엑셀 다운로드",
-                            data=xls,
-                            file_name=f"단일수업_주간1대1_{week_teacher}_{orig_date}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
+                        xls = to_excel_bytes({"후보": dfw, "매트릭스": matrix_df.reset_index()})
+                        st.download_button("📥 엑셀 다운로드", data=xls,
+                                           file_name=f"1대1_{week_teacher}_{orig_date}.xlsx",
+                                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                     except:
-                        csv = dfw.to_csv(index=False).encode("utf-8-sig")
-                        st.download_button("📥 CSV 다운로드", data=csv,
-                                          file_name=f"단일수업_주간1대1_{week_teacher}.csv")
+                        pass
 
         st.divider()
-        # ========== 끝 ==========
         col_a, col_b = st.columns(2)
         tlist = st.session_state.teachers["교사명"].tolist()
 
