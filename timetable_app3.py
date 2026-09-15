@@ -643,17 +643,32 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
             for sw in test_swaps[mask].itertuples(index=False):
                 t_a, p_a = str(sw.교사A).strip(), safe_int(sw.교시A)
                 t_b, p_b = str(sw.교사B).strip(), safe_int(sw.교시B)
+                typ = str(getattr(sw, "유형", "")).strip()
                 s_a = str(getattr(sw, "과목A", "")).strip()
                 c_a = str(getattr(sw, "학급A", "")).strip()
+                s_b = str(getattr(sw, "과목B", "")).strip()
+                c_b = str(getattr(sw, "학급B", "")).strip()
+
+                # 테스트용도 실제 맞교환 로직과 동일하게 적용한다.
+                # 원본일에는 B의 원래 수업(B 과목/학급)을 A의 슬롯으로 이동시키고,
+                # 목표일에는 A의 원래 수업(A 과목/학급)을 B의 슬롯으로 이동시킨다.
                 if sw.원본일자 == norm:
                     current.pop((t_a, p_a), None)
-                    if t_b:
+                    if typ in ["1:1 맞교환", "1:1맞교환", "직접1:1"] and t_b:
                         current[(t_b, p_a)] = {"교사명": t_b, "요일": day, "교시": p_a,
-                                               "과목": s_a, "학급": c_a, "과목군": subject_group(s_a), "원본교사": ""}
-                if sw.목표일자 == norm and t_a and p_b:
-                    current.pop((t_b, p_b), None)
-                    current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
-                                           "과목": s_a, "학급": c_a, "과목군": subject_group(s_a), "원본교사": ""}
+                                               "과목": s_b or s_a, "학급": c_b or c_a,
+                                               "과목군": subject_group(s_b or s_a), "원본교사": ""}
+                if sw.목표일자 == norm:
+                    if typ in ["1:1 맞교환", "1:1맞교환", "직접1:1"]:
+                        current.pop((t_b, p_b), None)
+                        if t_a and p_b:
+                            current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
+                                                   "과목": s_a, "학급": c_a,
+                                                   "과목군": subject_group(s_a), "원본교사": ""}
+                    elif "연계" in typ and t_a and p_b:
+                        current[(t_a, p_b)] = {"교사명": t_a, "요일": day, "교시": p_b,
+                                               "과목": s_a, "학급": c_a,
+                                               "과목군": subject_group(s_a), "원본교사": ""}
 
     subs = st.session_state.subs
     if not subs.empty:
