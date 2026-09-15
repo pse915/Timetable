@@ -1093,7 +1093,86 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
         date_b_str, period_b, max_cycle=3, future_days=7, version=ver
     )
     return df_swap, cycles, msg
+def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 0, version: int = 0) -> pd.DataFrame:
+    """
+    선택한 교사의 해당 주(월~금) 수업 전체에 대해
+    가능한 1:1 맞교환 후보를 표 형태로 반환.
+    """
+    # 해당 주 월요일 구하기
+    weekday = ref_date.weekday()
+    monday = ref_date - timedelta(days=weekday)
+    week_dates = [(monday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(5)]
 
+    ver = version or st.session_state.get("_data_version", 0)
+    results = []
+
+    for d_str in week_dates:
+        day_kr = WEEKDAY_KR[datetime.strptime(d_str, "%Y-%m-%d").weekday()]
+        e_tt = get_effective_timetable_for_date(d_str, ver)
+        if e_tt.empty:
+            continue
+
+        my_lessons = e_tt[(e_tt["교사명"] == teacher) & (e_tt["요일"] == day_kr)].sort_values("교시")
+        for _, lesson in my_lessons.iterrows():
+            p = safe_int(lesson["교시"])
+            my_class = str(lesson["학급"]).strip()
+            my_subj  = str(lesson["과목"]).strip()
+            my_grade = grade_of(my_class)
+            my_group = subject_group(my_subj)
+
+            # 같은 주의 다른 날 + (옵션) 미래 며칠까지 탐색
+            search_dates = week_dates[:]
+            if future_days > 0:
+                last = datetime.strptime(week_dates[-1], "%Y-%m-%d").date()
+                for i in range(1, future_days + 1):
+                    nd = last + timedelta(days=i)
+                    if nd.weekday() < 5:
+                        search_dates.append(nd.strftime("%Y-%m-%d"))
+
+            for td_str in search_dates:
+                if td_str == d_str:
+                    continue
+                tday = WEEKDAY_KR[datetime.strptime(td_str, "%Y-%m-%d").weekday()]
+                e_b = get_effective_timetable_for_date(td_str, ver)
+
+                # 같은 교시에 수업이 있는 다른 교사 찾기
+                others = e_b[(e_b["교시"] == p) & (e_b["교사명"] != teacher)] if not e_b.empty else pd.DataFrame()
+                for _, o in others.iterrows():
+                    if not (is_free(teacher, tday, p, td_str, e_b) and
+                            is_free(str(o["교사명"]), day_kr, p, d_str, e_tt)):
+                        continue
+
+                    other_class = str(o["학급"]).strip()
+                    other_grade = grade_of(other_class)
+                    same_class  = (other_class == my_class)
+                    same_grade  = (other_grade == my_grade)
+                    score = 0
+                    if same_class: score += 200
+                    elif same_grade: score += 100
+                    if subject_group(str(o["과목"])) == my_group: score += 40
+                    if td_str[:7] == d_str[:7]: score += 10   # 같은 달 가산
+
+                    results.append({
+                        "원본요일": day_kr,
+                        "원본교시": p,
+                        "원본학급": my_class,
+                        "원본과목": my_subj,
+                        "이동희망일": td_str,
+                        "이동요일": tday,
+                        "상대교사": str(o["교사명"]),
+                        "상대수업": f"{other_class} {o['과목']}",
+                        "동일학급": "🏆" if same_class else "",
+                        "동학년": "⚠" if same_grade and not same_class else "",
+                        "점수": score,
+                        "_sort": (0 if same_class else 1, 0 if same_grade else 1, -score)
+                    })
+
+    if not results:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(results)
+    df = df.sort_values("_sort").drop(columns=["_sort"]).reset_index(drop=True)
+    return df
 # ==========================================================================================
 # 뷰 헬퍼
 # ==========================================================================================
@@ -2133,6 +2212,56 @@ if "결강·보강" in tab_map:
 if "시간표 맞교환 & 변경 추천" in tab_map:
     with tab_map["시간표 맞교환 & 변경 추천"]:
         st.markdown("### 🔄 스마트 시간표 변경 & 맞교환")
+                # ========== 주간 1:1 교환 가능 표 (새로 추가) ==========
+        st.markdown("### 📅 주간 1:1 교환 가능 표 (한눈에 보기)")
+        col_w1, col_w2, col_w3 = st.columns([2, 1, 1])
+        with col_w1:
+            week_teacher = st.selectbox(
+                "교사 선택",
+                st.session_state.teachers["교사명"].tolist(),
+                key="week_1to1_t"
+            )
+        with col_w2:
+            week_ref = st.date_input(
+                "기준 주 (아무 날짜)",
+                value=date.today(),
+                key="week_1to1_ref"
+            )
+        with col_w3:
+            extra_days = st.number_input(
+                "미래 추가 일수",
+                min_value=0, max_value=14, value=0,
+                key="week_1to1_extra"
+            )
+
+        if st.button("주간 1:1 가능 표 생성", type="primary", key="btn_week_1to1"):
+            with st.spinner("한 주 전체 1:1 후보 검색 중..."):
+                df_week = get_weekly_1to1_swap_table(
+                    week_teacher, week_ref, future_days=extra_days
+                )
+                st.session_state["_week_1to1_df"] = df_week
+
+        if "_week_1to1_df" in st.session_state:
+            dfw = st.session_state["_week_1to1_df"]
+            if dfw.empty:
+                st.info("해당 주에 가능한 1:1 교환이 없습니다.")
+            else:
+                st.success(f"총 {len(dfw)}건의 1:1 후보가 발견되었습니다. (동일학급 → 동학년 우선)")
+                show_cols = [
+                    "원본요일", "원본교시", "원본학급", "원본과목",
+                    "이동희망일", "이동요일", "상대교사", "상대수업",
+                    "동일학급", "동학년", "점수"
+                ]
+                st.dataframe(
+                    dfw[show_cols],
+                    use_container_width=True,
+                    height=450,
+                    hide_index=True
+                )
+                st.caption("원하는 행을 보고 아래에서 직접 맞교환을 적용하시면 됩니다.")
+
+        st.divider()   # 기존 1:1 / 연계 섹션과 구분
+        # ========== 주간 표 끝 ==========
         col_a, col_b = st.columns(2)
         tlist = st.session_state.teachers["교사명"].tolist()
 
