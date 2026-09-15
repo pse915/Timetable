@@ -628,6 +628,73 @@ def _test_slot_is_affected(on_date: str, teacher: str, period: int) -> bool:
     return (norm, str(teacher).strip(), safe_int(period)) in get_test_affected_slots()
 
 
+def get_actual_direct_swap_affected_slots() -> set:
+    """실제 저장된 1:1 맞교환으로 이미 사용된 슬롯을 모두 반환한다."""
+    affected = set()
+    swaps = st.session_state.get("swaps", pd.DataFrame())
+    if swaps is None or swaps.empty:
+        return affected
+    for sw in swaps.itertuples(index=False):
+        if not _is_direct_swap_type(str(getattr(sw, "유형", ""))):
+            continue
+        date_a = normalize_date_str(getattr(sw, "원본일자", ""))
+        date_b = normalize_date_str(getattr(sw, "목표일자", ""))
+        t_a = str(getattr(sw, "교사A", "")).strip()
+        t_b = str(getattr(sw, "교사B", "")).strip()
+        p_a = safe_int(getattr(sw, "교시A", 0))
+        p_b = safe_int(getattr(sw, "교시B", 0))
+        for item in [
+            (date_a, t_a, p_a), (date_a, t_b, p_a),
+            (date_b, t_b, p_b), (date_b, t_a, p_b),
+        ]:
+            if item[0] and item[1] and item[2] > 0:
+                affected.add(item)
+    return affected
+
+
+def _actual_direct_slot_is_affected(on_date: str, teacher: str, period: int) -> bool:
+    norm = normalize_date_str(on_date)
+    return (norm, str(teacher).strip(), safe_int(period)) in get_actual_direct_swap_affected_slots()
+
+
+def _effective_swap_origin_info(teacher: str, on_date: str, period: int, use_test: bool = False) -> str:
+    """해당 셀이 기존/테스트 교환에 의해 다른 수업이 들어온 슬롯인지 반환한다."""
+    norm = normalize_date_str(on_date)
+    teacher = str(teacher).strip()
+    period = safe_int(period)
+    if not norm or not teacher or period <= 0:
+        return ""
+
+    tables = []
+    actual = st.session_state.get("swaps", pd.DataFrame())
+    if actual is not None and not actual.empty:
+        tables.append(actual)
+    if use_test:
+        test = st.session_state.get("test_swaps", pd.DataFrame())
+        if test is not None and not test.empty:
+            tables.append(test)
+
+    for swaps in tables:
+        for sw in swaps.itertuples(index=False):
+            typ = str(getattr(sw, "유형", "")).strip()
+            date_a = normalize_date_str(getattr(sw, "원본일자", ""))
+            date_b = normalize_date_str(getattr(sw, "목표일자", ""))
+            teacher_a = str(getattr(sw, "교사A", "")).strip()
+            teacher_b = str(getattr(sw, "교사B", "")).strip()
+            period_a = safe_int(getattr(sw, "교시A", 0))
+            period_b = safe_int(getattr(sw, "교시B", 0))
+
+            if _is_direct_swap_type(typ):
+                if date_a == norm and teacher_b == teacher and period_a == period:
+                    return f"{date_b} {period_b}교시의 {teacher_a} 수업과 맞교환"
+                if date_b == norm and teacher_a == teacher and period_b == period:
+                    return f"{date_a} {period_a}교시의 {teacher_b} 수업과 맞교환"
+            elif "연계" in typ:
+                if date_b == norm and teacher_a == teacher and period_b == period:
+                    return f"{date_a} {period_a}교시의 {teacher_b}와 연계교환"
+    return ""
+
+
 @st.cache_data(show_spinner=False, ttl=180)
 def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: bool = False) -> pd.DataFrame:
     norm = normalize_date_str(on_date)
@@ -1349,12 +1416,8 @@ def get_single_lesson_1to1_candidates(
     if source_tt.empty:
         return pd.DataFrame()
 
-    # 이미 테스트 교환으로 사용된 원본 슬롯은 다시 원본으로 사용할 수 없다.
-    if use_test and _test_slot_is_affected(source_str, teacher, orig_period):
-        return pd.DataFrame()
-
-    # 화면에서 선택한 수업이 테스트 반영 시간표에서도 아직 같은 수업인지 확인한다.
-    # 이 검사가 있어야 한 번 이동된 수업을 다시 원본으로 취급하지 않는다.
+    # 변경된 슬롯도 현재 적용 시간표의 실제 상태이므로 그대로 후보 계산에 포함한다.
+    # 과거에 변경되었는지 여부가 아니라, 현재 시점의 교사/날짜/교시 상태를 기준으로 판정한다.
     source_match = source_tt[
         (source_tt["교사명"] == str(teacher).strip())
         & (source_tt["교시"] == safe_int(orig_period))
@@ -1367,7 +1430,6 @@ def get_single_lesson_1to1_candidates(
     results = []
     seen = set()
     source_group = subject_group(orig_subject)
-    affected_test_slots = get_test_affected_slots() if use_test else set()
 
     for target_date in search_dates:
         target_str = target_date.strftime("%Y-%m-%d")
@@ -1386,13 +1448,9 @@ def get_single_lesson_1to1_candidates(
 
         for _, candidate in candidates.iterrows():
             other_teacher = str(candidate["교사명"]).strip()
-            if use_test and (
-                (target_str, other_teacher, safe_int(candidate["교시"])) in affected_test_slots
-                or _test_slot_is_affected(source_str, other_teacher, orig_period)
-            ):
-                continue
-
-            key = (target_str, other_teacher, safe_int(candidate["교시"]))
+            target_period = safe_int(candidate["교시"])
+            # 상대 수업도 현재 적용 시간표의 실제 수업이면 후보로 허용한다.
+            key = (target_str, other_teacher, target_period)
             if key in seen or not is_free(other_teacher, source_day, orig_period, source_str, source_tt):
                 continue
             seen.add(key)
@@ -2567,11 +2625,11 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         # ========== 단일 수업 → 주간 1:1 (클릭 가능한 버튼 버전) ==========
         st.markdown("### 📅 단일 수업 → 주간 1:1 가능 위치")
 
-        st.markdown("#### 원본 수업 선택 — 매트릭스에서 수업 셀 하나를 클릭")
-        st.caption("수업이 적힌 셀을 클릭하면 교사·요일·교시를 자동으로 읽어, 그 날짜의 동일 학급 1:1 후보를 바로 표시합니다.")
+        st.markdown("#### 수업 선택 — **현재 적용 시간표**에서 수업 셀 하나를 클릭")
+        st.caption("현재 적용된 맞교환·보강·시간강사 변경을 반영합니다. 선택한 현재 수업 상태를 기준으로 1:1 가능 위치를 계산합니다.")
         week_anchor = st.date_input("검색 기준 주", value=date.today(), key="week_1to1_week_anchor")
         ver = st.session_state.get("_data_version", 0)
-        lesson_matrix = effective_teacher_matrix(week_anchor, ver).copy()
+        lesson_matrix = effective_teacher_matrix(week_anchor, ver, use_test=False).copy()
 
         if lesson_matrix.empty:
             st.warning("교사 시간표 데이터가 없습니다.")
@@ -2598,7 +2656,8 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                     week_teacher = str(lesson_matrix.iloc[row_idx]["교사명"]).strip()
                     monday = week_anchor - timedelta(days=week_anchor.weekday())
                     orig_date = monday + timedelta(days=DAYS.index(day_kr))
-                    e_orig = get_effective_timetable_for_date(orig_date.strftime("%Y-%m-%d"), ver)
+                    orig_date_str = orig_date.strftime("%Y-%m-%d")
+                    e_orig = get_effective_timetable_for_date(orig_date_str, ver, use_test=False)
                     selected_lesson = e_orig[
                         (e_orig["교사명"] == week_teacher)
                         & (e_orig["요일"] == day_kr)
@@ -2620,7 +2679,11 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                         if st.session_state.get("_single_cycle_context") != cycle_context:
                             st.session_state["_single_cycle_context"] = cycle_context
                             st.session_state["_single_show_extended_cycles"] = False
-                        st.info(f"**원본 수업**: {orig_date.strftime('%Y-%m-%d')} ({day_kr}) {orig_period}교시 · {lesson['학급']} · {lesson['과목']}")
+                        origin_info = _effective_swap_origin_info(week_teacher, orig_date_str, orig_period, use_test=False)
+                        if origin_info:
+                            st.info(f"**현재 적용 수업**: {orig_date_str} ({day_kr}) {orig_period}교시 · {lesson['학급']} · {lesson['과목']}  \n🔄 변경 이력: {origin_info}")
+                        else:
+                            st.info(f"**현재 적용 수업**: {orig_date_str} ({day_kr}) {orig_period}교시 · {lesson['학급']} · {lesson['과목']}")
                         st.caption("🏆 동일 학급 후보만 자동 검색합니다.")
                         df_week = get_single_lesson_1to1_candidates(
                             week_teacher, orig_date.strftime("%Y-%m-%d"), orig_period,
@@ -2795,10 +2858,11 @@ if "시간표 변경 테스트용" in tab_map:
             st.rerun()
 
         tlist = st.session_state.teachers["교사명"].tolist()
-        st.markdown("#### 원본 수업 선택 — **실제 변경만 반영된 시간표**에서 수업 셀 하나를 클릭")
+        st.markdown("#### 수업 선택 — **현재 적용 + 테스트 변경 결과**에서 수업 셀 하나를 클릭")
+        st.caption("실제 변경과 현재까지의 테스트 변경을 모두 반영합니다. 선택한 현재 상태를 기준으로 다음 1:1 가능 위치를 계산합니다.")
         test_week_anchor = st.date_input("테스트 검색 기준 주", value=date.today(), key="test_week_anchor")
         ver = st.session_state.get("_data_version", 0)
-        test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=False)
+        test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
         test_pick_a = None
         if test_matrix.empty:
             st.warning("테스트용 시간표 데이터가 없습니다.")
@@ -2821,7 +2885,7 @@ if "시간표 변경 테스트용" in tab_map:
                     test_monday = test_week_anchor - timedelta(days=test_week_anchor.weekday())
                     test_date = test_monday + timedelta(days=DAYS.index(test_day))
                     test_date_str = test_date.strftime("%Y-%m-%d")
-                    test_tt = get_effective_timetable_for_date(test_date_str, ver, use_test=False)
+                    test_tt = get_effective_timetable_for_date(test_date_str, ver, use_test=True)
                     test_lesson = test_tt[
                         (test_tt["교사명"] == test_teacher)
                         & (test_tt["요일"] == test_day)
@@ -2833,7 +2897,11 @@ if "시간표 변경 테스트용" in tab_map:
                             "교사명": test_teacher, "일자": test_date_str, "요일": test_day,
                             "교시": test_period, "학급": test_lesson["학급"], "과목": test_lesson["과목"]
                         }
-                        st.info(f"**테스트 원본 수업**: {test_date_str} ({test_day}) {test_period}교시 · {test_lesson['학급']} · {test_lesson['과목']}")
+                        origin_info = _effective_swap_origin_info(test_teacher, test_date_str, test_period, use_test=True)
+                        if origin_info:
+                            st.info(f"**현재 적용 테스트 수업**: {test_date_str} ({test_day}) {test_period}교시 · {test_lesson['학급']} · {test_lesson['과목']}  \n🔄 변경 이력: {origin_info}")
+                        else:
+                            st.info(f"**현재 적용 테스트 수업**: {test_date_str} ({test_day}) {test_period}교시 · {test_lesson['학급']} · {test_lesson['과목']}")
                 else:
                     st.info("교사명이나 빈칸이 아닌 수업 셀을 클릭하세요.")
             else:
@@ -2859,7 +2927,7 @@ if "시간표 변경 테스트용" in tab_map:
                     st.info("동일 학급 1:1 후보 없음")
                 else:
                     for idx, row in df_swap.iterrows():
-                        label = f"{row['이동희망일']} ({row['이동요일']}) {row['원본교시']}교시 · {row['상대교사']} · {row['상대수업']}"
+                        label = f"{row['이동희망일']} ({row['이동요일']}) 현재 {row['원본교시']}교시 · {row['상대교사']} · {row['상대수업']}"
                         if st.button(f"[테스트] {label}", key=f"test_matrix_swap_{idx}"):
                             b_info = {
                                 "교사명": row["상대교사"], "일자": row["이동희망일"], "요일": row["이동요일"],
