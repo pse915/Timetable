@@ -1162,6 +1162,11 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                     if td_str[:7] == d_str[:7]:
                         score += 10
 
+                                        # 중복 방지 키
+                    dup_key = (d_str, p, td_str, str(o["교사명"]))
+                    if any(r.get("_dup") == dup_key for r in results):
+                        continue
+
                     results.append({
                         "원본일자": d_str,
                         "원본요일": day_kr,
@@ -1175,7 +1180,9 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                         "동일학급": "🏆" if same_class else "",
                         "동학년": "⚠" if same_grade and not same_class else "",
                         "점수": score,
-                        "_sort": (0 if same_class else 1, 0 if same_grade else 1, -score)
+                        "_sort": (0 if same_class else 1, 0 if same_grade else 1, -score),
+                        "_dup": dup_key          # 중복 체크용 (나중에 삭제)
+                    })
                     })
 
     if not results:
@@ -1187,7 +1194,13 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
         ])
 
     df = pd.DataFrame(results)
-    df = df.sort_values("_sort").drop(columns=["_sort"]).reset_index(drop=True)
+    if not df.empty:
+        df = df.drop(columns=["_dup"], errors="ignore")
+        df = df.drop_duplicates(
+            subset=["원본일자", "원본교시", "이동희망일", "상대교사"],
+            keep="first"
+        )
+        df = df.sort_values("_sort").drop(columns=["_sort"]).reset_index(drop=True)
     return df
 # ==========================================================================================
 # 뷰 헬퍼
