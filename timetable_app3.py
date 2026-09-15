@@ -9,7 +9,6 @@
 
 import io
 import copy
-import re
 import uuid
 from datetime import date, datetime, timedelta
 from collections import defaultdict
@@ -2033,6 +2032,43 @@ def get_single_lesson_linked_cycles(
 # ==========================================================================================
 # 뷰 헬퍼
 # ==========================================================================================
+
+def weekly_matrix_column_config(df, first_label=None):
+    """주간(월~금 × 교시) 매트릭스의 가독성을 위한 열 너비 설정."""
+    if df is None or df.empty:
+        return {}
+    cfg = {}
+    first = first_label or ("교사명" if "교사명" in df.columns else "학급" if "학급" in df.columns else None)
+    for c in df.columns:
+        if c == first:
+            cfg[c] = st.column_config.TextColumn(c, width="medium")
+        else:
+            # 주간 35칸은 한 화면에 억지로 압축하지 않고, 각 셀의 최소 가독성을
+            # 확보한 뒤 데이터프레임 내부에서 가로 스크롤하도록 한다.
+            cfg[c] = st.column_config.TextColumn(c, width="medium")
+    return cfg
+
+def render_weekly_matrix(df, *, key=None, height=650, caption=True):
+    """모든 주간 매트릭스를 동일한 표시 규칙으로 렌더링한다.
+
+    월~금 × 교시 전체 열을 절대 제거하거나 접지 않는다.
+    셀 폭을 확보하여 내용이 지나치게 압축되지 않도록 하고, 화면보다 넓은
+    경우 데이터프레임 자체의 가로 스크롤로 전체 주간표를 탐색한다.
+    """
+    if df is None or df.empty:
+        st.info("표시할 주간 시간표가 없습니다.")
+        return None
+    if caption:
+        st.caption("📌 주간 전체(월~금 × 교시)를 유지합니다. 화면보다 넓으면 표 아래/내부를 좌우로 스크롤하세요.")
+    return st.dataframe(
+        df,
+        hide_index=True,
+        use_container_width=True,
+        height=height,
+        key=key,
+        column_config=weekly_matrix_column_config(df),
+    )
+
 @st.cache_data(show_spinner=False)
 def teacher_matrix(version=0):
     tt = st.session_state.timetable
@@ -2103,152 +2139,6 @@ def class_matrix(version=0, ref_date=None, use_test=False):
                 else: row[f"{d}{p}"]=""
         rows.append(row)
     return pd.DataFrame(rows)
-
-
-def _compact_matrix_cell(row, perspective="teacher", use_test=False):
-    """매트릭스용 짧은 셀 문자열. 긴 변경 설명은 상세 영역에서 보여준다."""
-    if row is None:
-        return ""
-    if perspective == "teacher":
-        cell = f"{str(row.get('학급','')).strip()} {str(row.get('과목','')).strip()}".strip()
-    else:
-        cell = f"{str(row.get('교사명','')).strip()} {str(row.get('과목','')).strip()}".strip()
-    typ = str(row.get("변경유형", "원본")).strip()
-    if typ == "교환": cell += "  🔄"
-    elif typ == "테스트교환": cell += "  🧪"
-    elif typ == "보강": cell += "  🟢"
-    elif typ == "시간강사": cell += "  🟡"
-    return cell
-
-
-def teacher_day_matrix(ref_date: date, day_kr: str, version: int = 0, use_test: bool = False) -> pd.DataFrame:
-    """한 요일만 표시하는 교사×교시 매트릭스. 넓은 주간표 대신 읽기 쉬운 6~7열 표를 만든다."""
-    monday = ref_date - timedelta(days=ref_date.weekday())
-    day_date = monday + timedelta(days=DAYS.index(day_kr))
-    ds = day_date.strftime("%Y-%m-%d")
-    e = get_effective_timetable_for_date(ds, version, use_test=use_test)
-    teachers = sorted(set(st.session_state.get("timetable", pd.DataFrame()).get("교사명", pd.Series(dtype=str)).dropna().astype(str).str.strip()) |
-                      set(e.get("교사명", pd.Series(dtype=str)).dropna().astype(str).str.strip()))
-    periods = range(1, PERIODS_PER_DAY.get(day_kr, MAX_PERIOD) + 1)
-    idx = {(str(r.교사명).strip(), safe_int(r.교시)): r for r in e.itertuples(index=False)} if not e.empty else {}
-    rows = []
-    for teacher in teachers:
-        row = {"교사명": teacher}
-        for period in periods:
-            row[f"{period}교시"] = _compact_matrix_cell(idx.get((teacher, period)), "teacher", use_test)
-        rows.append(row)
-    return pd.DataFrame(rows, columns=["교사명"] + [f"{p}교시" for p in periods])
-
-
-def class_day_matrix(ref_date: date, day_kr: str, version: int = 0, use_test: bool = False) -> pd.DataFrame:
-    """한 요일만 표시하는 학급×교시 매트릭스."""
-    monday = ref_date - timedelta(days=ref_date.weekday())
-    day_date = monday + timedelta(days=DAYS.index(day_kr))
-    ds = day_date.strftime("%Y-%m-%d")
-    e = get_effective_timetable_for_date(ds, version, use_test=use_test)
-    classes = sorted(e.get("학급", pd.Series(dtype=str)).dropna().astype(str).str.strip().unique()) if not e.empty else []
-    periods = range(1, PERIODS_PER_DAY.get(day_kr, MAX_PERIOD) + 1)
-    idx = {(str(r.학급).strip(), safe_int(r.교시)): r for r in e.itertuples(index=False)} if not e.empty else {}
-    rows = []
-    for cls in classes:
-        row = {"학급": cls}
-        for period in periods:
-            row[f"{period}교시"] = _compact_matrix_cell(idx.get((cls, period)), "class", use_test)
-        rows.append(row)
-    return pd.DataFrame(rows, columns=["학급"] + [f"{p}교시" for p in periods])
-
-
-def _compact_weekly_display(df: pd.DataFrame, perspective="teacher") -> pd.DataFrame:
-    """주간 매트릭스를 한눈에 보기 좋게 압축한다. 데이터 구조는 그대로 유지한다."""
-    if df is None or df.empty:
-        return df
-    out=df.copy(deep=True)
-    for col in out.columns:
-        if col == ("교사명" if perspective == "teacher" else "학급"):
-            continue
-        out[col]=out[col].astype(str).str.replace(" 교환", " 🔄", regex=False)
-        out[col]=out[col].str.replace(" 테스트교환", " 🧪", regex=False)
-        out[col]=out[col].str.replace(" 보강", " 🟢", regex=False)
-        out[col]=out[col].str.replace("시간강사", "🟡", regex=False)
-        # 셀 내용은 2줄로 줄여 세로 공간을 조금 사용하고 가로 폭을 줄인다.
-        out[col]=out[col].apply(lambda x: x.replace(" ", "\n", 1) if x and "\n" not in x else x)
-    return out
-
-
-def render_weekly_teacher_matrices(ref_date: date, version: int = 0, use_test: bool = False, key_prefix="weekly_teacher", selectable=False):
-    """기존 주간 매트릭스 구조를 유지하되, 5일×교시를 한 표에 모두 보여준다.
-    요일 탭으로 나누지 않고 열 폭/셀 표현을 압축해 가로 공간을 최대한 활용한다.
-    selectable=True인 경우 기존 셀 선택 기능도 그대로 제공한다.
-    """
-    monday = ref_date - timedelta(days=ref_date.weekday())
-    df = effective_teacher_matrix(ref_date, version, use_test=use_test).copy()
-    if df.empty:
-        st.info("표시할 시간표가 없습니다.")
-        return None
-
-    # 헤더는 월1 → 금7 순서를 유지한다. 주말은 애초에 DAYS에 포함하지 않는다.
-    ordered=["교사명"]+[f"{d}{p}" for d in DAYS for p in range(1, PERIODS_PER_DAY.get(d, MAX_PERIOD)+1)]
-    ordered=[c for c in ordered if c in df.columns]
-    df=df.reindex(columns=ordered)
-    display_df=_compact_weekly_display(df, "teacher")
-
-    dates=[monday+timedelta(days=i) for i in range(5)]
-    st.caption(" · ".join(f"{d} {dt:%m/%d}" for d,dt in zip(DAYS,dates)) + "  |  🔄 교환 · 🧪 테스트 · 🟢 보강 · 🟡 시간강사")
-    st.caption("💡 전체 주간표를 한 화면에서 확인할 수 있도록 셀을 압축했습니다. 셀을 클릭하면 선택할 수 있습니다.")
-
-    config={"교사명": st.column_config.TextColumn("교사명", width=90)}
-    for c in display_df.columns:
-        if c != "교사명":
-            day=c[:1]; p=c[1:]
-            config[c]=st.column_config.TextColumn(f"{day}\n{p}교시", width=48)
-    event=st.dataframe(
-        display_df, hide_index=True, use_container_width=True,
-        height=min(760, max(300, 48+len(display_df)*34)),
-        key=f"{key_prefix}_all_week",
-        on_select="rerun" if selectable else None,
-        selection_mode="single-cell" if selectable else None,
-        column_config=config
-    )
-    if selectable:
-        cells=getattr(getattr(event,"selection",None),"cells",[]) or []
-        if cells:
-            ri,col=cells[0]
-            if col != "교사명" and 0 <= ri < len(display_df):
-                teacher=str(display_df.iloc[ri]["교사명"]).strip()
-                m=re.match(r"^([월화수목금])(\d+)$", str(col))
-                if m:
-                    day_kr=m.group(1); period=int(m.group(2))
-                    return {"teacher":teacher,"day":day_kr,"date":monday+timedelta(days=DAYS.index(day_kr)),
-                            "period":period,"value":str(df.iloc[ri][col]).strip()}
-    return None
-
-
-def render_weekly_class_matrices(ref_date: date, version: int = 0, use_test: bool = False, key_prefix="weekly_class"):
-    """기존 주간 학급 매트릭스 구조를 유지하면서 월~금 전체를 한 표에 압축 표시한다."""
-    df=class_matrix(version, ref_date, use_test=use_test).copy()
-    if df.empty:
-        st.info("표시할 학급 시간표가 없습니다.")
-        return
-    ordered=["학급"]+[f"{d}{p}" for d in DAYS for p in range(1, PERIODS_PER_DAY.get(d, MAX_PERIOD)+1)]
-    ordered=[c for c in ordered if c in df.columns]
-    df=df.reindex(columns=ordered)
-    display_df=_compact_weekly_display(df, "class")
-    monday=ref_date-timedelta(days=ref_date.weekday())
-    dates=[monday+timedelta(days=i) for i in range(5)]
-    st.caption(" · ".join(f"{d} {dt:%m/%d}" for d,dt in zip(DAYS,dates)) + "  |  🔄 교환 · 🧪 테스트 · 🟢 보강 · 🟡 시간강사")
-    config={"학급": st.column_config.TextColumn("학급", width=85)}
-    for c in display_df.columns:
-        if c != "학급":
-            config[c]=st.column_config.TextColumn(f"{c[:1]}\n{c[1:]}교시", width=48)
-    st.dataframe(display_df, hide_index=True, use_container_width=True,
-                 height=min(760,max(300,48+len(display_df)*34)), key=f"{key_prefix}_all_week",
-                 column_config=config)
-
-
-
-def render_weekly_teacher_compact(ref_date: date, version: int = 0, use_test: bool = False, key_prefix="compact"):
-    """요일 탭 + 7교시 구조를 기본으로 사용하되 한 화면에 5일을 억지로 밀어 넣지 않는다."""
-    return render_weekly_teacher_matrices(ref_date, version, use_test, key_prefix, selectable=False)
 
 def get_teacher_week_view(teacher: str, ref_date: date, use_test=False):
     monday=ref_date-timedelta(days=ref_date.weekday()); week_dates=[monday+timedelta(days=i) for i in range(5)]
@@ -3101,19 +2991,17 @@ if "시간표 조회" in tab_map:
                 st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
         elif view == "교사별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_week_ref")
-            st.caption("요일별로 나누어 표시합니다. 가로 스크롤 없이 월~금 시간표를 확인할 수 있습니다.")
-            render_weekly_teacher_compact(ref, ver, use_test=False, key_prefix="view_week_day")
+            render_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), key="view_teacher_week_matrix", height=650)
         elif view == "학급별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_class_ref")
-            st.caption("요일별로 나누어 표시합니다. 각 표는 학급 × 교시 구조입니다.")
-            render_weekly_class_matrices(ref, ver, use_test=False, key_prefix="view_class_day")
+            render_weekly_matrix(class_matrix(ver, ref_date=ref), key="view_class_week_matrix", height=650)
         else:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
             ref=calendar_picker("주간 기준일",date.today(),key="view_ref")
             grid,dates=get_teacher_week_view(t,ref)
             st.caption(f"{dates[0]} ~ {dates[4]}")
-            st.dataframe(grid,use_container_width=True,hide_index=True)
+            render_weekly_matrix(grid, key="view_teacher_personal_week_matrix", height=430)
 
 # ------------------------------------------------------------------ 시간강사 관리
 if "시간강사 관리" in tab_map:
@@ -3316,63 +3204,106 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         week_anchor = calendar_picker("검색 기준 주", date.today(), key="week_1to1_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표가 아래 매트릭스에 표시됩니다.")
         ver = st.session_state.get("_data_version", 0)
         lesson_matrix = effective_teacher_matrix(week_anchor, ver, use_test=False).copy()
-        st.caption("표시 기준: 🔄 실제 교환 · 🟢 보강 · 🟡 시간강사 · 🧪 테스트 변경. 긴 주간표 대신 요일별 탭으로 표시합니다.")
+        st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 시간강사 대체는 교사명(원본교사) 형태")
 
         if lesson_matrix.empty:
             st.warning("교사 시간표 데이터가 없습니다.")
-            extra_days = st.slider("미래 추가 검색 일수", 0, 14, 7, key="week_extra_days")
         else:
-            picked = render_weekly_teacher_matrices(week_anchor, ver, use_test=False,
-                                                   key_prefix="week_1to1_day", selectable=True)
+            matrix_event = st.dataframe(
+                lesson_matrix,
+                hide_index=True,
+                use_container_width=True,
+                height=520,
+                key="week_1to1_lesson_matrix",
+                on_select="rerun",
+                selection_mode="single-cell"
+            )
+            selected_cells = matrix_event.selection.cells
             extra_days = st.slider("미래 추가 검색 일수", 0, 14, 7, key="week_extra_days")
-            if picked:
-                week_teacher = picked["teacher"]
-                day_kr = picked["day"]
-                orig_period = picked["period"]
-                orig_date = picked["date"]
-                cell_value = picked["value"]
-                orig_date_str = orig_date.strftime("%Y-%m-%d")
-                e_orig = get_effective_timetable_for_date(orig_date_str, ver, use_test=False)
-                selected_lesson = e_orig[(e_orig["교사명"] == week_teacher) &
-                                         (e_orig["요일"] == day_kr) &
-                                         (e_orig["교시"].apply(safe_int) == orig_period)]
-                if selected_lesson.empty:
-                    st.warning("선택한 셀의 수업을 해당 날짜 시간표에서 찾을 수 없습니다.")
-                    for k in ["_single_week_df", "_single_orig", "_single_linked_cycles", "_single_linked_cycle_msg"]:
-                        st.session_state.pop(k, None)
-                else:
-                    lesson = selected_lesson.iloc[0]
-                    cycle_context = (week_teacher, orig_date_str, orig_period, str(lesson["학급"]), str(lesson["과목"]), extra_days, ver)
-                    if st.session_state.get("_single_cycle_context") != cycle_context:
-                        st.session_state["_single_cycle_context"] = cycle_context
-                        st.session_state["_single_show_extended_cycles"] = False
-                    origin_info = _effective_swap_origin_info(week_teacher, orig_date_str, orig_period, use_test=False)
-                    sub_info = _effective_sub_origin_info(week_teacher, orig_date_str, orig_period)
-                    info_lines = [f"**현재 적용 수업**: {orig_date_str} ({day_kr}) {orig_period}교시 · {lesson['학급']} · {lesson['과목']}"]
-                    if origin_info: info_lines.append(f"🔄 교환 변경 이력: {origin_info}")
-                    if sub_info: info_lines.append(f"🟢 보강 처리 이력: {sub_info}")
-                    st.info("  \n".join(info_lines))
-                    st.caption("🏆 동일 학급 후보만 자동 검색합니다.")
-                    df_week = get_single_lesson_1to1_candidates(
-                        week_teacher, orig_date_str, orig_period, str(lesson["학급"]), str(lesson["과목"]),
-                        future_days=extra_days, version=ver
-                    )
-                    if df_week.empty:
-                        linked_cycles, linked_cycle_msg = get_single_lesson_linked_cycles(
-                            week_teacher, orig_date_str, orig_period, str(lesson["학급"]), str(lesson["과목"]),
-                            future_days=extra_days, version=ver, min_cycle=2, max_cycle=3
-                        )
+
+            if selected_cells:
+                row_idx, column_name = selected_cells[0]
+                day_kr = str(column_name)[:1]
+                orig_period = safe_int(str(column_name)[1:])
+                cell_value = str(lesson_matrix.iloc[row_idx][column_name]).strip()
+
+                if day_kr in DAYS and orig_period >= 1 and cell_value:
+                    week_teacher = str(lesson_matrix.iloc[row_idx]["교사명"]).strip()
+                    monday = week_anchor - timedelta(days=week_anchor.weekday())
+                    orig_date = monday + timedelta(days=DAYS.index(day_kr))
+                    orig_date_str = orig_date.strftime("%Y-%m-%d")
+                    e_orig = get_effective_timetable_for_date(orig_date_str, ver, use_test=False)
+                    selected_lesson = e_orig[
+                        (e_orig["교사명"] == week_teacher)
+                        & (e_orig["요일"] == day_kr)
+                        & (e_orig["교시"] == orig_period)
+                    ]
+
+                    if selected_lesson.empty:
+                        st.warning("선택한 셀의 수업을 해당 날짜 시간표에서 찾을 수 없습니다.")
+                        st.session_state.pop("_single_week_df", None)
+                        st.session_state.pop("_single_orig", None)
+                        st.session_state.pop("_single_linked_cycles", None)
+                        st.session_state.pop("_single_linked_cycle_msg", None)
                     else:
-                        linked_cycles, linked_cycle_msg = [], ""
-                    st.session_state["_single_week_df"] = df_week
-                    st.session_state["_single_linked_cycles"] = linked_cycles
-                    st.session_state["_single_linked_cycle_msg"] = linked_cycle_msg
-                    st.session_state["_single_orig"] = {
-                        "teacher": week_teacher, "date": orig_date_str, "day": day_kr,
-                        "period": orig_period, "class": str(lesson["학급"]), "subject": str(lesson["과목"])
-                    }
+                        lesson = selected_lesson.iloc[0]
+                        cycle_context = (
+                            week_teacher, orig_date.strftime("%Y-%m-%d"), orig_period,
+                            str(lesson["학급"]), str(lesson["과목"]), extra_days, ver
+                        )
+                        if st.session_state.get("_single_cycle_context") != cycle_context:
+                            st.session_state["_single_cycle_context"] = cycle_context
+                            st.session_state["_single_show_extended_cycles"] = False
+                        origin_info = _effective_swap_origin_info(week_teacher, orig_date_str, orig_period, use_test=False)
+                        sub_info = _effective_sub_origin_info(week_teacher, orig_date_str, orig_period)
+                        info_lines = [f"**현재 적용 수업**: {orig_date_str} ({day_kr}) {orig_period}교시 · {lesson['학급']} · {lesson['과목']}"]
+                        if origin_info:
+                            info_lines.append(f"🔄 교환 변경 이력: {origin_info}")
+                        if sub_info:
+                            info_lines.append(f"🟢 보강 처리 이력: {sub_info}")
+                        st.info("  \n".join(info_lines))
+                        st.caption("🏆 동일 학급 후보만 자동 검색합니다.")
+                        df_week = get_single_lesson_1to1_candidates(
+                            week_teacher, orig_date.strftime("%Y-%m-%d"), orig_period,
+                            str(lesson["학급"]), str(lesson["과목"]),
+                            future_days=extra_days, version=ver
+                        )
+                        if df_week.empty:
+                            linked_cycles, linked_cycle_msg = get_single_lesson_linked_cycles(
+                                week_teacher, orig_date.strftime("%Y-%m-%d"), orig_period,
+                                str(lesson["학급"]), str(lesson["과목"]),
+                                future_days=extra_days, version=ver, min_cycle=2, max_cycle=3
+                            )
+                            if st.session_state.get("_single_show_extended_cycles", False):
+                                extended_cycles, extended_msg = get_single_lesson_linked_cycles(
+                                    week_teacher, orig_date.strftime("%Y-%m-%d"), orig_period,
+                                    str(lesson["학급"]), str(lesson["과목"]),
+                                    future_days=extra_days, version=ver, min_cycle=4, max_cycle=6
+                                )
+                                linked_cycles.extend(extended_cycles)
+                                linked_cycle_msg = f"기본: {linked_cycle_msg} / 확장: {extended_msg}"
+                        else:
+                            linked_cycles, linked_cycle_msg = [], ""
+
+                        st.session_state["_single_week_df"] = df_week
+                        st.session_state["_single_linked_cycles"] = linked_cycles
+                        st.session_state["_single_linked_cycle_msg"] = linked_cycle_msg
+                        st.session_state["_single_orig"] = {
+                            "teacher": week_teacher,
+                            "date": orig_date.strftime("%Y-%m-%d"),
+                            "day": day_kr,
+                            "period": orig_period,
+                            "class": str(lesson["학급"]),
+                            "subject": str(lesson["과목"])
+                        }
+                else:
+                    st.info("교사명이나 빈칸이 아닌, 수업 내용이 적힌 셀을 클릭하세요.")
+                    st.session_state.pop("_single_week_df", None)
+                    st.session_state.pop("_single_orig", None)
+                    st.session_state.pop("_single_linked_cycles", None)
+                    st.session_state.pop("_single_linked_cycle_msg", None)
             else:
-                st.info("요일 탭에서 수업 내용이 있는 셀 하나를 클릭하세요.")
+                st.info("시간표 매트릭스에서 원본 수업 셀 하나를 클릭하세요.")
 
             if "_single_week_df" in st.session_state:
                 dfw = st.session_state["_single_week_df"]
@@ -3511,38 +3442,53 @@ if "시간표 변경 테스트용" in tab_map:
         test_week_anchor = calendar_picker("테스트 검색 기준 주", date.today(), key="test_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표를 테스트 기준으로 사용합니다.")
         ver = st.session_state.get("_data_version", 0)
         test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
-        st.caption("🔄 실제 교환 · 🟢 보강 · 🟡 시간강사 · 🧪 테스트 변경. 요일별 탭으로 나누어 표시합니다.")
+        st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
         test_pick_a = None
         if test_matrix.empty:
             st.warning("테스트용 시간표 데이터가 없습니다.")
         else:
-            picked_test = render_weekly_teacher_matrices(test_week_anchor, ver, use_test=True,
-                                                        key_prefix="test_lesson_day", selectable=True)
+            test_event = st.dataframe(
+                test_matrix, hide_index=True, use_container_width=True, height=520,
+                key="test_lesson_matrix", on_select="rerun", selection_mode="single-cell"
+            )
+            test_cells = test_event.selection.cells
             if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
-                st.caption("※ 테스트 결과가 반영된 현재 시간표입니다.")
+                st.caption("※ 원본 선택표에는 테스트 결과를 반영하지 않습니다. 이미 테스트에 사용된 수업을 다시 원본으로 선택할 수 없습니다.")
             test_extra_days = st.slider("테스트 미래 추가 검색 일수", 0, 14, 7, key="test_extra_days")
-            if picked_test:
-                test_teacher = picked_test["teacher"]
-                test_day = picked_test["day"]
-                test_period = picked_test["period"]
-                test_date = picked_test["date"]
-                test_date_str = test_date.strftime("%Y-%m-%d")
-                test_tt = get_effective_timetable_for_date(test_date_str, ver, use_test=True)
-                test_lesson_df = test_tt[(test_tt["교사명"] == test_teacher) &
-                                         (test_tt["요일"] == test_day) &
-                                         (test_tt["교시"].apply(safe_int) == test_period)]
-                if not test_lesson_df.empty:
-                    test_lesson = test_lesson_df.iloc[0]
-                    test_pick_a = {"교사명": test_teacher, "일자": test_date_str, "요일": test_day,
-                                   "교시": test_period, "학급": test_lesson["학급"], "과목": test_lesson["과목"]}
-                    origin_info = _effective_swap_origin_info(test_teacher, test_date_str, test_period, use_test=True)
-                    sub_info = _effective_sub_origin_info(test_teacher, test_date_str, test_period)
-                    info_lines = [f"**현재 적용 테스트 수업**: {test_date_str} ({test_day}) {test_period}교시 · {test_lesson['학급']} · {test_lesson['과목']}"]
-                    if origin_info: info_lines.append(f"🔄 교환 변경 이력: {origin_info}")
-                    if sub_info: info_lines.append(f"🟢 보강 처리 이력: {sub_info}")
-                    st.info("  \n".join(info_lines))
+            if test_cells:
+                test_row_idx, test_column = test_cells[0]
+                test_day = str(test_column)[:1]
+                test_period = safe_int(str(test_column)[1:])
+                test_value = str(test_matrix.iloc[test_row_idx][test_column]).strip()
+                if test_day in DAYS and test_period >= 1 and test_value:
+                    test_teacher = str(test_matrix.iloc[test_row_idx]["교사명"]).strip()
+                    test_monday = test_week_anchor - timedelta(days=test_week_anchor.weekday())
+                    test_date = test_monday + timedelta(days=DAYS.index(test_day))
+                    test_date_str = test_date.strftime("%Y-%m-%d")
+                    test_tt = get_effective_timetable_for_date(test_date_str, ver, use_test=True)
+                    test_lesson = test_tt[
+                        (test_tt["교사명"] == test_teacher)
+                        & (test_tt["요일"] == test_day)
+                        & (test_tt["교시"] == test_period)
+                    ]
+                    if not test_lesson.empty:
+                        test_lesson = test_lesson.iloc[0]
+                        test_pick_a = {
+                            "교사명": test_teacher, "일자": test_date_str, "요일": test_day,
+                            "교시": test_period, "학급": test_lesson["학급"], "과목": test_lesson["과목"]
+                        }
+                        origin_info = _effective_swap_origin_info(test_teacher, test_date_str, test_period, use_test=True)
+                        sub_info = _effective_sub_origin_info(test_teacher, test_date_str, test_period)
+                        info_lines = [f"**현재 적용 테스트 수업**: {test_date_str} ({test_day}) {test_period}교시 · {test_lesson['학급']} · {test_lesson['과목']}"]
+                        if origin_info:
+                            info_lines.append(f"🔄 교환 변경 이력: {origin_info}")
+                        if sub_info:
+                            info_lines.append(f"🟢 보강 처리 이력: {sub_info}")
+                        st.info("  \n".join(info_lines))
+                else:
+                    st.info("교사명이나 빈칸이 아닌 수업 셀을 클릭하세요.")
             else:
-                st.info("요일 탭에서 테스트할 수업 셀 하나를 클릭하세요.")
+                st.info("매트릭스에서 테스트할 원본 수업 셀 하나를 클릭하세요.")
 
         if test_pick_a:
             df_swap = get_single_lesson_1to1_candidates(
@@ -3596,7 +3542,7 @@ if "시간표 변경 테스트용" in tab_map:
         ref_preview = calendar_picker("미리보기 기준일", date.today(), key="test_preview_d")
         grid, dates = get_teacher_week_view(t_preview, ref_preview, use_test=True)
         st.caption(f"{dates[0]} ~ {dates[4]}  (테스트 반영됨)")
-        st.dataframe(grid, use_container_width=True, height=350, hide_index=True)
+        render_weekly_matrix(grid, key="test_week_preview_matrix", height=350)
 
         if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
@@ -3642,7 +3588,7 @@ if "변경된 교사 주간표" in tab_map:
                 with st.expander(f"👤 {t}", expanded=False):
                     st.caption("🔄 교환 이력 / 🟢 보강 처리 이력이 각 수업 칸에 표시됩니다.")
                     grid, _ = get_teacher_week_view(t, ref)
-                    st.dataframe(grid, use_container_width=True, hide_index=True)
+                    render_weekly_matrix(grid, key=f"changed_teacher_week_matrix_{safe_int(hash(t) % 1000000)}", height=430)
 
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
