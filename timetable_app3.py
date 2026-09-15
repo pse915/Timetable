@@ -851,6 +851,13 @@ def do_swap(a, b, date_a, date_b, is_part_time_purpose=False, is_test=False):
     if is_test:
         st.session_state.test_swaps = pd.concat([st.session_state.get("test_swaps", pd.DataFrame()), pd.DataFrame([rec])], ignore_index=True)
         return True
+    if is_test:
+        st.session_state.test_swaps = pd.concat([st.session_state.get("test_swaps", pd.DataFrame()), pd.DataFrame([rec])], ignore_index=True)
+        get_effective_timetable_for_date.clear()
+        effective_teacher_matrix.clear()
+        get_single_lesson_1to1_candidates.clear()
+        get_single_lesson_linked_cycles.clear()
+        return True
     push_history(f"맞교환 ({a['교사명']} ↔ {b['교사명']})")
     st.session_state.swaps = pd.concat([st.session_state.swaps, pd.DataFrame([rec])], ignore_index=True)
     save_work_data_to_gsheet()
@@ -868,6 +875,13 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
     }
     if is_test:
         st.session_state.test_swaps = pd.concat([st.session_state.get("test_swaps", pd.DataFrame()), pd.DataFrame([rec])], ignore_index=True)
+        return True
+    if is_test:
+        st.session_state.test_swaps = pd.concat([st.session_state.get("test_swaps", pd.DataFrame()), pd.DataFrame([rec])], ignore_index=True)
+        get_effective_timetable_for_date.clear()
+        effective_teacher_matrix.clear()
+        get_single_lesson_1to1_candidates.clear()
+        get_single_lesson_linked_cycles.clear()
         return True
     push_history(f"연계교환 ({a['교사명']} → {teacher_b})")
     st.session_state.swaps = pd.concat([st.session_state.swaps, pd.DataFrame([rec])], ignore_index=True)
@@ -896,6 +910,7 @@ def apply_cycle_swaps(moves, is_test=False):
 # ==========================================================================================
 def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
                            date_b_str, period_b, min_cycle=2, max_cycle=3, future_days=7, version=0):
+                           date_b_str, period_b, min_cycle=2, max_cycle=3, future_days=7, version=0, use_test=False):
     """
     학급 시수·담당·과목을 보존하는 지정 인원 범위의 순환.
     - 교사별 free-slot 사전 계산으로 O(n²) → O(n) 수준으로 개선
@@ -923,6 +938,7 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
 
     # 캐시 한 번에 구축
     e_cache = {d: get_effective_timetable_for_date(d, version) for d in candidates}
+    e_cache = {d: get_effective_timetable_for_date(d, version, use_test=use_test) for d in candidates}
 
     # 해당 학급의 슬롯 정보
     class_slots = {}          # (date, period) → {teacher, subject, day}
@@ -1205,6 +1221,7 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
 def get_single_lesson_1to1_candidates(
     teacher: str, orig_date_str: str, orig_period: int,
     orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0
+    orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0, use_test: bool = False
 ) -> pd.DataFrame:
     """선택한 수업 한 건만 대상으로 동일 학급 1:1 교환 후보를 빠르게 찾는다."""
     source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
@@ -1222,6 +1239,7 @@ def get_single_lesson_1to1_candidates(
     ver = version or st.session_state.get("_data_version", 0)
     source_str = source_date.strftime("%Y-%m-%d")
     source_tt = get_effective_timetable_for_date(source_str, ver)
+    source_tt = get_effective_timetable_for_date(source_str, ver, use_test=use_test)
     if source_tt.empty:
         return pd.DataFrame()
 
@@ -1234,6 +1252,7 @@ def get_single_lesson_1to1_candidates(
             continue
         target_day = WEEKDAY_KR[target_date.weekday()]
         target_tt = get_effective_timetable_for_date(target_str, ver)
+        target_tt = get_effective_timetable_for_date(target_str, ver, use_test=use_test)
         if target_tt.empty or not is_free(teacher, target_day, orig_period, target_str, target_tt):
             continue
 
@@ -1273,6 +1292,7 @@ def get_single_lesson_linked_cycles(
     teacher: str, orig_date_str: str, orig_period: int,
     orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0,
     min_cycle: int = 2, max_cycle: int = 3
+    min_cycle: int = 2, max_cycle: int = 3, use_test: bool = False
 ):
     """선택 수업용 연계 순환 후보를 지정 인원 범위에서 탐색한다."""
     source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
@@ -1295,6 +1315,7 @@ def get_single_lesson_linked_cycles(
             continue
         target_day = WEEKDAY_KR[target_date.weekday()]
         target_tt = get_effective_timetable_for_date(target_str, ver)
+        target_tt = get_effective_timetable_for_date(target_str, ver, use_test=use_test)
         if target_tt.empty:
             continue
         class_lessons = target_tt[target_tt["학급"] == orig_class]
@@ -1320,6 +1341,7 @@ def get_single_lesson_linked_cycles(
             teacher, source_str, orig_period, orig_class, orig_subject,
             target_str, target_period, min_cycle=min_cycle, max_cycle=max_cycle,
             future_days=future_days, version=ver
+            future_days=future_days, version=ver, use_test=use_test
         )
         for cycle in cycles:
             cycle_key = tuple((m["teacher"], m["from_date"], m["from_period"], m["to_date"], m["to_period"]) for m in cycle["moves"])
@@ -1354,6 +1376,7 @@ def teacher_matrix(version=0):
 
 @st.cache_data(show_spinner=False, ttl=180)
 def effective_teacher_matrix(ref_date: date, version: int = 0) -> pd.DataFrame:
+def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = False) -> pd.DataFrame:
     """기준 주에 실제 적용되는 맞교환·보강·시간강사 변경을 반영한 교사 매트릭스."""
     monday = ref_date - timedelta(days=ref_date.weekday())
     daily_timetables = {}
@@ -1365,6 +1388,7 @@ def effective_teacher_matrix(ref_date: date, version: int = 0) -> pd.DataFrame:
     for day_idx, day_kr in enumerate(DAYS):
         day_date = monday + timedelta(days=day_idx)
         day_tt = get_effective_timetable_for_date(day_date.strftime("%Y-%m-%d"), version)
+        day_tt = get_effective_timetable_for_date(day_date.strftime("%Y-%m-%d"), version, use_test=use_test)
         daily_timetables[day_kr] = day_tt
         if not day_tt.empty:
             teacher_names.update(day_tt["교사명"].dropna().astype(str).str.strip())
@@ -2630,10 +2654,105 @@ if "시간표 변경 테스트용" in tab_map:
             st.session_state.test_swaps = pd.DataFrame()
             st.session_state["test_has_cycle"] = False
             st.success("테스트 상태가 초기화되었습니다.")
+        if st.button("🔄 테스트 상태 초기화", type="secondary"):
+            st.session_state.test_swaps = pd.DataFrame()
+            st.session_state["test_has_cycle"] = False
+            get_effective_timetable_for_date.clear()
+            effective_teacher_matrix.clear()
+            get_single_lesson_1to1_candidates.clear()
+            get_single_lesson_linked_cycles.clear()
+            st.success("테스트 상태가 초기화되었습니다.")
             st.rerun()
 
         col_a, col_b = st.columns(2)
         tlist = st.session_state.teachers["교사명"].tolist()
+        tlist = st.session_state.teachers["교사명"].tolist()
+        st.markdown("#### 원본 수업 선택 — 변경 반영 매트릭스에서 수업 셀 하나를 클릭")
+        test_week_anchor = st.date_input("테스트 검색 기준 주", value=date.today(), key="test_week_anchor")
+        ver = st.session_state.get("_data_version", 0)
+        test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
+        test_pick_a = None
+        if test_matrix.empty:
+            st.warning("테스트용 시간표 데이터가 없습니다.")
+        else:
+            test_event = st.dataframe(
+                test_matrix, hide_index=True, use_container_width=True, height=520,
+                key="test_lesson_matrix", on_select="rerun", selection_mode="single-cell"
+            )
+            test_cells = test_event.selection.cells
+            test_extra_days = st.slider("테스트 미래 추가 검색 일수", 0, 14, 7, key="test_extra_days")
+            if test_cells:
+                test_row_idx, test_column = test_cells[0]
+                test_day = str(test_column)[:1]
+                test_period = safe_int(str(test_column)[1:])
+                test_value = str(test_matrix.iloc[test_row_idx][test_column]).strip()
+                if test_day in DAYS and test_period >= 1 and test_value:
+                    test_teacher = str(test_matrix.iloc[test_row_idx]["교사명"]).strip()
+                    test_monday = test_week_anchor - timedelta(days=test_week_anchor.weekday())
+                    test_date = test_monday + timedelta(days=DAYS.index(test_day))
+                    test_date_str = test_date.strftime("%Y-%m-%d")
+                    test_tt = get_effective_timetable_for_date(test_date_str, ver, use_test=True)
+                    test_lesson = test_tt[
+                        (test_tt["교사명"] == test_teacher)
+                        & (test_tt["요일"] == test_day)
+                        & (test_tt["교시"] == test_period)
+                    ]
+                    if not test_lesson.empty:
+                        test_lesson = test_lesson.iloc[0]
+                        test_pick_a = {
+                            "교사명": test_teacher, "일자": test_date_str, "요일": test_day,
+                            "교시": test_period, "학급": test_lesson["학급"], "과목": test_lesson["과목"]
+                        }
+                        st.info(f"**테스트 원본 수업**: {test_date_str} ({test_day}) {test_period}교시 · {test_lesson['학급']} · {test_lesson['과목']}")
+                else:
+                    st.info("교사명이나 빈칸이 아닌 수업 셀을 클릭하세요.")
+            else:
+                st.info("매트릭스에서 테스트할 원본 수업 셀 하나를 클릭하세요.")
+
+        if test_pick_a:
+            df_swap = get_single_lesson_1to1_candidates(
+                test_pick_a["교사명"], test_pick_a["일자"], test_pick_a["교시"],
+                str(test_pick_a["학급"]), str(test_pick_a["과목"]),
+                future_days=test_extra_days, version=ver, use_test=True
+            )
+            cycles, cycle_msg = ([], "")
+            if df_swap.empty:
+                cycles, cycle_msg = get_single_lesson_linked_cycles(
+                    test_pick_a["교사명"], test_pick_a["일자"], test_pick_a["교시"],
+                    str(test_pick_a["학급"]), str(test_pick_a["과목"]),
+                    future_days=test_extra_days, version=ver, min_cycle=2, max_cycle=3, use_test=True
+                )
+
+            t1, t2 = st.tabs(["1:1 맞교환 테스트", "연계 순환 교환 테스트"])
+            with t1:
+                if df_swap.empty:
+                    st.info("동일 학급 1:1 후보 없음")
+                else:
+                    for idx, row in df_swap.iterrows():
+                        label = f"{row['이동희망일']} ({row['이동요일']}) {row['원본교시']}교시 · {row['상대교사']} · {row['상대수업']}"
+                        if st.button(f"[테스트] {label}", key=f"test_matrix_swap_{idx}"):
+                            b_info = {
+                                "교사명": row["상대교사"], "일자": row["이동희망일"], "요일": row["이동요일"],
+                                "교시": safe_int(row["원본교시"]),
+                                "학급": str(row["상대수업"]).split()[0],
+                                "과목": " ".join(str(row["상대수업"]).split()[1:])
+                            }
+                            do_swap(test_pick_a, b_info, test_pick_a["일자"], row["이동희망일"], is_test=True)
+                            st.success("테스트 맞교환이 적용되었습니다. 저장되지 않습니다.")
+                            st.rerun()
+            with t2:
+                st.caption(cycle_msg or "1:1 후보가 있을 때는 연계 순환을 표시하지 않습니다.")
+                if not cycles:
+                    st.info("테스트용 2·3인 순환 경로 없음")
+                else:
+                    for idx, cyc in enumerate(cycles):
+                        with st.expander(f"{'✅' if cyc['length']==2 else '🔗'} {cyc['length']}인 순환", expanded=(idx==0)):
+                            st.markdown(f"**경로**: `{cyc['path_desc']}`")
+                            if st.button("[테스트] 이 순환 적용", key=f"test_matrix_cyc_{idx}"):
+                                apply_cycle_swaps(cyc["moves"], is_test=True)
+                                st.session_state["test_has_cycle"] = True
+                                st.success(f"테스트 {cyc['length']}인 순환이 적용되었습니다. 저장되지 않습니다.")
+                                st.rerun()
 
         with col_a:
             st.markdown("#### 1️⃣ 원본 수업 (테스트)")
@@ -2721,6 +2840,15 @@ if "시간표 변경 테스트용" in tab_map:
                 if st.button("현재 테스트 중인 맞교환 목록 전체 삭제하기", key="test_clear_btn"):
                     st.session_state.test_swaps = pd.DataFrame()
                     st.session_state["test_has_cycle"] = False
+                    st.success("테스트 중인 맞교환 목록이 전체 삭제되었습니다.")
+            with col_btn2:
+                if st.button("현재 테스트 중인 맞교환 목록 전체 삭제하기", key="test_clear_btn"):
+                    st.session_state.test_swaps = pd.DataFrame()
+                    st.session_state["test_has_cycle"] = False
+                    get_effective_timetable_for_date.clear()
+                    effective_teacher_matrix.clear()
+                    get_single_lesson_1to1_candidates.clear()
+                    get_single_lesson_linked_cycles.clear()
                     st.success("테스트 중인 맞교환 목록이 전체 삭제되었습니다.")
                     st.rerun()
 
