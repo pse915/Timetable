@@ -1183,7 +1183,7 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                         "_sort": (0 if same_class else 1, 0 if same_grade else 1, -score),
                         "_dup": dup_key          # 중복 체크용 (나중에 삭제)
                     })
-                    })
+                    
 
     if not results:
         # 빈 결과여도 컬럼은 유지
