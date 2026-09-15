@@ -43,6 +43,8 @@ DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
 MAX_PERIOD = 7
 WEEKDAY_KR = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
+SCHOOL_WEEKDAYS = (0, 1, 2, 3, 4)  # 학교 표시는 월~금만
+
 
 TIMETABLE_SHEET_ID = "1jZhTHyJ8vKXn6tkoFXfY_f52-pj6eQTdVvRCo3cCmBA"
 WORK_SHEET_ID = "1g1B1cyZG_tfRn3AD1NZzr30YxYNYFewJeZYdos2obpU"
@@ -149,14 +151,16 @@ def _month_calendar_df(month_anchor: date, selected_dates=None, range_start=None
     first = month_anchor.replace(day=1)
     next_month = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
     last = next_month - timedelta(days=1)
-    # 월요일 시작, 최대 6주
+    # 학교 시간표 기준으로 월~금만 표시한다. 토·일은 달력/기간 선택 표에서도 숨긴다.
+    # 월요일 시작으로 주 단위를 맞추되, 실제 표의 열은 평일 5일만 사용한다.
     grid_start = first - timedelta(days=first.weekday())
     grid_end = last + timedelta(days=(6 - last.weekday()))
+    weekdays = ["월", "화", "수", "목", "금"]
     rows = []
     cur = grid_start
     while cur <= grid_end:
         row = {}
-        for i, wd in enumerate(["월", "화", "수", "목", "금", "토", "일"]):
+        for i, wd in enumerate(weekdays):
             d = cur + timedelta(days=i)
             if d.month != first.month:
                 row[wd] = ""
@@ -173,7 +177,7 @@ def _month_calendar_df(month_anchor: date, selected_dates=None, range_start=None
                 row[wd] = f"{mark}{d.day:02d}"
         rows.append(row)
         cur += timedelta(days=7)
-    return pd.DataFrame(rows, columns=["월", "화", "수", "목", "금", "토", "일"])
+    return pd.DataFrame(rows, columns=weekdays)
 
 
 def calendar_picker(label, value=None, key="calendar", help_text=None):
@@ -183,12 +187,18 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
     반환값은 datetime.date이다.
     """
     value = value or date.today()
+    # 학교 일정은 월~금만 사용한다. 주말이 기본값/이전 선택값으로 들어와도 금요일로 보정한다.
+    if value.weekday() >= 5:
+        value = value - timedelta(days=value.weekday() - 4)
     month_key = f"_{key}_month"
     selected_key = f"_{key}_selected"
     if month_key not in st.session_state:
         st.session_state[month_key] = value.replace(day=1)
     if selected_key not in st.session_state:
         st.session_state[selected_key] = value
+    elif st.session_state[selected_key].weekday() >= 5:
+        selected = st.session_state[selected_key]
+        st.session_state[selected_key] = selected - timedelta(days=selected.weekday() - 4)
 
     st.markdown(f"**{label}**")
     nav1, nav2, nav3 = st.columns([1, 4, 1])
@@ -209,11 +219,14 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
     quick1, quick2 = st.columns([1, 5])
     with quick1:
         if st.button("오늘", key=f"{key}_today", use_container_width=True):
-            st.session_state[month_key] = date.today().replace(day=1)
-            st.session_state[selected_key] = date.today()
+            today = date.today()
+            if today.weekday() >= 5:
+                today = today - timedelta(days=today.weekday() - 4)
+            st.session_state[month_key] = today.replace(day=1)
+            st.session_state[selected_key] = today
             st.rerun()
     with quick2:
-        st.caption(f"선택: **{st.session_state[selected_key]:%Y-%m-%d}** · 달력의 날짜 셀을 클릭하세요.")
+        st.caption(f"선택: **{st.session_state[selected_key]:%Y-%m-%d}** · 평일(월~금)만 표시됩니다. 날짜 셀을 클릭하세요.")
 
     cal = _month_calendar_df(st.session_state[month_key], selected_dates={st.session_state[selected_key]})
     event = st.dataframe(
