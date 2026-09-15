@@ -2236,39 +2236,6 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         # ========== 단일 수업 → 주간 1:1 (클릭 가능한 버튼 버전) ==========
         st.markdown("### 📅 단일 수업 → 주간 1:1 가능 위치")
 
-        col1, col2 = st.columns([2, 1.5])
-        with col1:
-            week_teacher = st.selectbox("교사 선택", st.session_state.teachers["교사명"].tolist(), key="week_1to1_t")
-        with col2:
-            orig_date = st.date_input("원본 날짜", value=date.today(), key="week_1to1_orig_date")
-
-        day_kr = WEEKDAY_KR[orig_date.weekday()]
-        ver = st.session_state.get("_data_version", 0)
-        e_orig = get_effective_timetable_for_date(orig_date.strftime("%Y-%m-%d"), ver)
-
-        my_lessons = e_orig[(e_orig["교사명"] == week_teacher) & (e_orig["요일"] == day_kr)].sort_values("교시")
-
-        if my_lessons.empty:
-            st.warning(f"{week_teacher} 선생님의 {orig_date} ({day_kr}) 수업이 없습니다.")
-        else:
-            period_opts = []
-            period_map = {}
-            for _, r in my_lessons.iterrows():
-                p = safe_int(r["교시"])
-                label = f"{p}교시 · {r['학급']} · {r['과목']}"
-                period_opts.append(label)
-                period_map[label] = r
-
-            selected_label = st.selectbox("원본 교시 (수업 있는 교시만)", period_opts, key="week_1to1_orig_p")
-            lesson = period_map[selected_label]
-            orig_period = safe_int(lesson["교시"])
-
-            st.info(f"**원본 수업**: {day_kr} {orig_period}교시 · {lesson['학급']} · {lesson['과목']}")
-
-            only_same_class = st.checkbox("🏆 동일 학급만 보기", value=False, key="week_only_same")
-            extra_days = st.slider("미래 추가 검색 일수", 0, 14, 7, key="week_extra_days")
-
-            if st.button("이 수업의 주간 1:1 위치 검색", type="primary", key="btn_gen_matrix"):
         st.markdown("#### 1. 교사 선택 — 전체 시간표 매트릭스에서 한 명 선택")
         teacher_pick_df = teacher_matrix().copy()
         if teacher_pick_df.empty:
@@ -2338,8 +2305,6 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                     else:
                         mask = (df_all["원본일자"] == orig_date.strftime("%Y-%m-%d")) & (df_all["원본교시"] == orig_period)
                         df_week = df_all[mask].copy()
-                        if only_same_class and not df_week.empty:
-                            df_week = df_week[df_week["동일학급"] == "🏆"]
                         # 이 화면은 동일 학급 간 1:1 교환만 허용한다.
                         df_week = df_week[df_week["동일학급"] == "🏆"]
                         df_week = df_week.reset_index(drop=True)
