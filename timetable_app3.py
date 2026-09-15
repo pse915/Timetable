@@ -2212,8 +2212,9 @@ if "결강·보강" in tab_map:
 if "시간표 맞교환 & 변경 추천" in tab_map:
     with tab_map["시간표 맞교환 & 변경 추천"]:
         st.markdown("### 🔄 스마트 시간표 변경 & 맞교환")
-                # ========== 주간 1:1 교환 가능 표 (새로 추가) ==========
-        st.markdown("### 📅 주간 1:1 교환 가능 표 (한눈에 보기)")
+                 # ========== 주간 1:1 교환 가능 표 (매트릭스 버전) ==========
+        st.markdown("### 📅 주간 1:1 교환 가능 매트릭스")
+
         col_w1, col_w2, col_w3 = st.columns([2, 1, 1])
         with col_w1:
             week_teacher = st.selectbox(
@@ -2234,7 +2235,9 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                 key="week_1to1_extra"
             )
 
-        if st.button("주간 1:1 가능 표 생성", type="primary", key="btn_week_1to1"):
+        only_same_class = st.checkbox("🏆 동일 학급만 보기", value=True, key="week_only_same")
+
+        if st.button("주간 1:1 매트릭스 생성", type="primary", key="btn_week_1to1"):
             with st.spinner("한 주 전체 1:1 후보 검색 중..."):
                 df_week = get_weekly_1to1_swap_table(
                     week_teacher, week_ref, future_days=extra_days
@@ -2242,26 +2245,131 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                 st.session_state["_week_1to1_df"] = df_week
 
         if "_week_1to1_df" in st.session_state:
-            dfw = st.session_state["_week_1to1_df"]
-            if dfw.empty:
-                st.info("해당 주에 가능한 1:1 교환이 없습니다.")
-            else:
-                st.success(f"총 {len(dfw)}건의 1:1 후보가 발견되었습니다. (동일학급 → 동학년 우선)")
-                show_cols = [
-                    "원본요일", "원본교시", "원본학급", "원본과목",
-                    "이동희망일", "이동요일", "상대교사", "상대수업",
-                    "동일학급", "동학년", "점수"
-                ]
-                st.dataframe(
-                    dfw[show_cols],
-                    use_container_width=True,
-                    height=450,
-                    hide_index=True
-                )
-                st.caption("원하는 행을 보고 아래에서 직접 맞교환을 적용하시면 됩니다.")
+            dfw = st.session_state["_week_1to1_df"].copy()
 
-        st.divider()   # 기존 1:1 / 연계 섹션과 구분
-        # ========== 주간 표 끝 ==========
+            if only_same_class and not dfw.empty:
+                dfw = dfw[dfw["동일학급"] == "🏆"].reset_index(drop=True)
+
+            if dfw.empty:
+                st.info("조건에 맞는 1:1 교환이 없습니다.")
+            else:
+                st.success(f"총 {len(dfw)}건의 1:1 후보 (매트릭스로 표시)")
+
+                # -------------------------------------------------
+                # 1. 매트릭스 형태로 변환 (요일 × 교시)
+                # -------------------------------------------------
+                # 해당 주의 실제 날짜 구하기
+                weekday = week_ref.weekday()
+                monday = week_ref - timedelta(days=weekday)
+                week_dates = [(monday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(5)]
+                day_names = ["월", "화", "수", "목", "금"]
+
+                # 빈 매트릭스 만들기
+                matrix = {day: {p: "" for p in range(1, 8)} for day in day_names}
+
+                # 원본 수업 + 가능한 상대교사 채우기
+                for _, row in dfw.iterrows():
+                    day = row["원본요일"]
+                    p = safe_int(row["원본교시"])
+                    if day not in matrix or p not in matrix[day]:
+                        continue
+
+                    # 기존 내용이 없으면 원본 수업 표시
+                    if not matrix[day][p]:
+                        matrix[day][p] = f"{row['원본학급']} {row['원본과목']}"
+
+                    # 가능한 상대 추가
+                    partner = f"→{row['상대교사']}({row['이동요일']}{row['이동희망일'][5:]})"
+                    if partner not in matrix[day][p]:
+                        matrix[day][p] += f"\n{partner}"
+
+                # DataFrame으로 변환 (보기 좋게)
+                matrix_df = pd.DataFrame(matrix).T   # 행=요일, 열=교시
+                matrix_df.columns = [f"{p}교시" for p in matrix_df.columns]
+                matrix_df.index.name = "요일"
+
+                st.markdown("#### 📊 주간 매트릭스 (원본수업 + 가능한 상대교사)")
+                st.caption("셀 안에 `→교사명(이동요일 MM-DD)` 형태로 가능한 교환이 표시됩니다.")
+                st.dataframe(
+                    matrix_df,
+                    use_container_width=True,
+                    height=320,
+                    hide_index=False
+                )
+
+                # -------------------------------------------------
+                # 2. 엑셀 다운로드
+                # -------------------------------------------------
+                try:
+                    xls_bytes = to_excel_bytes({
+                        "주간매트릭스": matrix_df.reset_index(),
+                        "상세후보목록": dfw
+                    })
+                    st.download_button(
+                        "📥 엑셀 다운로드 (매트릭스 + 상세목록)",
+                        data=xls_bytes,
+                        file_name=f"주간_1대1_매트릭스_{week_teacher}_{week_ref}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="week_excel_dl"
+                    )
+                except Exception:
+                    csv = dfw.to_csv(index=False).encode("utf-8-sig")
+                    st.download_button(
+                        "📥 CSV 다운로드",
+                        data=csv,
+                        file_name=f"주간_1대1_{week_teacher}_{week_ref}.csv",
+                        mime="text/csv",
+                        key="week_csv_dl"
+                    )
+
+                st.divider()
+
+                # -------------------------------------------------
+                # 3. 선택 후 바로 적용
+                # -------------------------------------------------
+                st.markdown("#### ✅ 매트릭스에서 선택한 교환 바로 적용")
+
+                options = []
+                for i, row in dfw.iterrows():
+                    mark = "🏆" if row["동일학급"] else ("⚠" if row["동학년"] else "")
+                    opt = (f"{mark} {row['원본요일']}{row['원본교시']}교시 "
+                           f"({row['원본학급']} {row['원본과목']})  →  "
+                           f"{row['이동희망일']} {row['상대교사']} ({row['상대수업']})")
+                    options.append(opt)
+
+                selected_opt = st.selectbox("적용할 교환 선택", options, key="week_select_swap")
+
+                if st.button("이 교환 적용하기", type="primary", key="btn_apply_week_swap"):
+                    idx = options.index(selected_opt)
+                    row = dfw.iloc[idx]
+
+                    a_info = {
+                        "교사명": week_teacher,
+                        "일자": row["원본일자"],
+                        "요일": row["원본요일"],
+                        "교시": safe_int(row["원본교시"]),
+                        "학급": row["원본학급"],
+                        "과목": row["원본과목"]
+                    }
+                    b_info = {
+                        "교사명": row["상대교사"],
+                        "일자": row["이동희망일"],
+                        "요일": row["이동요일"],
+                        "교시": safe_int(row["원본교시"]),
+                        "학급": row["상대수업"].split()[0] if " " in str(row["상대수업"]) else "",
+                        "과목": " ".join(str(row["상대수업"]).split()[1:]) if " " in str(row["상대수업"]) else str(row["상대수업"])
+                    }
+
+                    if do_swap(a_info, b_info, row["원본일자"], row["이동희망일"]):
+                        st.success(f"✅ {week_teacher} ↔ {row['상대교사']} 맞교환이 등록되었습니다!")
+                        if "_week_1to1_df" in st.session_state:
+                            del st.session_state["_week_1to1_df"]
+                        st.rerun()
+                    else:
+                        st.error("교환 등록 실패")
+
+        st.divider()
+        # ========== 매트릭스 버전 끝 ==========
         col_a, col_b = st.columns(2)
         tlist = st.session_state.teachers["교사명"].tolist()
 
