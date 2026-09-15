@@ -895,9 +895,9 @@ def apply_cycle_swaps(moves, is_test=False):
 # ★★★ 연계 공강 순환 알고리즘 (속도 대폭 최적화)
 # ==========================================================================================
 def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
-                           date_b_str, period_b, max_cycle=3, future_days=7, version=0):
+                           date_b_str, period_b, min_cycle=2, max_cycle=3, future_days=7, version=0):
     """
-    학급 시수·담당·과목 완전 보존 2~4인 순환.
+    학급 시수·담당·과목을 보존하는 지정 인원 범위의 순환.
     - 교사별 free-slot 사전 계산으로 O(n²) → O(n) 수준으로 개선
     - DFS depth + visited 제한 강화
     """
@@ -990,7 +990,10 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
             return
         if len(path) > max_cycle:
             return
-        if current == original_slot and len(path) >= 2:
+        if current == original_slot:
+            # 작은 순환을 먼저 종료해 확장 검색에 섞이지 않도록 한다.
+            if len(path) < min_cycle:
+                return
             cycle_slots = [original_slot] + path[:-1]
             moves = []
             n = len(cycle_slots)
@@ -1268,9 +1271,10 @@ def get_single_lesson_1to1_candidates(
 @st.cache_data(show_spinner=False, ttl=180)
 def get_single_lesson_linked_cycles(
     teacher: str, orig_date_str: str, orig_period: int,
-    orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0
+    orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0,
+    min_cycle: int = 2, max_cycle: int = 3
 ):
-    """1:1 후보가 없을 때만 사용할, 선택 수업용 연계 순환 후보 탐색."""
+    """선택 수업용 연계 순환 후보를 지정 인원 범위에서 탐색한다."""
     source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
     source_str = source_date.strftime("%Y-%m-%d")
     monday = source_date - timedelta(days=source_date.weekday())
@@ -1314,7 +1318,8 @@ def get_single_lesson_linked_cycles(
     for _, target_str, target_period in target_slots[:10]:
         cycles, _ = find_cycle_linked_swaps(
             teacher, source_str, orig_period, orig_class, orig_subject,
-            target_str, target_period, max_cycle=4, future_days=future_days, version=ver
+            target_str, target_period, min_cycle=min_cycle, max_cycle=max_cycle,
+            future_days=future_days, version=ver
         )
         for cycle in cycles:
             cycle_key = tuple((m["teacher"], m["from_date"], m["from_period"], m["to_date"], m["to_period"]) for m in cycle["moves"])
@@ -2450,6 +2455,13 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                         st.session_state.pop("_single_linked_cycle_msg", None)
                     else:
                         lesson = selected_lesson.iloc[0]
+                        cycle_context = (
+                            week_teacher, orig_date.strftime("%Y-%m-%d"), orig_period,
+                            str(lesson["학급"]), str(lesson["과목"]), extra_days, ver
+                        )
+                        if st.session_state.get("_single_cycle_context") != cycle_context:
+                            st.session_state["_single_cycle_context"] = cycle_context
+                            st.session_state["_single_show_extended_cycles"] = False
                         st.info(f"**원본 수업**: {orig_date.strftime('%Y-%m-%d')} ({day_kr}) {orig_period}교시 · {lesson['학급']} · {lesson['과목']}")
                         st.caption("🏆 동일 학급 후보만 자동 검색합니다.")
                         df_week = get_single_lesson_1to1_candidates(
@@ -2461,8 +2473,16 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                             linked_cycles, linked_cycle_msg = get_single_lesson_linked_cycles(
                                 week_teacher, orig_date.strftime("%Y-%m-%d"), orig_period,
                                 str(lesson["학급"]), str(lesson["과목"]),
-                                future_days=extra_days, version=ver
+                                future_days=extra_days, version=ver, min_cycle=2, max_cycle=3
                             )
+                            if st.session_state.get("_single_show_extended_cycles", False):
+                                extended_cycles, extended_msg = get_single_lesson_linked_cycles(
+                                    week_teacher, orig_date.strftime("%Y-%m-%d"), orig_period,
+                                    str(lesson["학급"]), str(lesson["과목"]),
+                                    future_days=extra_days, version=ver, min_cycle=4, max_cycle=6
+                                )
+                                linked_cycles.extend(extended_cycles)
+                                linked_cycle_msg = f"기본: {linked_cycle_msg} / 확장: {extended_msg}"
                         else:
                             linked_cycles, linked_cycle_msg = [], ""
 
@@ -2494,8 +2514,15 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                     st.warning("동일 학급 1:1 교환 후보가 없습니다.")
                     linked_cycles = st.session_state.get("_single_linked_cycles", [])
                     linked_cycle_msg = st.session_state.get("_single_linked_cycle_msg", "")
-                    st.markdown("#### 🔗 연계 순환 교환 (1:1 후보 없을 때만 표시)")
+                    st.markdown("#### 🔗 연계 순환 교환 (2·3인 우선)")
                     st.caption(linked_cycle_msg)
+                    if not st.session_state.get("_single_show_extended_cycles", False):
+                        if st.button("4~6인 순환도 추가 검색", key="matrix_show_extended_cycles"):
+                            st.session_state["_single_show_extended_cycles"] = True
+                            st.rerun()
+                        st.caption("기본 목록에는 2·3인 순환만 표시됩니다.")
+                    else:
+                        st.info("확장 검색 결과가 포함되어 있습니다: 4~6인 순환")
                     if not linked_cycles:
                         st.info("조건을 만족하는 연계 순환 경로가 없습니다.")
                     else:
