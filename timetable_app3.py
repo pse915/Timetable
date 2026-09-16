@@ -10,7 +10,6 @@
 import io
 import copy
 import uuid
-from urllib.parse import urlencode
 from datetime import date, datetime, timedelta
 from collections import defaultdict
 import numpy as np
@@ -2139,29 +2138,6 @@ def _weekly_cell_parts(value):
 
 
 
-def _weekly_query_params(key, row_label, row_name, day_index, period):
-    """주간 매트릭스 셀 클릭용 query parameter를 생성한다."""
-    return urlencode({
-        "wm": "1", "wm_key": str(key), "wm_row_label": str(row_label),
-        "wm_row": str(row_name), "wm_day": int(day_index), "wm_period": int(period)
-    })
-
-
-def _read_weekly_selection():
-    """셀 클릭으로 전달된 주간표 선택을 읽는다. 잘못된 값은 무시한다."""
-    try:
-        qp = st.query_params
-        if str(qp.get("wm", "")) != "1":
-            return None
-        key = str(qp.get("wm_key", "")); row_label = str(qp.get("wm_row_label", ""))
-        row_name = str(qp.get("wm_row", "")); day_index = int(qp.get("wm_day", "-1")); period = int(qp.get("wm_period", "0"))
-        if not key or row_label not in ("교사명", "학급") or not row_name or not (0 <= day_index < 5) or not (1 <= period <= MAX_PERIOD):
-            return None
-        return {"key": key, "row_label": row_label, "row_name": row_name, "day_index": day_index, "period": period}
-    except Exception:
-        return None
-
-
 def _resolve_weekly_selection(selection, ref_date, use_test=False):
     if not selection:
         return None
@@ -2442,9 +2418,12 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
                          key="weekly_matrix", title=None, show_week_dates=True, use_test=False, open_dialog=True):
     """주간 5일×7교시 인터랙티브 렌더러.
 
-    기존 HTML 링크 방식은 클릭할 때 URL 이동으로 앱이 첫 화면처럼 보일 수 있으므로 제거한다.
-    대신 Streamlit의 dataframe 단일 셀 선택 이벤트를 사용하고, 선택 결과는 native dialog에서 처리한다.
-    주간 35교시는 그대로 유지하며 요일 그룹 배경/경계와 변경 상태를 스타일링한다.
+    URL/query parameter를 전혀 사용하지 않는다.
+    사용자가 주간표의 수업 셀을 클릭하면 Streamlit의 selection 이벤트로
+    현재 실행 상태에 선택을 저장하고, native dialog를 띄워 작업한다.
+
+    결과적으로 동작은 바탕화면의 '셀 선택 → 컨텍스트 메뉴'와 비슷하지만,
+    브라우저 URL을 바꾸거나 초기 페이지로 이동하지 않는다.
     """
     if matrix is None or matrix.empty:
         st.info("표시할 주간 시간표가 없습니다.")
@@ -2455,7 +2434,7 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
     if show_week_dates:
         dates = [monday + timedelta(days=i) for i in range(5)]
         st.caption(" · ".join(f"{DAYS[i]} {dates[i]:%Y.%m.%d}" for i in range(5)))
-    st.caption("💡 수업 셀을 클릭하면 페이지 이동 없이 작은 팝업에서 맞교환·결강·보강을 조작할 수 있습니다.")
+    st.caption("💡 수업 셀을 한 번 클릭하면 페이지 이동 없이 작은 작업 팝업이 열립니다. URL은 변경하지 않습니다.")
 
     display = _weekly_styled_matrix(matrix)
     column_config = {}
@@ -2466,22 +2445,41 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
             col = f"{day}{p}"
             if col in display.columns:
                 column_config[col] = st.column_config.TextColumn(f"{day}{p}", width="small")
-    event = st.dataframe(
-        display,
-        hide_index=True,
-        use_container_width=True,
-        height=height,
-        key=key,
-        on_select="rerun",
-        selection_mode="single-cell",
-        column_config=column_config,
-    )
+
+    event = None
+    selected_cells = []
     try:
-        selected_cells = event.selection.cells
-    except Exception:
-        selected_cells = []
+        event = st.dataframe(
+            display,
+            hide_index=True,
+            use_container_width=True,
+            height=height,
+            key=key,
+            on_select="rerun",
+            selection_mode="single-cell",
+            column_config=column_config,
+        )
+        try:
+            selected_cells = list(event.selection.cells)
+        except Exception:
+            selected_cells = []
+    except TypeError:
+        # 구버전 Streamlit에서는 selection API가 없을 수 있다.
+        # 이 경우 표 자체는 정상 표시하고 URL 이동 방식으로 대체하지 않는다.
+        st.dataframe(
+            display,
+            hide_index=True,
+            use_container_width=True,
+            height=height,
+            key=f"{key}_legacy",
+            column_config=column_config,
+        )
+        st.warning("현재 Streamlit 버전에서는 주간표 셀 클릭 기능을 지원하지 않습니다. Streamlit을 최신 버전으로 업데이트하면 셀 클릭 팝업을 사용할 수 있습니다.")
+        return None
+
     lesson = _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, use_test=use_test)
     if lesson:
+        # 선택 상태는 URL이 아니라 session_state에만 저장한다.
         st.session_state.weekly_selected_lesson = lesson
         st.session_state.weekly_dialog_use_test = bool(use_test)
         st.session_state.weekly_dialog_title = title or "주간표 작업"
