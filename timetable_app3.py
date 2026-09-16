@@ -9,6 +9,7 @@
 
 import io
 import copy
+from contextlib import contextmanager
 import uuid
 import time as _time
 from datetime import date, datetime, timedelta, time
@@ -1635,24 +1636,26 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
     # 해당 학급의 슬롯 정보
     class_slots = {}          # (date, period) → {teacher, subject, day}
     teacher_occupied = defaultdict(set)  # teacher → set of (date, period)
+    affected_test_slots = get_test_affected_slots() if use_test else set()
+    weekday_cache = {d: WEEKDAY_KR[datetime.strptime(d, "%Y-%m-%d").weekday()] for d in candidates}
 
     for d in candidates:
         e = e_cache.get(d)
         if e is None or e.empty:
             continue
-        day_kr = WEEKDAY_KR[datetime.strptime(d, "%Y-%m-%d").weekday()]
-        for _, r in e.iterrows():
-            t = str(r["교사명"]).strip()
-            p = safe_int(r["교시"])
+        day_kr = weekday_cache[d]
+        # itertuples()은 iterrows()보다 훨씬 가볍고, 테스트 영향 슬롯도
+        # 반복 호출하지 않고 한 번만 가져와 연계 순환 탐색 비용을 줄인다.
+        for r in e.itertuples(index=False):
+            t = str(getattr(r, "교사명", "")).strip()
+            p = safe_int(getattr(r, "교시", 0))
             teacher_occupied[t].add((d, p))
-            if str(r["학급"]).strip() == class_a:
-                # 테스트 모드에서는 이미 테스트에 사용된 수업 슬롯을
-                # 새로운 순환의 구성원으로 재사용하지 않는다.
-                if use_test and (d, t, p) in get_test_affected_slots():
+            if str(getattr(r, "학급", "")).strip() == class_a:
+                if use_test and (d, t, p) in affected_test_slots:
                     continue
                 class_slots[(d, p)] = {
                     "teacher": t,
-                    "subject": str(r["과목"]).strip(),
+                    "subject": str(getattr(r, "과목", "")).strip(),
                     "day": day_kr
                 }
 
@@ -1676,7 +1679,7 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
         occupied = teacher_occupied.get(t, set())
         free_set = set()
         for d in candidates:
-            day_kr = WEEKDAY_KR[datetime.strptime(d, "%Y-%m-%d").weekday()]
+            day_kr = weekday_cache[d]
             max_p = PERIODS_PER_DAY.get(day_kr, 7)
             for p in range(1, max_p + 1):
                 slot = (d, p)
@@ -2439,28 +2442,16 @@ def _weekly_fragment_rerun():
         st.rerun()
 
 
-def _weekly_timed_status(label):
-    """팝업 내부의 무거운 작업에 눈에 잘 띄는 로딩 표시와 처리 시간을 제공한다.
+@contextmanager
+def _weekly_dialog_loading(label: str):
+    """주간 작업 실행 중에만 보이는 초경량 로딩 표시.
 
-    중요: 이 함수는 무거운 계산을 시작하기 *직전*에 호출되므로,
-    사용자에게 현재 작업이 진행 중이라는 것을 명확히 보여준다.
-    기존의 2개 반환값(started, status)은 그대로 유지해 호출부 회귀를 막는다.
+    완료 후 별도의 상태 박스/안내 문구를 남기지 않는다. 실제 계산은
+    호출부의 context 안에서 실행되므로 Streamlit의 spinner가 계산 중에만
+    표시되고, 계산이 끝나면 자동으로 사라진다.
     """
-    started = _time.perf_counter()
-    status = st.status(f"🔄 로딩 중...  {label}", expanded=True)
-    status.write("⏳ 잠시만 기다려 주세요. 최신 시간표를 확인하고 있습니다.")
-    status.caption("작업이 끝나면 실제 처리 시간이 표시됩니다.")
-    return started, status
-
-
-def _weekly_finish_status(started, status, label, *, ok=True):
-    elapsed = _time.perf_counter() - started
-    status.update(
-        label=f"✅ {label} 완료 · {elapsed:.2f}초" if ok else f"⚠️ {label} 종료 · {elapsed:.2f}초",
-        state="complete" if ok else "error",
-        expanded=False,
-    )
-    st.caption(f"처리 시간: **{elapsed:.2f}초**")
+    with st.spinner(f"🔄 로딩 중... {label}"):
+        yield
 
 
 @st.dialog("🎯 수업 작업", width="large")
@@ -2555,7 +2546,7 @@ def _weekly_action_dialog():
     # 검색 범위는 실제 검색 작업을 선택했을 때만 노출한다.
     # 팝업 속도를 위해 기본은 선택한 주간(월~금)만 검색한다.
     # 미래 날짜 검색은 사용자가 필요할 때만 확장한다.
-    extra_days = int(st.session_state.get("weekly_dialog_extra_days", 7) or 7)
+    extra_days = int(st.session_state.get("weekly_dialog_extra_days", 7))
     if action_mode in ("swap", "cycle"):
         with st.expander("🔎 검색 범위 확장", expanded=False):
             extra_days = st.slider(
@@ -2580,14 +2571,12 @@ def _weekly_action_dialog():
         )
         stored_key = st.session_state.get("weekly_swap_candidates_key")
         if stored_key != cache_key:
-            started, progress = _weekly_timed_status("1:1 교환 후보 검색 중")
-            with st.spinner("🔎 현재 유효 시간표에서 교환 후보를 찾고 있습니다..."):
+            with _weekly_dialog_loading("1:1 교환 후보 검색 중"):
                 df_swap = get_single_lesson_1to1_candidates(
                     lesson["교사명"], lesson["일자"], safe_int(lesson["교시"]),
                     str(lesson["학급"]), str(lesson["과목"]),
                     future_days=extra_days, version=ver, use_test=use_test,
                 )
-            _weekly_finish_status(started, progress, "1:1 교환 후보 검색")
             st.session_state.weekly_swap_candidates = df_swap
             st.session_state.weekly_swap_candidates_key = cache_key
         else:
@@ -2621,15 +2610,10 @@ def _weekly_action_dialog():
             }
             button_label = "🧪 1:1 맞교환 테스트" if use_test else "✅ 1:1 맞교환 실행"
             if st.button(button_label, type="primary", key="dlg_direct_swap", use_container_width=True):
-                started, progress = _weekly_timed_status(
-                    "테스트 맞교환 계산 중" if use_test else "1:1 맞교환 적용 중"
-                )
                 try:
-                    with st.spinner("🔄 최신 시간표를 확인하고 맞교환을 처리하고 있습니다..."):
+                    with _weekly_dialog_loading("1:1 맞교환 처리 중"):
                         ok = do_swap(lesson, b_info, lesson["일자"], b_info["일자"], is_test=use_test)
-                    _weekly_finish_status(started, progress, "테스트 맞교환" if use_test else "1:1 맞교환", ok=bool(ok))
                 except Exception as exc:
-                    _weekly_finish_status(started, progress, "맞교환", ok=False)
                     st.error(f"맞교환 처리 중 오류가 발생했습니다: {exc}")
                     ok = False
                 if ok:
@@ -2652,14 +2636,12 @@ def _weekly_action_dialog():
         )
         stored_key = st.session_state.get("weekly_cycle_candidates_key")
         if stored_key != cache_key:
-            started, progress = _weekly_timed_status("연계 순환 후보 검색 중")
-            with st.spinner("🔗 2·3인 순환 가능 경로를 계산하고 있습니다..."):
+            with _weekly_dialog_loading("연계 순환 후보 계산 중"):
                 cycles, cycle_msg = get_single_lesson_linked_cycles(
                     lesson["교사명"], lesson["일자"], safe_int(lesson["교시"]),
                     str(lesson["학급"]), str(lesson["과목"]),
                     future_days=extra_days, version=ver, min_cycle=2, max_cycle=3, use_test=use_test,
                 )
-            _weekly_finish_status(started, progress, "연계 순환 후보 검색")
             st.session_state.weekly_cycle_candidates = cycles
             st.session_state.weekly_cycle_candidates_msg = cycle_msg
             st.session_state.weekly_cycle_candidates_key = cache_key
@@ -2680,13 +2662,10 @@ def _weekly_action_dialog():
                     st.caption(cyc.get("path_desc", ""))
                     st.caption("학급의 담당교사·과목·시수가 보존되는 순환 후보입니다.")
                     if st.button("🧪 이 연계 순환 테스트", key=f"dlg_cycle_test_{idx}", use_container_width=True):
-                        started, progress = _weekly_timed_status(f"{cyc['length']}인 연계 순환 테스트 적용 중")
                         try:
-                            with st.spinner("🔗 연계된 모든 교환 슬롯을 검증하고 있습니다..."):
+                            with _weekly_dialog_loading("연계 순환 테스트 중"):
                                 ok = apply_cycle_swaps(cyc["moves"], is_test=True)
-                            _weekly_finish_status(started, progress, f"{cyc['length']}인 연계 순환 테스트", ok=(ok is not False))
                         except Exception as exc:
-                            _weekly_finish_status(started, progress, "연계 순환 테스트", ok=False)
                             st.error(f"연계 순환 테스트 중 오류가 발생했습니다: {exc}")
                             ok = False
                         if ok is not False:
@@ -2705,13 +2684,10 @@ def _weekly_action_dialog():
         with r2:
             detail = st.text_input("상세사유", key="dlg_abs_detail")
         if st.button("📌 결강 등록", type="primary", key="dlg_abs_submit", use_container_width=True):
-            started, progress = _weekly_timed_status("결강 등록 중")
             try:
-                with st.spinner("📌 결강 정보를 저장하고 있습니다..."):
+                with _weekly_dialog_loading("결강 정보 저장 중"):
                     ok = _register_absence_from_weekly(lesson, reason, detail)
-                _weekly_finish_status(started, progress, "결강 등록", ok=bool(ok))
             except Exception as exc:
-                _weekly_finish_status(started, progress, "결강 등록", ok=False)
                 st.error(f"결강 등록 중 오류가 발생했습니다: {exc}")
                 ok = False
             if ok:
@@ -2724,13 +2700,11 @@ def _weekly_action_dialog():
     # 보강: 사용자가 보강 메뉴를 선택한 경우에만 추천 계산
     # ----------------------------------------------------------------
     elif action_mode == "substitute":
-        started, progress = _weekly_timed_status("보강 교사 추천 검색 중")
-        with st.spinner("🟢 현재 시간표와 가능 시간을 확인하고 있습니다..."):
+        with _weekly_dialog_loading("보강 후보 확인 중"):
             cand = get_cached_substitute_recommendations(
                 lesson["요일"], lesson["교시"], lesson["과목"], lesson["학급"], lesson["교사명"], lesson["일자"],
                 top_n=10, include_part_time=True, version=ver
             )
-        _weekly_finish_status(started, progress, "보강 교사 추천 검색")
         if cand.empty:
             st.warning("현재 조건에서 추천 가능한 보강 교사가 없습니다.")
         else:
@@ -2748,17 +2722,14 @@ def _weekly_action_dialog():
                 pick = st.selectbox("보강 교사", labels, key="dlg_sub_pick")
                 picked = cand[cand["보강교사"].astype(str) == str(pick)].iloc[0]
                 if st.button("🟢 선택 교사로 보강 배정", type="primary", key="dlg_sub_submit", use_container_width=True):
-                    started, progress = _weekly_timed_status("보강 배정 중")
                     try:
-                        with st.spinner("🟢 보강 교사 가능 여부를 다시 확인하고 저장하고 있습니다..."):
+                        with _weekly_dialog_loading("보강 배정 처리 중"):
                             ok = add_substitute(
                                 cid, lesson["일자"], lesson["요일"], lesson["교시"], lesson["학급"], lesson["과목"],
                                 lesson["교사명"], str(picked["보강교사"]), "주간표", picked.get("우선순위", ""),
                                 "주간 시간표 셀에서 배정"
                             )
-                        _weekly_finish_status(started, progress, "보강 배정", ok=bool(ok))
                     except Exception as exc:
-                        _weekly_finish_status(started, progress, "보강 배정", ok=False)
                         st.error(f"보강 배정 중 오류가 발생했습니다: {exc}")
                         ok = False
                     if ok:
