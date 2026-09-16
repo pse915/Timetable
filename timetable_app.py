@@ -30,22 +30,25 @@ from openpyxl.worksheet.page import PageMargins
 # ==========================================================================================
 # 0. 기본 설정
 # ==========================================================================================
-st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", layout="wide")
+st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
-    [data-testid="stDataFrame"] { border: 1px solid #94a3b8 !important; border-radius: 6px; }
-    [data-testid="stDataFrame"] [role="gridcell"], 
+    /* Apple-like: 화면을 업무표에 최대한 할당하고 장식은 최소화 */
+    .block-container { max-width: 100%; padding-top: .55rem; padding-bottom: .55rem; padding-left: .75rem; padding-right: .75rem; }
+    [data-testid="stHeader"] { background: transparent; }
+    [data-testid="stDataFrame"] { border: 1px solid #d6d9df !important; border-radius: 10px; overflow: hidden; }
+    [data-testid="stDataFrame"] [role="gridcell"],
     [data-testid="stDataFrame"] [role="columnheader"] {
-        border-right: 1px solid #cbd5e1 !important;
-        border-bottom: 1px solid #cbd5e1 !important;
+        border-right: 1px solid #e5e7eb !important;
+        border-bottom: 1px solid #e5e7eb !important;
     }
-    .login-box { max-width: 420px; margin: 80px auto; padding: 30px; border: 1px solid #cbd5e1; border-radius: 12px; background: #f8fafc; }
-    .app-hero { padding: 18px 22px; border: 1px solid #dbe4ee; border-radius: 14px; background: linear-gradient(135deg, #f8fbff 0%, #f8fafc 100%); margin-bottom: 14px; }
-    .app-hero-title { font-size: 1.35rem; font-weight: 800; margin-bottom: 4px; }
-    .app-hero-sub { color: #64748b; font-size: .92rem; }
-    .ux-chip { display:inline-block; padding: 4px 9px; margin: 2px 4px 2px 0; border-radius: 999px; background:#eef4fa; border:1px solid #d8e3ee; font-size:.78rem; }
-    .weekly-help { padding: 8px 12px; border-radius: 9px; background:#f8fafc; border:1px solid #e2e8f0; color:#475569; font-size:.86rem; }
+    [data-testid="stDataFrame"] [role="columnheader"] { font-weight: 650 !important; }
+    .login-box { max-width: 420px; margin: 80px auto; padding: 30px; border: 1px solid #cfd4dc; border-radius: 12px; background: #f8fafc; }
+    div[data-testid="stVerticalBlock"] > div:has(> div > .compact-nav) { margin-bottom: .15rem; }
+    .compact-nav { color:#6b7280; font-size:.78rem; margin:0 0 .25rem .15rem; }
+    /* 매트릭스는 페이지보다 내부 표가 우선 스크롤되도록 높이를 확보 */
+    .matrix-shell { margin-top: .15rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -439,9 +442,6 @@ def range_calendar_matrix_picker(start_value=None, end_value=None, key="range_ma
     st.session_state[f"{key}_end_periods"]=end_p
     return start_date,end_date,start_p,end_p
 
-
-def render_change_legend():
-    st.caption("🟢 보강 · 🔄 실제 교환 · 🧪 테스트 교환 · 🟡 시간강사 · 빈칸=공강")
 
 def get_all_teacher_names():
     ts = []
@@ -2308,8 +2308,9 @@ def _weekly_display_matrix(matrix: pd.DataFrame) -> pd.DataFrame:
             if not cls and not subject:
                 vals.append("")
             else:
-                # Streamlit dataframe은 줄바꿈을 지원하므로 3줄로 고정한다.
-                vals.append("\n".join([x for x in (cls, subject, icon) if x]))
+                # 한 줄로 압축해 35개 슬롯이 가로로 한눈에 들어오게 한다.
+                text = " ".join([x for x in (cls, subject, icon) if x])
+                vals.append(text)
         out[col] = vals
     return out
 
@@ -2324,9 +2325,10 @@ def _weekly_styled_matrix(matrix: pd.DataFrame):
     styler = styler.set_properties(**{
         "text-align": "center",
         "vertical-align": "middle",
-        "white-space": "pre-wrap",
-        "line-height": "1.15",
-        "font-size": "12px",
+        "white-space": "nowrap",
+        "line-height": "1.0",
+        "font-size": "10.5px",
+        "padding": "2px 1px",
     })
     if "교사명" in display.columns:
         styler = styler.set_properties(subset=["교사명"], **{
@@ -2841,7 +2843,7 @@ def render_weekly_selection_panel(ref_date, *, use_test=False, title="선택 수
 def render_standard_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", key="weekly_matrix", title=None, use_test=False):
     """모든 탭이 동일한 주간 매트릭스 렌더러 설정을 사용하도록 하는 표준 래퍼."""
     return render_weekly_matrix(
-        matrix, ref_date, row_label=row_label, height=650, key=key,
+        matrix, ref_date, row_label=row_label, height=900, key=key,
         title=title, show_week_dates=True, use_test=use_test, open_dialog=True
     )
 
@@ -2854,7 +2856,7 @@ def _weekly_selection_signature(selected_cells):
         return tuple()
 
 
-def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", height=700,
+def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", height=900,
                          key="weekly_matrix", title=None, show_week_dates=True, use_test=False, open_dialog=True):
     """주간 5일×7교시 인터랙티브 렌더러.
 
@@ -2870,24 +2872,20 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         return None
     monday = ref_date - timedelta(days=ref_date.weekday())
     if title:
-        st.markdown(f"#### {title}")
+        st.markdown(f"<div style='font-size:.86rem;font-weight:600;color:#6b7280;margin:0 0 .12rem .1rem'>{title}</div>", unsafe_allow_html=True)
     if show_week_dates:
         dates = [monday + timedelta(days=i) for i in range(5)]
-        st.caption(" · ".join(f"{DAYS[i]} {dates[i]:%Y.%m.%d}" for i in range(5)))
-    if _is_current_week(ref_date):
-        st.caption("🕒 현재 주: 이미 지난 평일의 수업은 자동으로 숨기고, 오늘부터 남은 시간표를 표시합니다.")
-    st.caption("💡 수업 셀을 한 번 클릭하면 페이지 이동 없이 작은 작업 팝업이 열립니다. URL은 변경하지 않습니다.")
+        st.markdown("<div class='compact-nav'>" + "　".join(f"{DAYS[i]} {dates[i]:%m.%d}" for i in range(5)) + "</div>", unsafe_allow_html=True)
 
     # 현재 주라면 이미 지나간 평일의 수업 셀은 숨긴다.
     # 단, 기준일을 과거/미래 주로 선택한 경우에는 역사 조회를 위해 그대로 보여준다.
     visible_matrix = _hide_past_week_slots(matrix, ref_date, hide_past=True)
     display = _weekly_styled_matrix(visible_matrix)
     column_config = {}
-    # 1500px급 브라우저에서 좌우 여백까지 고려해 월~금 전체가 들어오도록 폭을 고정한다.
-    # 내부 표는 약 1455px(행 이름 90px + 교시 39px × 최대 35칸)를 목표로 한다.
-    # 35칸보다 적은 실제 요일 교시를 가진 학교에서도 같은 규칙을 유지한다.
-    compact_period_width = 39
-    row_name_width = 90
+    # 35개 슬롯이 좌우 스크롤 없이 최대한 한 화면에 들어오도록 압축한다.
+    # 텍스트는 한 줄로 표시하고, 요일 경계선과 상태 아이콘으로 정보를 구분한다.
+    compact_period_width = 31
+    row_name_width = 82
     if row_label in display.columns:
         column_config[row_label] = st.column_config.TextColumn(row_label, width=row_name_width)
     monday = ref_date - timedelta(days=ref_date.weekday())
@@ -2912,13 +2910,13 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         event = st.dataframe(
             display,
             hide_index=True,
-            use_container_width=False,
+            use_container_width=True,
             height=height,
+            row_height=21,
             key=widget_key,
             on_select="rerun",
             selection_mode="single-cell",
             column_config=column_config,
-            width=1450,
         )
         try:
             selected_cells = list(event.selection.cells)
@@ -2943,11 +2941,10 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         st.dataframe(
             display,
             hide_index=True,
-            use_container_width=False,
+            use_container_width=True,
             height=height,
             key=f"{key}_legacy__sel{matrix_epoch}",
             column_config=column_config,
-            width=1450,
         )
         st.warning("현재 Streamlit 버전에서는 주간표 셀 클릭 기능을 지원하지 않습니다. Streamlit을 최신 버전으로 업데이트하면 셀 클릭 팝업을 사용할 수 있습니다.")
         return None
@@ -3804,33 +3801,6 @@ def _week_anchor(ref_date=None):
     return ref - timedelta(days=ref.weekday())
 
 
-def render_app_overview():
-    """교사가 첫 화면에서 현재 업무 상태를 3초 안에 파악할 수 있는 경량 대시보드."""
-    today = _today_kst().strftime("%Y-%m-%d")
-    abs_df = st.session_state.get("absences", pd.DataFrame())
-    sub_df = st.session_state.get("subs", pd.DataFrame())
-    swap_df = st.session_state.get("swaps", pd.DataFrame())
-    today_abs = 0 if abs_df.empty else int((abs_df["일자"].astype(str).map(normalize_date_str) == today).sum())
-    today_sub = 0 if sub_df.empty else int((sub_df["일자"].astype(str).map(normalize_date_str) == today).sum())
-    week_start = _week_anchor()
-    week_end = week_start + timedelta(days=4)
-    if swap_df.empty:
-        week_swap = 0
-    else:
-        date_min, date_max = week_start.strftime("%Y-%m-%d"), week_end.strftime("%Y-%m-%d")
-        dates = swap_df["원본일자"].astype(str).map(normalize_date_str) if "원본일자" in swap_df.columns else pd.Series("", index=swap_df.index)
-        targets = swap_df["목표일자"].astype(str).map(normalize_date_str) if "목표일자" in swap_df.columns else pd.Series("", index=swap_df.index)
-        week_swap = int((dates.between(date_min, date_max) | targets.between(date_min, date_max)).sum())
-    changed_today = today_abs + today_sub
-    st.markdown(f"""<div class='app-hero'><div class='app-hero-title'>📘 {SCHOOL_NAME} · {SCHOOL_YEAR}학년도</div>
-    <div class='app-hero-sub'>{current_name()} · {current_role()} · 오늘 {today} · 주간표는 월~금 기준</div></div>""", unsafe_allow_html=True)
-    cols = st.columns(5)
-    metrics = [("📌 오늘 결강", today_abs), ("🟢 오늘 보강", today_sub), ("🔄 이번 주 교환", week_swap), ("⚠️ 오늘 처리대상", changed_today), ("👩‍🏫 등록 교사", len(st.session_state.get("teachers", pd.DataFrame())))]
-    for c, (label, value) in zip(cols, metrics):
-        with c:
-            st.metric(label, value)
-    st.markdown("<div class='ux-chip'>📅 달력으로 날짜 선택</div><div class='ux-chip'>🗓️ 주간표에서 수업 클릭</div><div class='ux-chip'>🔄 1:1 맞교환이 기본</div><div class='ux-chip'>🔗 연계 순환은 필요할 때만 계산</div>", unsafe_allow_html=True)
-
 
 # ==========================================================================================
 # 앱 시작
@@ -3898,9 +3868,6 @@ with st.sidebar:
                 st.rerun()
 
         st.divider()
-        st.metric("등록 교사", len(st.session_state.teachers))
-        st.metric("누적 보강", len(st.session_state.subs))
-
         if is_edu_or_master():
             try:
                 curr_budget = get_current_budget()
@@ -3958,8 +3925,6 @@ if st.session_state.timetable.empty:
 # ==========================================================================================
 # 메인 화면
 # ==========================================================================================
-st.title(f"시간표 · 결강/보강 관리  |  {current_name()} ({current_user()}) · {current_role()}")
-render_app_overview()
 
 allowed_tabs = get_user_allowed_tabs()
 visible_tabs = [t for t in ALL_TABS if t in allowed_tabs]
@@ -3973,21 +3938,17 @@ if not visible_tabs:
     st.warning("접근 가능한 탭이 없습니다.")
     st.stop()
 
-# Streamlit의 st.tabs()는 보이지 않는 탭의 본문도 같은 실행에서 모두 계산한다.
-# 이 앱은 각 탭에 주간 매트릭스·Google Sheets 데이터·추천 계산이 많기 때문에,
-# 메뉴 하나만 실제로 렌더링하는 방식으로 전환한다. UI는 탭과 같은 역할을 하되
-# 비활성 화면을 계산하지 않아 클릭/팝업 반응성과 초기 로딩을 크게 줄인다.
+# 한 번에 하나의 업무 화면만 렌더링해 비활성 화면의 계산을 막는다.
 if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs:
     st.session_state.active_tab = visible_tabs[0]
 active_tab = st.selectbox(
     "업무 메뉴", visible_tabs,
     index=visible_tabs.index(st.session_state.active_tab),
     key="main_active_tab",
-    help="한 번에 한 업무 화면만 렌더링합니다. 주간표와 후보 검색의 불필요한 백그라운드 계산을 줄입니다.",
+    label_visibility="collapsed",
 )
 st.session_state.active_tab = active_tab
 tab_map = {active_tab: st.container()}
-st.caption(f"현재 업무: **{active_tab}** · 다른 메뉴는 위에서 선택하세요.")
 
 # 주간표 팝업은 현재 활성 화면의 주간표가 선택 상태를 기록한 뒤
 # 스크립트 마지막에서 단 한 번 렌더링한다. 비활성 메뉴는 렌더링하지 않으므로
@@ -3996,11 +3957,9 @@ st.caption(f"현재 업무: **{active_tab}** · 다른 메뉴는 위에서 선�
 # ------------------------------------------------------------------ 시간표 조회
 if "시간표 조회" in tab_map:
     with tab_map["시간표 조회"]:
-        st.subheader("📅 시간표 조회 — 달력 → 시간표 매트릭스")
-        render_change_legend()
-        view = st.radio("보기 방식", ["선택 날짜 매트릭스", "교사별 주간 매트릭스", "학급별 주간 매트릭스", "교사 1인 주간표"], horizontal=True, key="view_mode")
+        view = st.radio("보기 방식", ["선택 날짜", "교사별 주간", "학급별 주간", "교사 1인"], horizontal=True, key="view_mode", label_visibility="collapsed")
         ver = st.session_state.get("_data_version", 0)
-        if view == "선택 날짜 매트릭스":
+        if view == "선택 날짜":
             picked, matrix, selections = daily_schedule_picker(_today_kst(), key="view_daily", height=560,
                 help_text="날짜를 달력에서 선택한 후 교사×교시 셀을 클릭하세요.")
             if selections:
@@ -4013,12 +3972,12 @@ if "시간표 조회" in tab_map:
                         r=m.iloc[0]
                         details.append({"교사":r["교사명"],"교시":sel["교시"],"학급":r["학급"],"과목":r["과목"],"변경유형":r.get("변경유형","원본"),"변경상세":r.get("변경상세","")})
                 st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
-        elif view == "교사별 주간 매트릭스":
+        elif view == "교사별 주간":
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_week_ref")
             render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
-        elif view == "학급별 주간 매트릭스":
+        elif view == "학급별 주간":
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_class_ref")
             render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False)
             xlsx = build_weekly_class_schedule_excel_bytes(ref, use_test=False)
@@ -4224,12 +4183,6 @@ if "결강·보강" in tab_map:
 # ------------------------------------------------------------------ 시간표 맞교환
 if "시간표 맞교환 & 변경 추천" in tab_map:
     with tab_map["시간표 맞교환 & 변경 추천"]:
-        st.markdown("### 🔄 스마트 시간표 변경 & 맞교환")
-        st.caption(
-            "이제 별도의 출발점 지정이나 후보표를 먼저 열 필요가 없습니다. "
-            "주간 시간표에서 수업 셀을 클릭하면 바로 작업 팝업이 열립니다."
-        )
-
         week_anchor = calendar_picker(
             "교환 검색 기준 주", _today_kst(),
             key="exchange_week_anchor",
@@ -4820,5 +4773,3 @@ if "📑 회원별 탭 권한 관리" in tab_map:
 # 방금 클릭한 셀이 팝업에 표시된다. 또한 주간표 렌더러 안에서 dialog가 중복 생성되지 않는다.
 if st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
     _weekly_action_dialog()
-
-st.caption(f"서라벌여중 시간표 관리 시스템 20260916 v2.1.0 · {current_name()} ({current_user()}) · {current_role()}")
