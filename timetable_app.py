@@ -39,17 +39,9 @@ st.markdown("""
     [data-testid="stHeader"] { background: transparent; }
     /* Streamlit Cloud 상단 GitHub/설정 메뉴와 충돌하지 않도록 앱 toolbar는 fixed가 아닌 일반 flow */
     .app-top-safe-space { height:30px; width:100%; flex:0 0 30px; pointer-events:none; }
-    /* 도구 창은 dialog를 사용한다. 반복 rerun에도 viewport 기준 중앙 위치와
-       고정된 최대 높이를 유지해 왼쪽으로 누적 이동하는 현상을 막는다. */
-    [data-testid="stDialog"] {
-        transform: none !important;
-    }
-    [data-testid="stDialog"] > div {
-        width: min(420px, calc(100vw - 32px)) !important;
-        max-width: min(420px, calc(100vw - 32px)) !important;
-        margin-left: auto !important;
-        margin-right: auto !important;
-    }
+    /* 도구 dialog는 Streamlit의 기본 중앙 정렬/폭 계산을 그대로 사용한다.
+       transform, margin, width를 강제로 덮어쓰면 rerun 때 dialog의 기준점이
+       바뀌면서 왼쪽으로 누적 이동하는 현상이 생길 수 있으므로 건드리지 않는다. */
     [data-testid="stDialog"] button,
     [data-testid="stDialog"] input,
     [data-testid="stDialog"] [role="button"] {
@@ -64,9 +56,9 @@ st.markdown("""
     .apple-note { margin:.05rem 0 .45rem; color:#6b7280; font-size:.76rem; line-height:1.35; }
     .apple-note strong { color:#4b5563; font-weight:600; }
     .sandbox-title { margin:.1rem 0 .1rem; color:#1d1d1f; font-size:1rem; font-weight:600; letter-spacing:-.015em; }
-    /* Cloud 기본 header 아래의 dialog가 상단/하단에 잘리지 않도록 dialog 자체에만 최대 높이를 준다. */
-    [data-testid="stDialog"] > div, div[role="dialog"] { max-height:calc(100vh - 4.5rem) !important; }
-    [data-testid="stDialog"] > div > div, div[role="dialog"] > div { max-height:calc(100vh - 4.5rem) !important; overflow-y:auto !important; }
+    /* Cloud 기본 header 아래에서 도구 내용만 세로 스크롤한다.
+       dialog의 외곽 wrapper에는 width/margin/transform을 적용하지 않는다. */
+    [data-testid="stDialog"] > div > div { max-height:calc(100vh - 4.5rem) !important; overflow-y:auto !important; }
     [data-testid="stDataFrame"] { border: 1px solid #d6d9df !important; border-radius: 10px; overflow: hidden; }
     [data-testid="stDataFrame"] [role="gridcell"],
     [data-testid="stDataFrame"] [role="columnheader"] {
