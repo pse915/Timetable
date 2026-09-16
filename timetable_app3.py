@@ -12,7 +12,6 @@ import copy
 import uuid
 from datetime import date, datetime, timedelta
 from collections import defaultdict
-from html import escape
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -34,134 +33,6 @@ st.markdown("""
         border-right: 1px solid #cbd5e1 !important;
         border-bottom: 1px solid #cbd5e1 !important;
     }
-    /* 모든 주간 교사 매트릭스: 셀 내부 줄바꿈과 충분한 높이를 강제 */
-    /* Streamlit DataFrame의 실제 텍스트 자식까지 줄바꿈을 강제한다.
-       일부 Streamlit 버전은 gridcell 자체가 아니라 내부 div/span에
-       white-space: nowrap를 적용하므로 부모만 바꾸면 줄바꿈이 되지 않는다. */
-    [data-testid="stDataFrame"] [role="gridcell"],
-    [data-testid="stDataFrame"] [role="gridcell"] > div,
-    [data-testid="stDataFrame"] [role="gridcell"] div,
-    [data-testid="stDataFrame"] [role="gridcell"] span {
-        white-space: pre-wrap !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
-        overflow-wrap: anywhere !important;
-        word-break: break-word !important;
-        line-height: 1.12 !important;
-        vertical-align: middle !important;
-    }
-    [data-testid="stDataFrame"] [role="gridcell"] {
-        height: auto !important;
-        min-height: 58px !important;
-        padding-top: 5px !important;
-        padding-bottom: 5px !important;
-    }
-    [data-testid="stDataFrame"] [role="columnheader"] {
-        white-space: nowrap !important;
-        line-height: 1.1 !important;
-    }
-    .weekly-matrix-wrap {
-        width: 100%;
-        overflow-x: auto;
-        border: 1px solid #94a3b8;
-        border-radius: 7px;
-        background: white;
-    }
-    .weekly-matrix {
-        width: 100%;
-        min-width: 980px;
-        border-collapse: collapse;
-        table-layout: fixed;
-        font-size: 11px;
-        line-height: 1.12;
-    }
-    .weekly-matrix th, .weekly-matrix td {
-        border-right: 1px solid #d7dce2;
-        border-bottom: 1px solid #d7dce2;
-        padding: 4px 2px;
-        text-align: center;
-        vertical-align: middle;
-        overflow: hidden;
-    }
-    .weekly-matrix th {
-        background: #f1f3f6;
-        font-weight: 700;
-        color: #334155;
-        white-space: nowrap;
-        height: 28px;
-    }
-    .weekly-matrix th.teacher-col, .weekly-matrix td.teacher-col {
-        width: 82px;
-        min-width: 82px;
-        max-width: 82px;
-        text-align: left;
-        padding-left: 7px;
-        white-space: nowrap;
-    }
-    .weekly-matrix td {
-        height: 43px;
-        white-space: normal;
-        word-break: keep-all;
-    }
-    .weekly-matrix td {
-        height: 43px;
-        white-space: normal;
-        word-break: keep-all;
-    }
-    /* 주간 매트릭스는 35개 교시 열을 유지하되 각 셀을 좁고 일정하게 만든다.
-       학급/과목은 셀 안에서 명확히 2줄로 보이도록 한다. */
-    .interactive-weekly-table {
-        min-width: 1490px;
-        table-layout: fixed;
-    }
-    .interactive-weekly-table th.period-col,
-    .interactive-weekly-table td.period-col {
-        width: 40px;
-        min-width: 40px;
-        max-width: 40px;
-        padding-left: 2px;
-        padding-right: 2px;
-    }
-    .interactive-weekly-table td.period-col {
-        height: 62px;
-        overflow: hidden;
-        vertical-align: middle;
-    }
-    .interactive-weekly-table .class-line {
-        font-size: 10px;
-        font-weight: 700;
-        line-height: 1.05;
-        white-space: nowrap;
-    }
-    .interactive-weekly-table .subject-line {
-        font-size: 9px;
-        line-height: 1.05;
-        overflow-wrap: anywhere;
-        word-break: break-all;
-    }
-    .interactive-weekly-table .change-line {
-        font-size: 8px;
-        line-height: 1.0;
-        margin-top: 2px;
-        overflow-wrap: anywhere;
-    }
-    .interactive-weekly-table th {
-        height: 30px;
-    }
-    .interactive-weekly-table .teacher-col {
-        position: sticky;
-        left: 0;
-        z-index: 2;
-        background: white;
-    }
-    .interactive-weekly-table thead .teacher-col {
-        z-index: 3;
-        background: #f1f3f6;
-    }
-    .weekly-matrix .class-line { font-weight: 600; }
-    .weekly-matrix .subject-line { font-size: 10.5px; color: #334155; }
-    .weekly-matrix .change-line { font-size: 9px; margin-top: 2px; }
-    .weekly-matrix .empty { color: #cbd5e1; }
     .login-box { max-width: 420px; margin: 80px auto; padding: 30px; border: 1px solid #cbd5e1; border-radius: 12px; background: #f8fafc; }
 </style>
 """, unsafe_allow_html=True)
@@ -521,158 +392,6 @@ def range_calendar_matrix_picker(start_value=None, end_value=None, key="range_ma
 
 def render_change_legend():
     st.caption("🟢 보강 · 🔄 실제 교환 · 🧪 테스트 교환 · 🟡 시간강사 · 빈칸=공강")
-
-def _weekly_cell_lines(value):
-    """주간 매트릭스 셀을 '학급 / 과목 / 변경표시' 2~3줄로 압축한다."""
-    import re
-    text = str(value or "").strip()
-    if not text:
-        return "", "", ""
-    prefix = ""
-    if text.startswith("[결강]"):
-        prefix = "결강"
-        text = text[len("[결강]"):].strip()
-    markers = []
-    for marker, label in [("🔄", "교환"), ("🧪", "테스트"), ("🟢", "보강"), ("🟡", "시간강사")]:
-        if marker in text:
-            markers.append(label)
-            text = text.replace(marker, " ")
-    text = re.sub(r"\s+", " ", text).strip()
-    # 시간강사 셀의 원본교사 표기는 한 줄로 길어지지 않게 변경표시로만 표시한다.
-    text = re.sub(r"\s+[^\s]+\s*→\s*시간강사.*$", "", text).strip()
-    parts = text.split(" ", 1)
-    class_line = parts[0] if parts else ""
-    subject_line = parts[1] if len(parts) > 1 else ""
-    if prefix:
-        change = prefix + (" · " + " · ".join(markers) if markers else "")
-    else:
-        change = " · ".join(markers)
-    return class_line, subject_line, change
-
-
-def render_weekly_matrix(df, *, height=None, caption=None, compact=False):
-    """주간 매트릭스의 열 구성은 그대로 유지하면서 셀만 읽기 좋게 렌더링한다.
-
-    월1~금7(학교 요일별 실제 교시 수) 구조와 행/열 순서는 변경하지 않는다.
-    일반 조회용은 HTML 표로 화면 폭에 맞추고, 셀 내용은 학급/과목을 줄바꿈한다.
-    """
-    if df is None or df.empty:
-        st.info("표시할 시간표가 없습니다.")
-        return
-    if caption:
-        st.caption(caption)
-    columns = list(df.columns)
-    html_parts = ['<div class="weekly-matrix-wrap"><table class="weekly-matrix"><thead><tr>']
-    for i, col in enumerate(columns):
-        cls = "teacher-col" if i == 0 else ""
-        html_parts.append(f'<th class="{cls}">{escape(str(col))}</th>')
-    html_parts.append('</tr></thead><tbody>')
-    for _, row in df.iterrows():
-        html_parts.append('<tr>')
-        for i, col in enumerate(columns):
-            value = row.get(col, "")
-            if i == 0:
-                html_parts.append(f'<td class="teacher-col"><strong>{escape(str(value))}</strong></td>')
-                continue
-            c, subj, change = _weekly_cell_lines(value)
-            if not c and not subj and not change:
-                html_parts.append('<td class="empty">·</td>')
-            else:
-                lines = f'<div class="class-line">{escape(c)}</div>' if c else ''
-                if subj:
-                    lines += f'<div class="subject-line">{escape(subj)}</div>'
-                if change:
-                    lines += f'<div class="change-line">{escape(change)}</div>'
-                html_parts.append(f'<td>{lines}</td>')
-        html_parts.append('</tr>')
-    html_parts.append('</tbody></table></div>')
-    st.markdown("".join(html_parts), unsafe_allow_html=True)
-
-
-def compact_interactive_weekly_matrix(df):
-    """셀 선택용 주간 교사표.
-
-    주간 매트릭스의 행/열 구조는 그대로 유지한다.
-    셀은 반드시 ``학급\n과목\n변경표시`` 형태로 만들어 브라우저의
-    Streamlit 데이터 그리드에서도 두 줄(변경 시 세 줄)로 읽히게 한다.
-    """
-    if df is None or df.empty:
-        return pd.DataFrame() if df is None else df.copy()
-    out = df.copy()
-    for col in out.columns:
-        if col == "교사명":
-            continue
-        vals = []
-        for v in out[col].tolist():
-            c, subj, change = _weekly_cell_lines(v)
-            if not c and not subj and not change:
-                vals.append("")
-                continue
-            lines = [x for x in (c, subj, change) if x]
-            # 일반 줄바꿈을 사용하고, CSS에서 pre-wrap으로 렌더링한다.
-            vals.append("\n".join(lines))
-        out[col] = vals
-    return out
-
-
-def weekly_matrix_column_config(df):
-    """주간 매트릭스의 모든 열 폭을 통일한다.
-
-    교사명은 조금 넓게, 월~금의 교시 열은 작은 고정 폭으로 두어
-    전체 주간 구조를 유지하면서 불필요하게 한 열이 넓어지는 것을 막는다.
-    """
-    if df is None or df.empty:
-        return {}
-    config = {}
-    for col in df.columns:
-        if col == "교사명":
-            config[col] = st.column_config.TextColumn("교사명", width="small")
-        else:
-            config[col] = st.column_config.TextColumn(str(col), width="small")
-    return config
-
-
-def render_interactive_weekly_matrix(df, *, key, height=620, caption=None):
-    """주간 교사 매트릭스 하나로 표시와 셀 선택을 동시에 처리한다.
-
-    주간 구조(교사명 + 월1~금7)는 그대로 유지한다. 별도의 '보기 표 +
-    선택 표'를 중복 출력하지 않고, 하나의 Streamlit 선택 그리드만 사용한다.
-    셀 값은 학급/과목/변경상태를 줄바꿈으로 넣어 한 셀에서 바로 읽고 클릭할 수 있게 한다.
-    """
-    if df is None or df.empty:
-        st.info("표시할 시간표가 없습니다.")
-        return None
-    if caption:
-        st.caption(caption)
-
-    matrix = compact_interactive_weekly_matrix(df)
-    # 선택용 데이터프레임 자체가 곧 화면에 보이는 주간표다.
-    # hidden/expander를 사용하지 않아 동일한 표를 두 번 렌더링하지 않는다.
-    try:
-        event = st.dataframe(
-            matrix,
-            hide_index=True,
-            use_container_width=True,
-            height=min(max(height, 420), 760),
-            key=key,
-            on_select="rerun",
-            selection_mode="single-cell",
-            row_height=64,
-            column_config=weekly_matrix_column_config(matrix),
-        )
-    except TypeError:
-        # 구버전 Streamlit 호환
-        event = st.dataframe(
-            matrix,
-            hide_index=True,
-            use_container_width=True,
-            height=min(max(height, 420), 760),
-            key=key,
-            on_select="rerun",
-            selection_mode="single-cell",
-        )
-    return event
-
 
 def get_all_teacher_names():
     ts = []
@@ -3235,17 +2954,17 @@ if "시간표 조회" in tab_map:
                 st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
         elif view == "교사별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_week_ref")
-            render_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), caption="월~금 전체 주간 시간표 · 학급과 과목을 두 줄로 표시")
+            st.dataframe(effective_teacher_matrix(ref,ver,use_test=False),use_container_width=True,height=650,hide_index=True)
         elif view == "학급별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_class_ref")
-            render_weekly_matrix(class_matrix(ver, ref_date=ref), caption="월~금 전체 주간 학급 시간표 · 기존 주간 매트릭스 구조 유지")
+            st.dataframe(class_matrix(ver, ref_date=ref),use_container_width=True,height=650,hide_index=True)
         else:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
             ref=calendar_picker("주간 기준일",date.today(),key="view_ref")
             grid,dates=get_teacher_week_view(t,ref)
             st.caption(f"{dates[0]} ~ {dates[4]}")
-            render_weekly_matrix(grid, caption="월~금 주간표 · 학급 / 과목 / 변경 이력을 구분해 표시")
+            st.dataframe(grid,use_container_width=True,hide_index=True)
 
 # ------------------------------------------------------------------ 시간강사 관리
 if "시간강사 관리" in tab_map:
@@ -3453,11 +3172,14 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         if lesson_matrix.empty:
             st.warning("교사 시간표 데이터가 없습니다.")
         else:
-            matrix_event = render_interactive_weekly_matrix(
-                effective_teacher_matrix(week_anchor, ver, use_test=False),
+            matrix_event = st.dataframe(
+                lesson_matrix,
+                hide_index=True,
+                use_container_width=True,
+                height=520,
                 key="week_1to1_lesson_matrix",
-                height=620,
-                caption="주간 전체 매트릭스 유지 · 각 수업은 학급 / 과목을 두 줄로 표시 · 변경 시 세 번째 줄에 표시"
+                on_select="rerun",
+                selection_mode="single-cell"
             )
             selected_cells = matrix_event.selection.cells
             extra_days = st.slider("미래 추가 검색 일수", 0, 14, 7, key="week_extra_days")
@@ -3688,11 +3410,9 @@ if "시간표 변경 테스트용" in tab_map:
         if test_matrix.empty:
             st.warning("테스트용 시간표 데이터가 없습니다.")
         else:
-            test_event = render_interactive_weekly_matrix(
-                effective_teacher_matrix(test_week_anchor, ver, use_test=True),
-                key="test_lesson_matrix",
-                height=620,
-                caption="주간 전체 매트릭스 유지 · 학급 / 과목 두 줄 표시 · 실제/테스트 변경 이력은 세 번째 줄에 표시"
+            test_event = st.dataframe(
+                test_matrix, hide_index=True, use_container_width=True, height=520,
+                key="test_lesson_matrix", on_select="rerun", selection_mode="single-cell"
             )
             test_cells = test_event.selection.cells
             if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
@@ -3785,7 +3505,7 @@ if "시간표 변경 테스트용" in tab_map:
         ref_preview = calendar_picker("미리보기 기준일", date.today(), key="test_preview_d")
         grid, dates = get_teacher_week_view(t_preview, ref_preview, use_test=True)
         st.caption(f"{dates[0]} ~ {dates[4]}  (테스트 반영됨)")
-        render_weekly_matrix(grid, caption="월~금 주간표 · 테스트 변경 반영")
+        st.dataframe(grid, use_container_width=True, height=350, hide_index=True)
 
         if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
@@ -3831,7 +3551,7 @@ if "변경된 교사 주간표" in tab_map:
                 with st.expander(f"👤 {t}", expanded=False):
                     st.caption("🔄 교환 이력 / 🟢 보강 처리 이력이 각 수업 칸에 표시됩니다.")
                     grid, _ = get_teacher_week_view(t, ref)
-                    render_weekly_matrix(grid, caption="월~금 주간표 · 변경 이력 포함")
+                    st.dataframe(grid, use_container_width=True, hide_index=True)
 
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
