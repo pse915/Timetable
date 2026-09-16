@@ -2311,27 +2311,43 @@ def _weekly_action_dialog():
     # ----------------------------------------------------------------
     # 처음 팝업에서는 메뉴만 그린다. 후보/보강 계산은 하지 않는다.
     # ----------------------------------------------------------------
-    action_mode = st.session_state.get("weekly_dialog_action_mode", "menu")
-    menu_cols = st.columns(5)
-    menu_items = [
-        ("swap", "🔄 1:1 맞교환"),
-        ("cycle", "🔗 연계 순환"),
-        ("absence", "📌 결강"),
-        ("substitute", "🟢 보강"),
-        ("detail", "ℹ️ 상세"),
-    ]
-    for col, (mode, label) in zip(menu_cols, menu_items):
-        with col:
-            if st.button(
-                label,
-                type="primary" if action_mode == mode else "secondary",
-                key=f"dlg_action_{mode}",
-                use_container_width=True,
-            ):
-                st.session_state.weekly_dialog_action_mode = mode
-                # 작업 모드 전환 시 기존 검색 결과는 재사용하되,
-                # 실제 계산은 해당 모드가 렌더링될 때만 수행한다.
-                st.rerun()
+    # 1:1 맞교환을 팝업의 기본 작업으로 사용한다.
+    # 다른 기능은 버튼을 눌렀을 때만 해당 화면으로 전환한다.
+    action_mode = st.session_state.get("weekly_dialog_action_mode", "swap")
+    if action_mode not in {"swap", "cycle", "absence", "substitute", "detail"}:
+        action_mode = "swap"
+        st.session_state.weekly_dialog_action_mode = "swap"
+
+    if action_mode == "swap":
+        st.markdown("#### 🔄 1:1 기본 맞교환")
+        st.caption("가장 자주 사용하는 1:1 맞교환을 기본 화면으로 표시합니다. 다른 작업은 아래 버튼을 눌러 진행하세요.")
+    else:
+        nav_cols = st.columns(5)
+        nav_items = [
+            ("swap", "🔄 1:1 맞교환"),
+            ("cycle", "🔗 연계 순환"),
+            ("absence", "📌 결강"),
+            ("substitute", "🟢 보강"),
+            ("detail", "ℹ️ 상세"),
+        ]
+        for col, (mode, label) in zip(nav_cols, nav_items):
+            with col:
+                if st.button(label, type="primary" if mode == action_mode else "secondary",
+                             key=f"dlg_action_{mode}", use_container_width=True):
+                    st.session_state.weekly_dialog_action_mode = mode
+                    st.rerun()
+        st.markdown(f"#### {dict(nav_items)[action_mode]}")
+
+    # 기본 1:1 화면에서도 다른 작업으로 즉시 이동할 수 있게 작은 메뉴만 둔다.
+    if action_mode == "swap":
+        alt_cols = st.columns(4)
+        alt_items = [("cycle", "🔗 연계 순환"), ("absence", "📌 결강"),
+                     ("substitute", "🟢 보강"), ("detail", "ℹ️ 상세")]
+        for col, (mode, label) in zip(alt_cols, alt_items):
+            with col:
+                if st.button(label, type="secondary", key=f"dlg_alt_{mode}", use_container_width=True):
+                    st.session_state.weekly_dialog_action_mode = mode
+                    st.rerun()
 
     if status != "원본" and action_mode == "detail":
         st.caption(
@@ -2341,16 +2357,22 @@ def _weekly_action_dialog():
         )
 
     # 검색 범위는 실제 검색 작업을 선택했을 때만 노출한다.
-    extra_days = int(st.session_state.get("weekly_dialog_extra_days", 7) or 7)
+    # 팝업 속도를 위해 기본은 선택한 주간(월~금)만 검색한다.
+    # 미래 날짜 검색은 사용자가 필요할 때만 확장한다.
+    extra_days = int(st.session_state.get("weekly_dialog_extra_days", 0) or 0)
     if action_mode in ("swap", "cycle"):
-        extra_days = st.slider(
-            "미래 추가 검색 일수", 0, 14, extra_days,
-            key="weekly_dialog_extra_days_input",
-            help="선택한 수업 이후 평일을 얼마나 더 검색할지 정합니다.",
-        )
-        if extra_days != st.session_state.get("weekly_dialog_extra_days"):
-            st.session_state.weekly_dialog_extra_days = extra_days
-            st.rerun()
+        with st.expander("🔎 검색 범위 확장", expanded=False):
+            extra_days = st.slider(
+                "미래 추가 검색 일수", 0, 14, extra_days,
+                key="weekly_dialog_extra_days_input",
+                help="기본값은 현재 주간만 검색합니다. 필요할 때 미래 평일을 추가합니다.",
+            )
+            if extra_days != st.session_state.get("weekly_dialog_extra_days"):
+                st.session_state.weekly_dialog_extra_days = extra_days
+                # 범위가 바뀐 경우에만 후보 캐시를 무효화한다.
+                st.session_state.pop("weekly_swap_candidates_key", None)
+                st.session_state.pop("weekly_cycle_candidates_key", None)
+                st.rerun()
 
     # ----------------------------------------------------------------
     # 1:1 교환: 사용자가 버튼을 누른 뒤에만 후보 검색
@@ -2643,7 +2665,11 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
     if lesson:
         # 선택 상태는 URL이 아니라 session_state에만 저장한다.
         st.session_state.weekly_selected_lesson = lesson
-        st.session_state.weekly_dialog_action_mode = "menu"
+        # 셀을 새로 선택하면 항상 1:1 맞교환을 기본 작업으로 연다.
+        st.session_state.weekly_dialog_action_mode = "swap"
+        # 이전 셀에서 확장했던 미래 검색 범위를 새 셀에 그대로 물려주지 않는다.
+        st.session_state.weekly_dialog_extra_days = 0
+        st.session_state.pop("weekly_dialog_extra_days_input", None)
         st.session_state.weekly_dialog_use_test = bool(use_test)
         st.session_state.weekly_dialog_title = title or "주간표 작업"
         st.session_state.weekly_dialog_open = bool(open_dialog)
