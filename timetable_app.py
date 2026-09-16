@@ -2891,10 +2891,10 @@ def render_weekly_selection_panel(ref_date, *, use_test=False, title="선택 수
         st.caption("주간표의 수업 셀을 클릭하면 작은 팝업에서 결강·맞교환·보강 작업을 시작할 수 있습니다.")
 
 
-def render_standard_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", key="weekly_matrix", title=None, use_test=False):
+def render_standard_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", key="weekly_matrix", title=None, use_test=False, height=900):
     """모든 탭이 동일한 주간 매트릭스 렌더러 설정을 사용하도록 하는 표준 래퍼."""
     return render_weekly_matrix(
-        matrix, ref_date, row_label=row_label, height=900, key=key,
+        matrix, ref_date, row_label=row_label, height=height, key=key,
         title=title, show_week_dates=True, use_test=use_test, open_dialog=True
     )
 
@@ -4368,12 +4368,40 @@ if "변경된 교사 주간표" in tab_map:
             st.success("이번 주차 변경 교사 없음")
         else:
             st.info(f"변경 교사 {len(changed)}명: {', '.join(changed)}")
+            # 변경 교사마다 별도의 매트릭스를 만들지 않고, 한 개의 주간표에
+            # 교사별 1행씩 배치한다. 기존 방식은 교사 수만큼 표가 반복되어
+            # 화면이 길어지고, 같은 헤더가 계속 반복되어 가독성이 떨어졌다.
             changed_week = effective_teacher_matrix(ref, st.session_state.get("_data_version", 0), use_test=False)
-            for idx, t in enumerate(changed):
-                with st.expander(f"👤 {t}", expanded=False):
-                    st.caption("🔄 교환 · 🟢 보강 · 🟡 시간강사 이력이 셀에 표시됩니다.")
-                    one = changed_week[changed_week["교사명"].astype(str).str.strip() == str(t).strip()].reset_index(drop=True) if not changed_week.empty else pd.DataFrame()
-                    render_standard_weekly_matrix(one, ref, row_label="교사명", key=f"changed_teacher_week_{idx}", title=f"{t} 주간 시간표", use_test=False)
+            if changed_week.empty:
+                st.info("변경 교사의 주간 시간표를 표시할 데이터가 없습니다.")
+            else:
+                changed_names = {str(t).strip() for t in changed}
+                changed_week = changed_week[
+                    changed_week["교사명"].astype(str).str.strip().isin(changed_names)
+                ].copy()
+                changed_week["__order"] = changed_week["교사명"].astype(str).str.strip().map(
+                    {str(t).strip(): i for i, t in enumerate(changed)}
+                )
+                changed_week = (
+                    changed_week.sort_values("__order", kind="stable")
+                    .drop(columns="__order")
+                    .reset_index(drop=True)
+                )
+                st.caption("교사마다 한 줄의 주간표로 표시 · 🔄 교환 · 🟢 보강 · 🟡 시간강사 변경 이력")
+                # 변경 교사는 서로 섞지 않고 기존처럼 교사별 개별 주간표를 유지한다.
+                # 다만 각 교사의 표는 '교시별 여러 행'이 아니라 1행만 사용해
+                # 월~금 35개 슬롯을 한눈에 비교할 수 있도록 한다.
+                for idx, teacher_name in enumerate(changed):
+                    one_teacher = changed_week[
+                        changed_week["교사명"].astype(str).str.strip() == str(teacher_name).strip()
+                    ].copy()
+                    if one_teacher.empty:
+                        continue
+                    render_standard_weekly_matrix(
+                        one_teacher, ref, row_label="교사명",
+                        key=f"changed_teacher_week_{idx}",
+                        title=str(teacher_name), use_test=False, height=82
+                    )
 
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
@@ -4843,4 +4871,3 @@ if "📑 회원별 탭 권한 관리" in tab_map:
 # 방금 클릭한 셀이 팝업에 표시된다. 또한 주간표 렌더러 안에서 dialog가 중복 생성되지 않는다.
 if st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
     _weekly_action_dialog()
-
