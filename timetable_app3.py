@@ -10,8 +10,7 @@
 import io
 import copy
 import uuid
-from datetime import date, datetime, timedelta, time
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, timedelta
 from collections import defaultdict
 import numpy as np
 import pandas as pd
@@ -49,39 +48,6 @@ PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
 MAX_PERIOD = 7
 WEEKDAY_KR = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
 SCHOOL_WEEKDAYS = (0, 1, 2, 3, 4)  # 학교 표시는 월~금만
-
-# 주간표는 한국 학교 일정 기준으로 현재 주를 판정한다.
-# 서버가 UTC여도 날짜가 하루 밀리지 않도록 Asia/Seoul을 명시한다.
-KST = ZoneInfo("Asia/Seoul")
-
-def _today_kst() -> date:
-    return datetime.now(KST).date()
-
-def _is_current_week(ref_date: date, today: date | None = None) -> bool:
-    today = today or _today_kst()
-    return (ref_date - timedelta(days=ref_date.weekday())) == (today - timedelta(days=today.weekday()))
-
-def _hide_past_week_slots(matrix: pd.DataFrame, ref_date: date, *, hide_past=True) -> pd.DataFrame:
-    """현재 주를 볼 때 이미 지나간 평일의 셀을 비운다.
-
-    과거 주/미래 주를 조회할 때는 역사 조회를 방해하지 않도록 원본을 그대로 표시한다.
-    현재 날짜 자체의 '몇 교시까지 지났는지'는 학교별 종/수업시간 정보가 코드에 없으므로
-    임의의 시간을 추정하지 않고 오늘의 교시는 표시한다.
-    """
-    if not hide_past or matrix is None or matrix.empty or not _is_current_week(ref_date):
-        return matrix
-    today = _today_kst()
-    monday = ref_date - timedelta(days=ref_date.weekday())
-    out = matrix.copy()
-    for i, day in enumerate(DAYS):
-        day_date = monday + timedelta(days=i)
-        if day_date >= today:
-            continue
-        for p in range(1, PERIODS_PER_DAY.get(day, MAX_PERIOD) + 1):
-            col = f"{day}{p}"
-            if col in out.columns:
-                out[col] = ""
-    return out
 
 
 TIMETABLE_SHEET_ID = "1jZhTHyJ8vKXn6tkoFXfY_f52-pj6eQTdVvRCo3cCmBA"
@@ -224,7 +190,7 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
     달력 셀을 클릭하면 선택값이 저장되며, 좌우 버튼으로 월을 이동할 수 있다.
     반환값은 datetime.date이다.
     """
-    value = value or _today_kst()
+    value = value or date.today()
     # 학교 일정은 월~금만 사용한다. 주말이 기본값/이전 선택값으로 들어와도 금요일로 보정한다.
     if value.weekday() >= 5:
         value = value - timedelta(days=value.weekday() - 4)
@@ -257,7 +223,7 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
     quick1, quick2 = st.columns([1, 5])
     with quick1:
         if st.button("오늘", key=f"{key}_today", use_container_width=True):
-            today = _today_kst()
+            today = date.today()
             if today.weekday() >= 5:
                 today = today - timedelta(days=today.weekday() - 4)
             st.session_state[month_key] = today.replace(day=1)
@@ -296,7 +262,7 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
 
 def calendar_range_picker(start_value=None, end_value=None, key="calendar_range", help_text=None):
     """시작일/종료일을 각각 달력 매트릭스로 선택한다."""
-    start_value = start_value or _today_kst()
+    start_value = start_value or date.today()
     end_value = end_value or start_value
     c1, c2 = st.columns(2)
     with c1:
@@ -383,7 +349,7 @@ def _daily_schedule_matrix(ref_date: date, *, teacher_filter=None, use_test=Fals
 def daily_schedule_picker(ref_date=None, key="daily_schedule", *, teacher_filter=None, use_test=False,
                           multi=False, height=430, help_text=None):
     """달력에서 날짜를 고른 뒤 그 날짜의 시간표 매트릭스에서 수업 셀을 선택한다."""
-    ref_date = ref_date or _today_kst()
+    ref_date = ref_date or date.today()
     picked_date = calendar_picker("날짜", ref_date, key=f"{key}_date")
     ver=st.session_state.get("_data_version",0)
     matrix=_daily_schedule_matrix(picked_date, teacher_filter=teacher_filter, use_test=use_test, version=ver)
@@ -414,7 +380,7 @@ def daily_schedule_picker(ref_date=None, key="daily_schedule", *, teacher_filter
 
 def range_calendar_matrix_picker(start_value=None, end_value=None, key="range_matrix"):
     """두 날짜 달력과 시작/종료 교시 매트릭스를 하나의 선택 영역으로 제공한다."""
-    start_value=start_value or _today_kst(); end_value=end_value or start_value
+    start_value=start_value or date.today(); end_value=end_value or start_value
     st.markdown("#### 📅 기간 선택")
     start_date,end_date=calendar_range_picker(start_value,end_value,key=f"{key}_dates")
     st.markdown("#### 🕐 교시 범위 선택")
@@ -2104,20 +2070,12 @@ def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = 
         day_date=monday+timedelta(days=i); ds=day_date.strftime("%Y-%m-%d")
         day_tt=get_effective_timetable_for_date(ds,version,use_test=use_test); daily_timetables[d]=(ds,day_tt)
         if not day_tt.empty: teacher_names.update(day_tt["교사명"].dropna().astype(str).str.strip())
-    # 교사×교시 인덱스는 교사마다 다시 만들지 않고 요일별로 한 번만 만든다.
-    # 이전 구현은 교사 수만큼 동일한 itertuples()/dict 생성을 반복해 주간표가 커질수록 느려졌다.
-    daily_indexes = {}
-    for d, (_, day_tt) in daily_timetables.items():
-        daily_indexes[d] = (
-            {(str(r.교사명).strip(), safe_int(r.교시)): r for r in day_tt.itertuples(index=False)}
-            if not day_tt.empty else {}
-        )
-
     rows=[]
     for t in sorted(x for x in teacher_names if x):
         row={"교사명":t}
         for d in DAYS:
-            idx = daily_indexes[d]
+            ds,day_tt=daily_timetables[d]
+            idx={(str(r.교사명).strip(),safe_int(r.교시)):r for r in day_tt.itertuples(index=False)} if not day_tt.empty else {}
             for p in range(1,PERIODS_PER_DAY.get(d,7)+1):
                 r=idx.get((t,p))
                 if r is None: row[f"{d}{p}"]=""; continue
@@ -2134,41 +2092,27 @@ def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = 
 @st.cache_data(show_spinner=False)
 def class_matrix(version=0, ref_date=None, use_test=False):
     """선택한 주의 실제 적용 학급 매트릭스. 날짜별 교환·보강·시간강사를 반영한다."""
-    ref=ref_date or _today_kst(); monday=ref-timedelta(days=ref.weekday())
+    ref=ref_date or date.today(); monday=ref-timedelta(days=ref.weekday())
     daily={}
     classes=set()
     for i,d in enumerate(DAYS):
         ds=(monday+timedelta(days=i)).strftime("%Y-%m-%d")
         e=get_effective_timetable_for_date(ds,version,use_test=use_test); daily[d]=e
         if not e.empty: classes.update(e["학급"].dropna().astype(str).str.strip())
-    # 요일별 (학급, 교시) 인덱스를 한 번만 만든다.
-    daily_indexes = {}
-    for d, e in daily.items():
-        idx = {}
-        if not e.empty:
-            for r in e.itertuples(index=False):
-                cls = str(getattr(r, "학급", "")).strip()
-                if not cls:
-                    continue
-                idx[(cls, safe_int(getattr(r, "교시", 0)))] = r
-        daily_indexes[d] = idx
-
     rows=[]
     for c in sorted(x for x in classes if x):
         row={"학급":c}
         for d in DAYS:
-            idx = daily_indexes[d]
+            e=daily[d]; idx={(safe_int(r.교시),str(r.교사명).strip()):r for r in e[e["학급"].astype(str).str.strip()==c].itertuples(index=False)} if not e.empty else {}
             for p in range(1,PERIODS_PER_DAY.get(d,7)+1):
-                r=idx.get((c,p))
-                if r is not None:
-                    cell=f"{r.교사명} {r.과목}".strip(); typ=str(getattr(r,"변경유형","원본"))
+                matches=[r for (pp,_),r in idx.items() if pp==p]
+                if matches:
+                    r=matches[0]; cell=f"{r.교사명} {r.과목}".strip(); typ=str(getattr(r,"변경유형","원본"))
                     if typ=="교환": cell += " 🔄"
-                    elif typ=="테스트교환": cell += " 🧪"
                     elif typ=="보강": cell += " 🟢"
                     elif typ=="시간강사": cell += " 🟡"
                     row[f"{d}{p}"]=cell
-                else:
-                    row[f"{d}{p}"]=""
+                else: row[f"{d}{p}"]=""
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -2636,12 +2580,12 @@ def _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, 
 
 
 def render_weekly_selection_panel(ref_date, *, use_test=False, title="선택 수업 작업"):
-    """하위 호환용. 팝업을 직접 렌더링하지 않고 중앙 렌더러에 위임한다."""
+    """하위 호환용. 선택된 수업이 있으면 네이티브 팝업을 연다."""
     lesson = st.session_state.get("weekly_selected_lesson")
     if lesson:
         st.session_state.weekly_dialog_use_test = use_test
         st.session_state.weekly_dialog_title = title
-        st.session_state.weekly_dialog_open = True
+        _weekly_action_dialog()
     else:
         st.caption("주간표의 수업 셀을 클릭하면 작은 팝업에서 결강·맞교환·보강 작업을 시작할 수 있습니다.")
 
@@ -2674,32 +2618,17 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
     if show_week_dates:
         dates = [monday + timedelta(days=i) for i in range(5)]
         st.caption(" · ".join(f"{DAYS[i]} {dates[i]:%Y.%m.%d}" for i in range(5)))
-    if _is_current_week(ref_date):
-        st.caption("🕒 현재 주: 이미 지난 평일의 수업은 자동으로 숨기고, 오늘부터 남은 시간표를 표시합니다.")
     st.caption("💡 수업 셀을 한 번 클릭하면 페이지 이동 없이 작은 작업 팝업이 열립니다. URL은 변경하지 않습니다.")
 
-    # 현재 주라면 이미 지나간 평일의 수업 셀은 숨긴다.
-    # 단, 기준일을 과거/미래 주로 선택한 경우에는 역사 조회를 위해 그대로 보여준다.
-    visible_matrix = _hide_past_week_slots(matrix, ref_date, hide_past=True)
-    display = _weekly_styled_matrix(visible_matrix)
+    display = _weekly_styled_matrix(matrix)
     column_config = {}
-    # 1500px급 브라우저에서 좌우 여백까지 고려해 월~금 전체가 들어오도록 폭을 고정한다.
-    # 내부 표는 약 1455px(행 이름 90px + 교시 39px × 최대 35칸)를 목표로 한다.
-    # 35칸보다 적은 실제 요일 교시를 가진 학교에서도 같은 규칙을 유지한다.
-    compact_period_width = 39
-    row_name_width = 90
     if row_label in display.columns:
-        column_config[row_label] = st.column_config.TextColumn(row_label, width=row_name_width)
-    monday = ref_date - timedelta(days=ref_date.weekday())
-    week_dates = [monday + timedelta(days=i) for i in range(5)]
-    for day_idx, day in enumerate(DAYS):
-        day_date = week_dates[day_idx]
+        column_config[row_label] = st.column_config.TextColumn(row_label, width="small")
+    for day in DAYS:
         for p in range(1, MAX_PERIOD + 1):
             col = f"{day}{p}"
             if col in display.columns:
-                # 첫 교시에 요일+날짜를 표시하고, 나머지는 요일+교시로 표시해 헤더를 압축한다.
-                label = f"{day} {day_date.day}" if p == 1 else f"{day}{p}"
-                column_config[col] = st.column_config.TextColumn(label, width=compact_period_width)
+                column_config[col] = st.column_config.TextColumn(f"{day}{p}", width="small")
 
     event = None
     selected_cells = []
@@ -2707,13 +2636,12 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         event = st.dataframe(
             display,
             hide_index=True,
-            use_container_width=False,
+            use_container_width=True,
             height=height,
             key=key,
             on_select="rerun",
             selection_mode="single-cell",
             column_config=column_config,
-            width=1450,
         )
         try:
             selected_cells = list(event.selection.cells)
@@ -2725,11 +2653,10 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         st.dataframe(
             display,
             hide_index=True,
-            use_container_width=False,
+            use_container_width=True,
             height=height,
             key=f"{key}_legacy",
             column_config=column_config,
-            width=1450,
         )
         st.warning("현재 Streamlit 버전에서는 주간표 셀 클릭 기능을 지원하지 않습니다. Streamlit을 최신 버전으로 업데이트하면 셀 클릭 팝업을 사용할 수 있습니다.")
         return None
@@ -2746,12 +2673,11 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         st.session_state.weekly_dialog_use_test = bool(use_test)
         st.session_state.weekly_dialog_title = title or "주간표 작업"
         st.session_state.weekly_dialog_open = bool(open_dialog)
-        # 중요: dialog는 이 함수에서 직접 렌더링하지 않는다.
-    # st.tabs()는 모든 탭의 본문을 같은 실행에서 렌더링하므로, 여러 주간표가
-    # 각각 _weekly_action_dialog()를 호출하면 @st.dialog의 내부 위젯/다이얼로그
-    # ID가 중복되어 StreamlitDuplicateElement가 발생할 수 있다.
-    # 선택 상태만 session_state에 기록하고, 스크립트 맨 마지막에서 단 한 번
-    # 중앙 렌더링한다.
+        if open_dialog:
+            _weekly_action_dialog()
+    elif open_dialog and st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
+        # 팝업 내부 버튼을 눌러 rerun된 경우에도 선택 수업을 유지하여 같은 팝업을 다시 연다.
+        _weekly_action_dialog()
     return lesson
 
 
@@ -3595,7 +3521,7 @@ with st.sidebar:
         st.divider()
         st.subheader("📄 내역서 / 계획서 출력")
 
-        plan_date = calendar_picker("계획서 기준일", _today_kst(), key="plan_date")
+        plan_date = calendar_picker("계획서 기준일", date.today(), key="plan_date")
         if st.button("📋 결보강 계획서 (본인용)", use_container_width=True, type="primary"):
             html = build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
             st.download_button(
@@ -3608,7 +3534,7 @@ with st.sidebar:
             st.info("다운로드한 HTML을 브라우저에서 열고 Ctrl+P → PDF로 저장하시면 양식과 거의 동일한 PDF가 생성됩니다.")
 
         if is_edu_or_master():
-            rd = calendar_picker("전체 내역서 일자", _today_kst(), key="sidebar_rd")
+            rd = calendar_picker("전체 내역서 일자", date.today(), key="sidebar_rd")
             if st.button("📊 전체 일일 내역서", use_container_width=True):
                 html = build_report_html(rd.strftime("%Y-%m-%d"))
                 st.download_button("HTML 다운로드 (전체)", html.encode("utf-8"), f"내역서_{rd}.html", "text/html")
@@ -3667,7 +3593,7 @@ if "시간표 조회" in tab_map:
         view = st.radio("보기 방식", ["선택 날짜 매트릭스", "교사별 주간 매트릭스", "학급별 주간 매트릭스", "교사 1인 주간표"], horizontal=True, key="view_mode")
         ver = st.session_state.get("_data_version", 0)
         if view == "선택 날짜 매트릭스":
-            picked, matrix, selections = daily_schedule_picker(_today_kst(), key="view_daily", height=560,
+            picked, matrix, selections = daily_schedule_picker(date.today(), key="view_daily", height=560,
                 help_text="날짜를 달력에서 선택한 후 교사×교시 셀을 클릭하세요.")
             if selections:
                 st.markdown("#### 선택 수업 상세")
@@ -3680,19 +3606,19 @@ if "시간표 조회" in tab_map:
                         details.append({"교사":r["교사명"],"교시":sel["교시"],"학급":r["학급"],"과목":r["과목"],"변경유형":r.get("변경유형","원본"),"변경상세":r.get("변경상세","")})
                 st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
         elif view == "교사별 주간 매트릭스":
-            ref=calendar_picker("주간 기준일",_today_kst(),key="view_week_ref")
+            ref=calendar_picker("주간 기준일",date.today(),key="view_week_ref")
             render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
         elif view == "학급별 주간 매트릭스":
-            ref=calendar_picker("주간 기준일",_today_kst(),key="view_class_ref")
+            ref=calendar_picker("주간 기준일",date.today(),key="view_class_ref")
             render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_class')
         else:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
-            ref=calendar_picker("주간 기준일",_today_kst(),key="view_ref")
+            ref=calendar_picker("주간 기준일",date.today(),key="view_ref")
             grid,dates=get_teacher_week_view(t,ref)
             st.caption(f"{dates[0]} ~ {dates[4]}")
             st.dataframe(grid,use_container_width=True,hide_index=True)
@@ -3711,7 +3637,7 @@ if "시간강사 관리" in tab_map:
             pt_subject = st.selectbox("담당과목", [""]+sorted(subjects), key="quick_pt_subject")
             orig_teachers = st.session_state.teachers["교사명"].dropna().astype(str).tolist() if not st.session_state.teachers.empty else []
             pt_orig = st.selectbox("대체교사", orig_teachers, key="quick_pt_orig")
-            qstart,qend=calendar_range_picker(_today_kst(),_today_kst(),key="quick_pt_range",help_text="달력에서 대체 기간을 선택합니다.")
+            qstart,qend=calendar_range_picker(date.today(),date.today(),key="quick_pt_range",help_text="달력에서 대체 기간을 선택합니다.")
             st.markdown("가능한 교시를 클릭하세요")
             qcols=st.columns(5); qdays=DAYS
             avail={}
@@ -3772,7 +3698,7 @@ if "결강·보강" in tab_map:
 
         with left:
             st.markdown("### 📌 결강 등록")
-            d_sel, abs_matrix, abs_cells = daily_schedule_picker(_today_kst(), key="abs_daily", multi=True, height=430,
+            d_sel, abs_matrix, abs_cells = daily_schedule_picker(date.today(), key="abs_daily", multi=True, height=430,
                 help_text="달력에서 날짜를 선택하고 결강할 수업 셀을 하나 이상 클릭하세요. 교사와 교시가 자동으로 결정됩니다.")
             on_date=d_sel.strftime("%Y-%m-%d"); day=WEEKDAY_KR[d_sel.weekday()]
             reason=st.selectbox("사유",ABSENCE_REASONS,key="abs_reason")
@@ -3812,7 +3738,7 @@ if "결강·보강" in tab_map:
                 st.info("먼저 결강을 등록하세요." if can_full_data() else "본인이 등록한 결강이 없습니다.")
             else:
                 st.markdown("#### 📅 보강 대상 선택 — 달력 → 결강 매트릭스")
-                sub_ref=calendar_picker("결강 날짜", _today_kst(), key="sub_ref")
+                sub_ref=calendar_picker("결강 날짜", date.today(), key="sub_ref")
                 sub_date=sub_ref.strftime("%Y-%m-%d")
                 day_abs=ab[ab["일자"].map(normalize_date_str)==sub_date].copy()
                 if day_abs.empty:
@@ -3896,7 +3822,7 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         )
 
         week_anchor = calendar_picker(
-            "교환 검색 기준 주", _today_kst(),
+            "교환 검색 기준 주", date.today(),
             key="exchange_week_anchor",
             help_text="선택한 날짜가 포함된 평일 주간 시간표를 표시합니다. 토·일은 표시하지 않습니다."
         )
@@ -3926,15 +3852,15 @@ if "통계" in tab_map:
         st.subheader("보강 통계")
         period = st.selectbox("빠른 기간", ["직접 선택", "전체", "1학기", "2학기", "이번 달"], key="st_p")
         if period == "직접 선택":
-            start, end = calendar_range_picker(date(2026, 3, 1), _today_kst(), key="stats_range", help_text="달력에서 시작일과 종료일을 선택합니다.")
+            start, end = calendar_range_picker(date(2026, 3, 1), date.today(), key="stats_range", help_text="달력에서 시작일과 종료일을 선택합니다.")
         else:
-            start, end = date(2026, 3, 1), _today_kst()
+            start, end = date(2026, 3, 1), date.today()
         if period == "1학기":
             start, end = date(2026, 3, 1), date(2026, 7, 31)
         elif period == "2학기":
             start, end = date(2026, 8, 1), date(2027, 2, 28)
         elif period == "이번 달":
-            start = _today_kst().replace(day=1)
+            start = date.today().replace(day=1)
         cum = cumulative_sub_count(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), st.session_state.get("_data_version", 0))
         df = pd.DataFrame({"교사명": list(cum.keys()), "누적보강": list(cum.values())}).sort_values("누적보강", ascending=False)
         st.dataframe(df, use_container_width=True, hide_index=True)
@@ -3960,7 +3886,7 @@ if "시간표 변경 테스트용" in tab_map:
         tlist = st.session_state.teachers["교사명"].tolist()
         st.markdown("#### 수업 선택 — **현재 적용 + 테스트 변경 결과**에서 수업 셀 하나를 클릭")
         st.caption("실제 변경과 현재까지의 테스트 변경을 모두 반영합니다. 선택한 현재 상태를 기준으로 다음 1:1 가능 위치를 계산합니다.")
-        test_week_anchor = calendar_picker("테스트 검색 기준 주", _today_kst(), key="test_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표를 테스트 기준으로 사용합니다.")
+        test_week_anchor = calendar_picker("테스트 검색 기준 주", date.today(), key="test_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표를 테스트 기준으로 사용합니다.")
         ver = st.session_state.get("_data_version", 0)
         test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
@@ -3973,7 +3899,7 @@ if "시간표 변경 테스트용" in tab_map:
 
         st.markdown("#### 테스트 적용 후 주간표 미리보기")
         t_preview = st.selectbox("미리볼 교사", tlist, key="test_preview_t")
-        ref_preview = calendar_picker("미리보기 기준일", _today_kst(), key="test_preview_d")
+        ref_preview = calendar_picker("미리보기 기준일", date.today(), key="test_preview_d")
         grid, dates = get_teacher_week_view(t_preview, ref_preview, use_test=True)
         st.caption(f"{dates[0]} ~ {dates[4]}  (테스트 반영됨)")
         st.dataframe(grid, use_container_width=True, height=350, hide_index=True)
@@ -4012,7 +3938,7 @@ if "시간표 변경 테스트용" in tab_map:
 if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
         st.subheader("📅 변경된 교사 주간 시간표")
-        ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
+        ref = calendar_picker("기준 날짜", date.today(), key="chg_ref")
         changed = get_changed_teachers_for_week(ref)
         if not changed:
             st.success("이번 주차 변경 교사 없음")
@@ -4043,7 +3969,7 @@ if "📋 복무 관리 & 판단" in tab_map:
                     st.warning("등록된 이름이 교사 목록에 없습니다. 관리자에게 문의하세요.")
 
             t = st.selectbox("교사", teacher_options, key="duty_t")
-            d, duty_matrix, duty_cells = daily_schedule_picker(_today_kst(), key="duty_daily", teacher_filter=t, multi=True, height=360,
+            d, duty_matrix, duty_cells = daily_schedule_picker(date.today(), key="duty_daily", teacher_filter=t, multi=True, height=360,
                 help_text="달력에서 날짜를 선택하고 해당 교사의 수업 셀을 클릭하세요. 빈 셀도 복무 시간 선택에 사용할 수 있도록 아래 교시 버튼을 제공합니다.")
             reason = st.selectbox("사유", ABSENCE_REASONS, key="duty_r")
             detail = st.text_input("상세", key="duty_det")
@@ -4262,7 +4188,7 @@ if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
         abs_teacher = st.selectbox("교사", st.session_state.teachers["교사명"].tolist(), key="multi_t")
 
         start_date, end_date, start_periods, end_periods = range_calendar_matrix_picker(
-            _today_kst(), _today_kst(), key="multi_range",
+            date.today(), date.today(), key="multi_range",
         )
         start_all = 0 in start_periods
         end_all = 0 in end_periods
@@ -4485,11 +4411,5 @@ if "📑 회원별 탭 권한 관리" in tab_map:
                     save_id_sheet(ids_df)
                     st.success("모든 탭 차단됨")
                     st.rerun()
-
-# ------------------------------------------------------------------ 주간표 공통 팝업 중앙 렌더러
-# st.tabs()의 각 탭에서 주간표가 여러 개 렌더링되더라도 native dialog는
-# 한 번의 Streamlit 실행에서 정확히 한 번만 생성해야 한다.
-if st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
-    _weekly_action_dialog()
 
 st.caption(f"서라벌여중 시간표 관리 시스템 20260916 v2.0.0 · {current_name()} ({current_user()}) · {current_role()}")
