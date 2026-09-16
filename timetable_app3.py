@@ -2103,6 +2103,116 @@ def class_matrix(version=0, ref_date=None, use_test=False):
         rows.append(row)
     return pd.DataFrame(rows)
 
+
+
+def _weekly_cell_parts(value):
+    # 주간 매트릭스 셀을 짧고 안정적인 표시 단위로 분해한다.
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return "", "", "원본", ""
+    marker = "원본"
+    if "🧪" in text or "테스트교환" in text:
+        marker = "테스트교환"
+    elif "🔄" in text or "교환" in text:
+        marker = "교환"
+    elif "🟢" in text or "보강" in text:
+        marker = "보강"
+    elif "🟡" in text or "시간강사" in text:
+        marker = "시간강사"
+    clean = text.replace("🔄 교환", "").replace("🧪 테스트교환", "")
+    clean = clean.replace("🟢 보강", "").replace("🟡 시간강사", "")
+    clean = clean.replace(" 🔄", "").replace(" 🧪", "").replace(" 🟢", "")
+    if "🟡" in clean:
+        clean = clean.split("🟡", 1)[0].strip()
+    if "[결강]" in clean:
+        clean = clean.replace("[결강]", "").strip()
+    parts = clean.split(None, 1)
+    cls = parts[0] if parts else ""
+    subject = parts[1] if len(parts) > 1 else ""
+    icon = {"교환":"🔄", "테스트교환":"🧪", "보강":"🟢", "시간강사":"🟡"}.get(marker, "")
+    return cls, subject, marker, icon
+
+
+def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", height=700,
+                         key="weekly_matrix", title=None, show_week_dates=True):
+    # 월~금 35교시를 유지하면서 요일 그룹/고정 행 이름/고정 셀 폭으로 렌더링한다.
+    if matrix is None or matrix.empty:
+        st.info("표시할 주간 시간표가 없습니다.")
+        return
+    monday = ref_date - timedelta(days=ref_date.weekday())
+    cols = [c for c in matrix.columns if c != row_label]
+    by_day = {d: [f"{d}{p}" for p in range(1, PERIODS_PER_DAY.get(d, 7)+1)] for d in DAYS}
+    if title:
+        st.markdown(f"#### {title}")
+    if show_week_dates:
+        dates = [monday + timedelta(days=i) for i in range(5)]
+        st.caption(" · ".join(f"{DAYS[i]} {dates[i]:%m/%d}" for i in range(5)))
+
+    import html
+    header1 = [f"<th class='wk-name' rowspan='2'>{html.escape(row_label)}</th>"]
+    header2 = []
+    for d in DAYS:
+        dcols = [c for c in by_day[d] if c in cols]
+        header1.append(f"<th class='wk-day' colspan='{len(dcols)}'>{d}</th>")
+        for c in dcols:
+            pno = safe_int(c.replace(d, ""))
+            header2.append(f"<th class='wk-period'>{pno}</th>")
+    rows_html = []
+    for _, row in matrix.iterrows():
+        cells = [f"<th class='wk-name wk-row-name'>{html.escape(str(row.get(row_label, '')))}</th>"]
+        for d in DAYS:
+            for c in by_day[d]:
+                if c not in cols:
+                    continue
+                raw = row.get(c, "")
+                cls, subject, marker, icon = _weekly_cell_parts(raw)
+                if not cls and not subject:
+                    cells.append("<td class='wk-cell empty'></td>")
+                    continue
+                marker_class = {"교환":"swap", "테스트교환":"test", "보강":"sub", "시간강사":"part"}.get(marker, "normal")
+                tooltip = html.escape(str(raw))
+                content = f"<span class='wk-class'>{html.escape(cls)}</span>"
+                if subject:
+                    content += f"<span class='wk-subject'>{html.escape(subject)}</span>"
+                if icon:
+                    content += f"<span class='wk-icon'>{icon}</span>"
+                cells.append(f"<td class='wk-cell {marker_class}' title='{tooltip}'>{content}</td>")
+        rows_html.append("<tr>" + "".join(cells) + "</tr>")
+
+    table = f'''
+    <div class="weekly-matrix-wrap" style="max-height:{int(height)}px">
+      <table class="weekly-matrix">
+        <thead><tr>{''.join(header1)}</tr><tr>{''.join(header2)}</tr></thead>
+        <tbody>{''.join(rows_html)}</tbody>
+      </table>
+    </div>
+    <style>
+      .weekly-matrix-wrap {{ width:100%; max-width:100%; overflow:auto; border:1px solid rgba(128,128,128,.35); border-radius:8px; background:var(--background-color); }}
+      .weekly-matrix {{ border-collapse:separate; border-spacing:0; table-layout:fixed; min-width:2260px; width:max-content; font-size:12px; }}
+      .weekly-matrix th, .weekly-matrix td {{ box-sizing:border-box; border-right:1px solid rgba(128,128,128,.18); border-bottom:1px solid rgba(128,128,128,.18); padding:3px 4px; text-align:center; vertical-align:middle; }}
+      .weekly-matrix thead th {{ position:sticky; top:0; z-index:4; background:var(--secondary-background-color); font-weight:700; }}
+      .weekly-matrix .wk-day {{ height:28px; font-size:13px; }}
+      .weekly-matrix .wk-period {{ width:62px; min-width:62px; max-width:62px; height:24px; font-weight:600; }}
+      .weekly-matrix .wk-name {{ position:sticky; left:0; z-index:5; width:86px; min-width:86px; max-width:86px; background:var(--secondary-background-color); text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+      .weekly-matrix thead .wk-name {{ z-index:7; }}
+      .weekly-matrix .wk-cell {{ width:62px; min-width:62px; max-width:62px; height:56px; line-height:1.08; overflow:hidden; }}
+      .weekly-matrix .wk-row-name {{ font-weight:600; }}
+      .weekly-matrix .wk-class {{ display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+      .weekly-matrix .wk-subject {{ display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; white-space:normal; overflow:hidden; overflow-wrap:anywhere; max-height:25px; }}
+      .weekly-matrix .wk-icon {{ display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+      .weekly-matrix .wk-class {{ font-weight:600; }}
+      .weekly-matrix .wk-subject {{ font-size:11px; }}
+      .weekly-matrix .wk-icon {{ font-size:13px; line-height:14px; }}
+      .weekly-matrix .empty {{ background:transparent; }}
+      .weekly-matrix .swap {{ box-shadow:inset 0 0 0 2px rgba(255,70,70,.75); }}
+      .weekly-matrix .test {{ box-shadow:inset 0 0 0 2px rgba(130,100,255,.75); }}
+      .weekly-matrix .sub {{ box-shadow:inset 0 0 0 2px rgba(30,170,80,.70); }}
+      .weekly-matrix .part {{ box-shadow:inset 0 0 0 2px rgba(230,170,30,.75); }}
+      .weekly-matrix tr:hover td, .weekly-matrix tr:hover th.wk-row-name {{ background:rgba(127,127,127,.08); }}
+    </style>
+    '''
+    st.markdown(table, unsafe_allow_html=True)
+
 def get_teacher_week_view(teacher: str, ref_date: date, use_test=False):
     monday=ref_date-timedelta(days=ref_date.weekday()); week_dates=[monday+timedelta(days=i) for i in range(5)]
     ver=st.session_state.get("_data_version",0); grid=[]
@@ -2954,10 +3064,10 @@ if "시간표 조회" in tab_map:
                 st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
         elif view == "교사별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_week_ref")
-            st.dataframe(effective_teacher_matrix(ref,ver,use_test=False),use_container_width=True,height=650,hide_index=True)
+            render_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', height=650, key='view_teacher_week_matrix', title='교사별 주간 시간표')
         elif view == "학급별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_class_ref")
-            st.dataframe(class_matrix(ver, ref_date=ref),use_container_width=True,height=650,hide_index=True)
+            render_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', height=650, key='view_class_week_matrix', title='학급별 주간 시간표')
         else:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
@@ -3406,6 +3516,8 @@ if "시간표 변경 테스트용" in tab_map:
         ver = st.session_state.get("_data_version", 0)
         test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
+        render_weekly_matrix(test_matrix, test_week_anchor, row_label="교사명", height=420, key="test_week_preview", title="테스트 적용 주간표")
+        st.markdown("#### 수업 선택 — 아래 선택표에서 셀을 클릭")
         test_pick_a = None
         if test_matrix.empty:
             st.warning("테스트용 시간표 데이터가 없습니다.")
