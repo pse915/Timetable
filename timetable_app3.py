@@ -12,6 +12,7 @@ import copy
 import uuid
 from datetime import date, datetime, timedelta
 from collections import defaultdict
+from html import escape
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -33,6 +34,53 @@ st.markdown("""
         border-right: 1px solid #cbd5e1 !important;
         border-bottom: 1px solid #cbd5e1 !important;
     }
+    .weekly-matrix-wrap {
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid #94a3b8;
+        border-radius: 7px;
+        background: white;
+    }
+    .weekly-matrix {
+        width: 100%;
+        min-width: 980px;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: 11px;
+        line-height: 1.12;
+    }
+    .weekly-matrix th, .weekly-matrix td {
+        border-right: 1px solid #d7dce2;
+        border-bottom: 1px solid #d7dce2;
+        padding: 4px 2px;
+        text-align: center;
+        vertical-align: middle;
+        overflow: hidden;
+    }
+    .weekly-matrix th {
+        background: #f1f3f6;
+        font-weight: 700;
+        color: #334155;
+        white-space: nowrap;
+        height: 28px;
+    }
+    .weekly-matrix th.teacher-col, .weekly-matrix td.teacher-col {
+        width: 82px;
+        min-width: 82px;
+        max-width: 82px;
+        text-align: left;
+        padding-left: 7px;
+        white-space: nowrap;
+    }
+    .weekly-matrix td {
+        height: 43px;
+        white-space: normal;
+        word-break: keep-all;
+    }
+    .weekly-matrix .class-line { font-weight: 600; }
+    .weekly-matrix .subject-line { font-size: 10.5px; color: #334155; }
+    .weekly-matrix .change-line { font-size: 9px; margin-top: 2px; }
+    .weekly-matrix .empty { color: #cbd5e1; }
     .login-box { max-width: 420px; margin: 80px auto; padding: 30px; border: 1px solid #cbd5e1; border-radius: 12px; background: #f8fafc; }
 </style>
 """, unsafe_allow_html=True)
@@ -392,6 +440,93 @@ def range_calendar_matrix_picker(start_value=None, end_value=None, key="range_ma
 
 def render_change_legend():
     st.caption("🟢 보강 · 🔄 실제 교환 · 🧪 테스트 교환 · 🟡 시간강사 · 빈칸=공강")
+
+def _weekly_cell_lines(value):
+    """주간 매트릭스 셀을 '학급 / 과목 / 변경표시' 2~3줄로 압축한다."""
+    import re
+    text = str(value or "").strip()
+    if not text:
+        return "", "", ""
+    prefix = ""
+    if text.startswith("[결강]"):
+        prefix = "결강"
+        text = text[len("[결강]"):].strip()
+    markers = []
+    for marker, label in [("🔄", "교환"), ("🧪", "테스트"), ("🟢", "보강"), ("🟡", "시간강사")]:
+        if marker in text:
+            markers.append(label)
+            text = text.replace(marker, " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    # 시간강사 셀의 원본교사 표기는 한 줄로 길어지지 않게 변경표시로만 표시한다.
+    text = re.sub(r"\s+[^\s]+\s*→\s*시간강사.*$", "", text).strip()
+    parts = text.split(" ", 1)
+    class_line = parts[0] if parts else ""
+    subject_line = parts[1] if len(parts) > 1 else ""
+    if prefix:
+        change = prefix + (" · " + " · ".join(markers) if markers else "")
+    else:
+        change = " · ".join(markers)
+    return class_line, subject_line, change
+
+
+def render_weekly_matrix(df, *, height=None, caption=None, compact=False):
+    """주간 매트릭스의 열 구성은 그대로 유지하면서 셀만 읽기 좋게 렌더링한다.
+
+    월1~금7(학교 요일별 실제 교시 수) 구조와 행/열 순서는 변경하지 않는다.
+    일반 조회용은 HTML 표로 화면 폭에 맞추고, 셀 내용은 학급/과목을 줄바꿈한다.
+    """
+    if df is None or df.empty:
+        st.info("표시할 시간표가 없습니다.")
+        return
+    if caption:
+        st.caption(caption)
+    columns = list(df.columns)
+    html_parts = ['<div class="weekly-matrix-wrap"><table class="weekly-matrix"><thead><tr>']
+    for i, col in enumerate(columns):
+        cls = "teacher-col" if i == 0 else ""
+        html_parts.append(f'<th class="{cls}">{escape(str(col))}</th>')
+    html_parts.append('</tr></thead><tbody>')
+    for _, row in df.iterrows():
+        html_parts.append('<tr>')
+        for i, col in enumerate(columns):
+            value = row.get(col, "")
+            if i == 0:
+                html_parts.append(f'<td class="teacher-col"><strong>{escape(str(value))}</strong></td>')
+                continue
+            c, subj, change = _weekly_cell_lines(value)
+            if not c and not subj and not change:
+                html_parts.append('<td class="empty">·</td>')
+            else:
+                lines = f'<div class="class-line">{escape(c)}</div>' if c else ''
+                if subj:
+                    lines += f'<div class="subject-line">{escape(subj)}</div>'
+                if change:
+                    lines += f'<div class="change-line">{escape(change)}</div>'
+                html_parts.append(f'<td>{lines}</td>')
+        html_parts.append('</tr>')
+    html_parts.append('</tbody></table></div>')
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
+
+
+def compact_interactive_weekly_matrix(df):
+    """셀 선택이 필요한 주간표용. 데이터 구조는 유지하고 표시 문자열만 2줄 중심으로 짧게 만든다."""
+    out = df.copy()
+    for col in out.columns:
+        if col == "교사명":
+            continue
+        vals=[]
+        for v in out[col].tolist():
+            c, subj, change = _weekly_cell_lines(v)
+            if not c and not subj:
+                vals.append("")
+            else:
+                text = f"{c}\n{subj}" if subj else c
+                if change:
+                    text += f"\n{change}"
+                vals.append(text)
+        out[col]=vals
+    return out
+
 
 def get_all_teacher_names():
     ts = []
@@ -2954,17 +3089,17 @@ if "시간표 조회" in tab_map:
                 st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
         elif view == "교사별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_week_ref")
-            st.dataframe(effective_teacher_matrix(ref,ver,use_test=False),use_container_width=True,height=650,hide_index=True)
+            render_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), caption="월~금 전체 주간 시간표 · 학급과 과목을 두 줄로 표시")
         elif view == "학급별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_class_ref")
-            st.dataframe(class_matrix(ver, ref_date=ref),use_container_width=True,height=650,hide_index=True)
+            render_weekly_matrix(class_matrix(ver, ref_date=ref), caption="월~금 전체 주간 학급 시간표 · 기존 주간 매트릭스 구조 유지")
         else:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
             ref=calendar_picker("주간 기준일",date.today(),key="view_ref")
             grid,dates=get_teacher_week_view(t,ref)
             st.caption(f"{dates[0]} ~ {dates[4]}")
-            st.dataframe(grid,use_container_width=True,hide_index=True)
+            render_weekly_matrix(grid, caption="월~금 주간표 · 학급 / 과목 / 변경 이력을 구분해 표시")
 
 # ------------------------------------------------------------------ 시간강사 관리
 if "시간강사 관리" in tab_map:
@@ -3166,7 +3301,7 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         st.caption("현재 적용된 맞교환·보강·시간강사 변경을 반영합니다. 선택한 현재 수업 상태를 기준으로 1:1 가능 위치를 계산합니다.")
         week_anchor = calendar_picker("검색 기준 주", date.today(), key="week_1to1_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표가 아래 매트릭스에 표시됩니다.")
         ver = st.session_state.get("_data_version", 0)
-        lesson_matrix = effective_teacher_matrix(week_anchor, ver, use_test=False).copy()
+        lesson_matrix = compact_interactive_weekly_matrix(effective_teacher_matrix(week_anchor, ver, use_test=False).copy())
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 시간강사 대체는 교사명(원본교사) 형태")
 
         if lesson_matrix.empty:
@@ -3179,7 +3314,8 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
                 height=520,
                 key="week_1to1_lesson_matrix",
                 on_select="rerun",
-                selection_mode="single-cell"
+                selection_mode="single-cell",
+                row_height=48
             )
             selected_cells = matrix_event.selection.cells
             extra_days = st.slider("미래 추가 검색 일수", 0, 14, 7, key="week_extra_days")
@@ -3404,7 +3540,7 @@ if "시간표 변경 테스트용" in tab_map:
         st.caption("실제 변경과 현재까지의 테스트 변경을 모두 반영합니다. 선택한 현재 상태를 기준으로 다음 1:1 가능 위치를 계산합니다.")
         test_week_anchor = calendar_picker("테스트 검색 기준 주", date.today(), key="test_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표를 테스트 기준으로 사용합니다.")
         ver = st.session_state.get("_data_version", 0)
-        test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
+        test_matrix = compact_interactive_weekly_matrix(effective_teacher_matrix(test_week_anchor, ver, use_test=True))
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
         test_pick_a = None
         if test_matrix.empty:
@@ -3412,7 +3548,7 @@ if "시간표 변경 테스트용" in tab_map:
         else:
             test_event = st.dataframe(
                 test_matrix, hide_index=True, use_container_width=True, height=520,
-                key="test_lesson_matrix", on_select="rerun", selection_mode="single-cell"
+                key="test_lesson_matrix", on_select="rerun", selection_mode="single-cell", row_height=48
             )
             test_cells = test_event.selection.cells
             if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
@@ -3505,7 +3641,7 @@ if "시간표 변경 테스트용" in tab_map:
         ref_preview = calendar_picker("미리보기 기준일", date.today(), key="test_preview_d")
         grid, dates = get_teacher_week_view(t_preview, ref_preview, use_test=True)
         st.caption(f"{dates[0]} ~ {dates[4]}  (테스트 반영됨)")
-        st.dataframe(grid, use_container_width=True, height=350, hide_index=True)
+        render_weekly_matrix(grid, caption="월~금 주간표 · 테스트 변경 반영")
 
         if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
@@ -3551,7 +3687,7 @@ if "변경된 교사 주간표" in tab_map:
                 with st.expander(f"👤 {t}", expanded=False):
                     st.caption("🔄 교환 이력 / 🟢 보강 처리 이력이 각 수업 칸에 표시됩니다.")
                     grid, _ = get_teacher_week_view(t, ref)
-                    st.dataframe(grid, use_container_width=True, hide_index=True)
+                    render_weekly_matrix(grid, caption="월~금 주간표 · 변경 이력 포함")
 
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
