@@ -2011,42 +2011,59 @@ def get_single_lesson_1to1_candidates(
 
     for target_date in search_dates:
         target_str = target_date.strftime("%Y-%m-%d")
-        # source_date 이전 날짜는 검색 대상이 아니다.
-        if target_str <= source_str:
+        # 선택한 당일은 포함한다.
+        # 당일에는 같은 교시뿐 아니라 다른 교시의 수업도 1:1 교환 후보가 될 수 있다.
+        # 선택일 이전 날짜만 제외하고, 선택일 이후 날짜는 기존 미래 검색 범위를 유지한다.
+        if target_str < source_str:
             continue
         target_day = WEEKDAY_KR[target_date.weekday()]
         target_tt = get_effective_timetable_for_date(target_str, ver, use_test=use_test)
-        if target_tt.empty or not is_free(teacher, target_day, orig_period, target_str, target_tt):
+        if target_tt.empty:
             continue
 
-        candidates = target_tt[
-            (target_tt["교시"] == orig_period)
-            & (target_tt["학급"] == orig_class)
-            & (target_tt["교사명"] != teacher)
-        ].drop_duplicates(subset=["교사명", "교시"])
+        # 당일: 1교시 → 4교시처럼 서로 다른 교시도 허용.
+        # 이후 날짜: 기존 동작을 유지해 원본과 같은 교시를 검색한다.
+        target_periods = (
+            list(range(1, PERIODS_PER_DAY.get(target_day, MAX_PERIOD) + 1))
+            if target_str == source_str else [orig_period]
+        )
 
-        for _, candidate in candidates.iterrows():
-            other_teacher = str(candidate["교사명"]).strip()
-            target_period = safe_int(candidate["교시"])
-            # 상대 수업도 현재 적용 시간표의 실제 수업이면 후보로 허용한다.
-            key = (target_str, other_teacher, target_period)
-            if key in seen or not is_free(other_teacher, source_day, orig_period, source_str, source_tt):
+        for target_period in target_periods:
+            # A 교사가 목표 슬롯에서 공강이어야 상대 수업을 받을 수 있다.
+            if not is_free(teacher, target_day, target_period, target_str, target_tt):
                 continue
-            seen.add(key)
-            score = 200
-            if subject_group(str(candidate["과목"])) == source_group:
-                score += 40
-            if target_str[:7] == source_str[:7]:
-                score += 10
-            results.append({
-                "원본일자": source_str, "원본요일": source_day, "원본교시": orig_period,
-                "원본학급": orig_class, "원본과목": orig_subject,
-                "이동희망일": target_str, "이동요일": target_day,
-                "상대교사": other_teacher,
-                "상대학급": str(candidate["학급"]), "상대과목": str(candidate["과목"]),
-                "상대수업": f"{candidate['학급']} {candidate['과목']}",
-                "동일학급": "🏆", "동학년": "", "점수": score
-            })
+
+            candidates = target_tt[
+                (target_tt["교시"] == target_period)
+                & (target_tt["학급"] == orig_class)
+                & (target_tt["교사명"] != teacher)
+            ].drop_duplicates(subset=["교사명", "교시"])
+
+            for _, candidate in candidates.iterrows():
+                other_teacher = str(candidate["교사명"]).strip()
+                # 상대 교사는 선택한 원본 슬롯으로 이동할 수 있어야 한다.
+                key = (target_str, other_teacher, target_period)
+                if key in seen or not is_free(other_teacher, source_day, orig_period, source_str, source_tt):
+                    continue
+                seen.add(key)
+                score = 200
+                if target_str == source_str:
+                    score += 15
+                    # 당일 교시 차이가 작은 후보를 우선한다.
+                    score += max(0, 8 - abs(target_period - orig_period))
+                if subject_group(str(candidate["과목"])) == source_group:
+                    score += 40
+                if target_str[:7] == source_str[:7]:
+                    score += 10
+                results.append({
+                    "원본일자": source_str, "원본요일": source_day, "원본교시": orig_period,
+                    "원본학급": orig_class, "원본과목": orig_subject,
+                    "이동희망일": target_str, "이동요일": target_day, "이동희망교시": target_period,
+                    "상대교사": other_teacher,
+                    "상대학급": str(candidate["학급"]), "상대과목": str(candidate["과목"]),
+                    "상대수업": f"{candidate['학급']} {candidate['과목']}",
+                    "동일학급": "🏆", "동학년": "", "점수": score
+                })
 
     return pd.DataFrame(results).sort_values(
         ["점수", "이동희망일", "상대교사"], ascending=[False, True, True]
@@ -2453,13 +2470,15 @@ def _filter_current_swap_candidates(df, lesson, *, use_test=False):
     target_cache = {}
     for idx, r in df.iterrows():
         td = normalize_date_str(r.get("이동희망일", ""))
-        tp = safe_int(r.get("원본교시", source_period))
+        # 당일 1:1 교환은 목표 교시가 원본 교시와 다를 수 있다.
+        # 신규 후보에는 이동희망교시를 저장하고, 구형 캐시/데이터는 원본교시로 호환한다.
+        tp = safe_int(r.get("이동희망교시", r.get("원본교시", source_period)))
         tt = str(r.get("상대교사", "")).strip()
         tc = str(r.get("상대학급", "")).strip()
         ts = str(r.get("상대과목", "")).strip()
         # 선택 수업보다 과거인 날짜는 오래된 후보로 간주하여 제거한다.
         if (not td or not tt or tp <= 0 or not tc or not ts
-                or td == source_date or td < source_date):
+                or td < source_date):
             continue
         if td not in target_cache:
             target_cache[td] = get_effective_timetable_for_date(td, ver, use_test=bool(use_test))
@@ -2634,7 +2653,7 @@ def _weekly_action_dialog():
             st.caption(f"가능한 1:1 교환 후보 {len(df_swap)}건 · 동일 학급을 우선 검색했습니다.")
             shortlist = df_swap.head(12).copy()
             labels = [
-                f"{row['이동희망일']} ({row['이동요일']}) · {safe_int(row['원본교시'])}교시 · "
+                f"{row['이동희망일']} ({row['이동요일']}) · {safe_int(row.get('이동희망교시', row['원본교시']))}교시 · "
                 f"{row['상대교사']} · {row['상대학급']} {row['상대과목']}"
                 for _, row in shortlist.iterrows()
             ]
@@ -2643,11 +2662,11 @@ def _weekly_action_dialog():
             picked = shortlist.iloc[labels.index(pick_label)]
             st.caption(
                 f"상대 수업: **{picked['상대교사']} · {picked['이동희망일']} · "
-                f"{safe_int(picked['원본교시'])}교시 · {picked['상대학급']} · {picked['상대과목']}**"
+                f"{safe_int(picked.get('이동희망교시', picked['원본교시']))}교시 · {picked['상대학급']} · {picked['상대과목']}**"
             )
             b_info = {
                 "교사명": str(picked["상대교사"]), "일자": str(picked["이동희망일"]),
-                "요일": str(picked["이동요일"]), "교시": safe_int(picked["원본교시"]),
+                "요일": str(picked["이동요일"]), "교시": safe_int(picked.get("이동희망교시", picked["원본교시"])),
                 "학급": str(picked["상대학급"]), "과목": str(picked["상대과목"]),
             }
             button_label = "🧪 1:1 맞교환 테스트" if use_test else "✅ 1:1 맞교환 실행"
