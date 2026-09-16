@@ -2440,48 +2440,16 @@ def _weekly_fragment_rerun():
 
 
 def _weekly_timed_status(label):
-    """팝업 내부 작업용 로딩 UI.
+    """팝업 내부의 무거운 작업에 눈에 잘 띄는 로딩 표시와 처리 시간을 제공한다.
 
-    Streamlit의 동기 실행 특성상 Python 코드가 실행되는 동안 일반 위젯은
-    계속 갱신되지 않을 수 있다. 따라서 브라우저에서 독립적으로 움직이는
-    아주 가벼운 JS 타이머 + CSS 스피너를 먼저 렌더링하고, 실제 작업은 기존
-    함수가 그대로 수행하도록 한다. 계산 알고리즘이나 캐시에는 관여하지 않는다.
+    중요: 이 함수는 무거운 계산을 시작하기 *직전*에 호출되므로,
+    사용자에게 현재 작업이 진행 중이라는 것을 명확히 보여준다.
+    기존의 2개 반환값(started, status)은 그대로 유지해 호출부 회귀를 막는다.
     """
     started = _time.perf_counter()
-    status = st.status(f"⏳ {label} · 처리 중...", expanded=True)
-
-    # iframe 내부의 타이머는 Python 작업이 진행되는 동안에도 브라우저에서
-    # 0.1초 단위로 갱신된다. 작업이 끝난 뒤에는 아래의 실제 측정값을 함께 보여준다.
-    components.html(
-        f"""
-        <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;
-                    border:1px solid #d9dee7;border-radius:10px;background:#f8fafc;
-                    font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-          <div style="width:18px;height:18px;border:3px solid #d7dde7;border-top-color:#64748b;
-                      border-radius:50%;animation:spin .75s linear infinite;flex:0 0 auto;"></div>
-          <div style="flex:1;min-width:0;">
-            <div style="font-weight:700;font-size:14px;">⏳ {label}</div>
-            <div style="font-size:13px;color:#64748b;margin-top:3px;">
-              처리 중 · 경과시간 <span id="elapsed">0.0</span>초
-            </div>
-          </div>
-        </div>
-        <style>
-          @keyframes spin {{ to {{ transform:rotate(360deg); }} }}
-        </style>
-        <script>
-          const startedAt = performance.now();
-          const target = document.getElementById('elapsed');
-          const tick = () => {{
-            target.textContent = ((performance.now() - startedAt) / 1000).toFixed(1);
-          }};
-          tick();
-          setInterval(tick, 100);
-        </script>
-        """,
-        height=62,
-        scrolling=False,
-    )
+    status = st.status(f"🔄 로딩 중...  {label}", expanded=True)
+    status.write("⏳ 잠시만 기다려 주세요. 최신 시간표를 확인하고 있습니다.")
+    status.caption("작업이 끝나면 실제 처리 시간이 표시됩니다.")
     return started, status
 
 
@@ -2492,7 +2460,7 @@ def _weekly_finish_status(started, status, label, *, ok=True):
         state="complete" if ok else "error",
         expanded=False,
     )
-    st.caption(f"실제 처리 시간: **{elapsed:.2f}초**")
+    st.caption(f"처리 시간: **{elapsed:.2f}초**")
 
 
 @st.dialog("🎯 수업 작업", width="large")
