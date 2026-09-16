@@ -2580,12 +2580,12 @@ def _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, 
 
 
 def render_weekly_selection_panel(ref_date, *, use_test=False, title="선택 수업 작업"):
-    """하위 호환용. 선택된 수업이 있으면 네이티브 팝업을 연다."""
+    """하위 호환용. 팝업을 직접 렌더링하지 않고 중앙 렌더러에 위임한다."""
     lesson = st.session_state.get("weekly_selected_lesson")
     if lesson:
         st.session_state.weekly_dialog_use_test = use_test
         st.session_state.weekly_dialog_title = title
-        _weekly_action_dialog()
+        st.session_state.weekly_dialog_open = True
     else:
         st.caption("주간표의 수업 셀을 클릭하면 작은 팝업에서 결강·맞교환·보강 작업을 시작할 수 있습니다.")
 
@@ -2673,11 +2673,12 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         st.session_state.weekly_dialog_use_test = bool(use_test)
         st.session_state.weekly_dialog_title = title or "주간표 작업"
         st.session_state.weekly_dialog_open = bool(open_dialog)
-        if open_dialog:
-            _weekly_action_dialog()
-    elif open_dialog and st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
-        # 팝업 내부 버튼을 눌러 rerun된 경우에도 선택 수업을 유지하여 같은 팝업을 다시 연다.
-        _weekly_action_dialog()
+        # 중요: dialog는 이 함수에서 직접 렌더링하지 않는다.
+    # st.tabs()는 모든 탭의 본문을 같은 실행에서 렌더링하므로, 여러 주간표가
+    # 각각 _weekly_action_dialog()를 호출하면 @st.dialog의 내부 위젯/다이얼로그
+    # ID가 중복되어 StreamlitDuplicateElement가 발생할 수 있다.
+    # 선택 상태만 session_state에 기록하고, 스크립트 맨 마지막에서 단 한 번
+    # 중앙 렌더링한다.
     return lesson
 
 
@@ -4411,5 +4412,11 @@ if "📑 회원별 탭 권한 관리" in tab_map:
                     save_id_sheet(ids_df)
                     st.success("모든 탭 차단됨")
                     st.rerun()
+
+# ------------------------------------------------------------------ 주간표 공통 팝업 중앙 렌더러
+# st.tabs()의 각 탭에서 주간표가 여러 개 렌더링되더라도 native dialog는
+# 한 번의 Streamlit 실행에서 정확히 한 번만 생성해야 한다.
+if st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
+    _weekly_action_dialog()
 
 st.caption(f"서라벌여중 시간표 관리 시스템 20260916 v2.0.0 · {current_name()} ({current_user()}) · {current_role()}")
