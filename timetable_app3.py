@@ -2343,6 +2343,80 @@ def _clear_weekly_selection():
     st.session_state.pop("weekly_cycle_candidates_key", None)
 
 
+def _validate_current_weekly_selection(lesson, *, use_test=False):
+    """session_state에 남아 있는 선택이 현재 Effective Schedule과 일치하는지 확인한다.
+
+    Streamlit의 dataframe selection은 rerun 사이에 잔존할 수 있고, 후보 캐시도
+    과거 실행의 결과를 잠시 보유할 수 있다. 따라서 팝업을 그리기 직전에 선택 슬롯의
+    현재 유효 수업을 다시 확인하여 "한 번 전 클릭한 수업"이나 오래된 수업을 차단한다.
+    """
+    if not isinstance(lesson, dict):
+        return False
+    try:
+        ds = normalize_date_str(lesson.get("일자", ""))
+        period = safe_int(lesson.get("교시", 0))
+        teacher = str(lesson.get("교사명", "")).strip()
+        klass = str(lesson.get("학급", "")).strip()
+        subject = str(lesson.get("과목", "")).strip()
+        if not ds or not teacher or period <= 0 or not klass or not subject:
+            return False
+        ver = st.session_state.get("_data_version", 0)
+        e = get_effective_timetable_for_date(ds, ver, use_test=bool(use_test))
+        if e is None or e.empty:
+            return False
+        m = e[(e["교사명"].astype(str).str.strip() == teacher)
+               & (e["교시"].apply(safe_int) == period)
+               & (e["학급"].astype(str).str.strip() == klass)
+               & (e["과목"].astype(str).str.strip() == subject)]
+        return not m.empty
+    except Exception:
+        return False
+
+
+def _filter_current_swap_candidates(df, lesson, *, use_test=False):
+    """후보 캐시에 오래된 수업이 섞여 있어도 현재 Effective Schedule과 대조해 제거한다."""
+    if df is None or df.empty or not isinstance(lesson, dict):
+        return pd.DataFrame(columns=list(df.columns) if isinstance(df, pd.DataFrame) else [])
+    ver = st.session_state.get("_data_version", 0)
+    source_date = normalize_date_str(lesson.get("일자", ""))
+    source_period = safe_int(lesson.get("교시", 0))
+    source_teacher = str(lesson.get("교사명", "")).strip()
+    source_class = str(lesson.get("학급", "")).strip()
+    source_subject = str(lesson.get("과목", "")).strip()
+    source_e = get_effective_timetable_for_date(source_date, ver, use_test=bool(use_test))
+    if source_e is None or source_e.empty:
+        return df.iloc[0:0].copy()
+    source_ok = not source_e[(source_e["교사명"].astype(str).str.strip() == source_teacher)
+                              & (source_e["교시"].apply(safe_int) == source_period)
+                              & (source_e["학급"].astype(str).str.strip() == source_class)
+                              & (source_e["과목"].astype(str).str.strip() == source_subject)].empty
+    if not source_ok:
+        return df.iloc[0:0].copy()
+
+    valid_rows = []
+    target_cache = {}
+    for idx, r in df.iterrows():
+        td = normalize_date_str(r.get("이동희망일", ""))
+        tp = safe_int(r.get("원본교시", source_period))
+        tt = str(r.get("상대교사", "")).strip()
+        tc = str(r.get("상대학급", "")).strip()
+        ts = str(r.get("상대과목", "")).strip()
+        if not td or not tt or tp <= 0 or not tc or not ts or td == source_date:
+            continue
+        if td not in target_cache:
+            target_cache[td] = get_effective_timetable_for_date(td, ver, use_test=bool(use_test))
+        te = target_cache[td]
+        if te is None or te.empty:
+            continue
+        m = te[(te["교사명"].astype(str).str.strip() == tt)
+               & (te["교시"].apply(safe_int) == tp)
+               & (te["학급"].astype(str).str.strip() == tc)
+               & (te["과목"].astype(str).str.strip() == ts)]
+        if not m.empty:
+            valid_rows.append(idx)
+    return df.loc[valid_rows].reset_index(drop=True)
+
+
 @st.dialog("🎯 수업 작업", width="large")
 def _weekly_action_dialog():
     """주간표 셀용 초경량 컨텍스트 팝업.
@@ -2357,6 +2431,12 @@ def _weekly_action_dialog():
         return
 
     use_test = bool(st.session_state.get("weekly_dialog_use_test", False))
+    # 팝업이 열리기 직전 현재 Effective Schedule과 선택 수업을 재검증한다.
+    # 이전 클릭의 session_state가 남아 있어도 오래된 수업을 표시하지 않는다.
+    if not _validate_current_weekly_selection(lesson, use_test=use_test):
+        _clear_weekly_selection()
+        st.rerun()
+
     title = st.session_state.get("weekly_dialog_title", "주간표 작업")
     status = lesson.get("변경유형") or "원본"
     ver = st.session_state.get("_data_version", 0)
@@ -2453,6 +2533,10 @@ def _weekly_action_dialog():
             st.session_state.weekly_swap_candidates_key = cache_key
         else:
             df_swap = st.session_state.get("weekly_swap_candidates", pd.DataFrame())
+
+        # 캐시에 남은 후보도 표시 직전에 현재 Effective Schedule과 다시 대조한다.
+        # 따라서 과거 날짜/과거 교사·과목 정보가 UI에 나타나지 않는다.
+        df_swap = _filter_current_swap_candidates(df_swap, lesson, use_test=use_test)
 
         if df_swap.empty:
             st.info("현재 조건에서 가능한 1:1 맞교환 위치가 없습니다.")
@@ -3668,13 +3752,10 @@ if not visible_tabs:
 tabs = st.tabs(visible_tabs)
 tab_map = {name: tabs[i] for i, name in enumerate(visible_tabs)}
 
-# ------------------------------------------------------------------ 주간표 공통 팝업 중앙 렌더러
-# 중요: native dialog는 st.tabs() 내부의 여러 주간표 렌더러에서 직접 호출하지 않는다.
-# 셀 선택은 각 렌더러가 session_state에 기록하고, 탭 본문을 그리기 전에 이 한 곳에서
-# 정확히 한 번만 dialog를 연다. 이렇게 해야 여러 탭이 동시에 렌더링되는 Streamlit 실행에서
-# 동일 Dialog/fragment가 중복 생성되는 문제를 피할 수 있다.
-if st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
-    _weekly_action_dialog()
+# 주간표 팝업은 모든 탭의 주간표가 현재 실행에서 먼저 선택 상태를 갱신한 뒤
+# 스크립트 마지막에 단 한 번 렌더링한다. (아래 메인 탭 렌더링 블록 끝에서 호출)
+# 이렇게 해야 클릭한 "현재" 셀이 한 실행 안에서 바로 팝업에 반영되며,
+# 이전 실행의 선택이 한 박자 늦게 표시되는 문제가 생기지 않는다.
 
 # ------------------------------------------------------------------ 시간표 조회
 if "시간표 조회" in tab_map:
@@ -4502,5 +4583,12 @@ if "📑 회원별 탭 권한 관리" in tab_map:
                     save_id_sheet(ids_df)
                     st.success("모든 탭 차단됨")
                     st.rerun()
+
+# ------------------------------------------------------------------ 주간표 공통 팝업 중앙 렌더러
+# 모든 탭의 주간표가 먼저 렌더링되어 이번 실행의 최신 셀 선택을 session_state에 기록한 뒤
+# 여기서 native dialog를 정확히 한 번만 호출한다. 따라서 클릭 직전의 이전 선택이 아니라
+# 방금 클릭한 셀이 팝업에 표시된다. 또한 주간표 렌더러 안에서 dialog가 중복 생성되지 않는다.
+if st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
+    _weekly_action_dialog()
 
 st.caption(f"서라벌여중 시간표 관리 시스템 20260916 v2.0.0 · {current_name()} ({current_user()}) · {current_role()}")
