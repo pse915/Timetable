@@ -39,6 +39,23 @@ st.markdown("""
     [data-testid="stHeader"] { background: transparent; }
     /* Streamlit Cloud 상단 GitHub/설정 메뉴와 충돌하지 않도록 앱 toolbar는 fixed가 아닌 일반 flow */
     .app-top-safe-space { height:30px; width:100%; flex:0 0 30px; pointer-events:none; }
+    /* 도구 창은 dialog를 사용한다. 반복 rerun에도 viewport 기준 중앙 위치와
+       고정된 최대 높이를 유지해 왼쪽으로 누적 이동하는 현상을 막는다. */
+    [data-testid="stDialog"] {
+        transform: none !important;
+    }
+    [data-testid="stDialog"] > div {
+        width: min(420px, calc(100vw - 32px)) !important;
+        max-width: min(420px, calc(100vw - 32px)) !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+    [data-testid="stDialog"] button,
+    [data-testid="stDialog"] input,
+    [data-testid="stDialog"] [role="button"] {
+        transition: none !important;
+        animation: none !important;
+    }
     .app-topbar { position:relative; z-index:2; width:100%; min-height:40px; display:flex; align-items:center; gap:.55rem; padding:.12rem .2rem .36rem; margin:-.08rem 0 .25rem; border-bottom:1px solid #e5e7eb; }
     .app-identity { white-space:nowrap; color:#6b7280; font-size:.76rem; line-height:1.15; letter-spacing:-.01em; }
     .app-identity strong { color:#374151; font-weight:650; }
@@ -1949,7 +1966,7 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
     if not results:
         return pd.DataFrame(columns=[
             "원본일자", "원본요일", "원본교시", "원본학급", "원본과목",
-            "이동희망일", "이동요일", "상대교사", "상대수업",
+            "이동희망일", "이동요일", "상대교시", "상대교사", "상대수업",
             "동일학급", "동학년", "점수"
         ])
 
@@ -1970,9 +1987,8 @@ def get_single_lesson_1to1_candidates(
     """
     source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
     source_day = WEEKDAY_KR[source_date.weekday()]
-    # 선택한 수업보다 이전 날짜는 교환 후보에서 제외한다.
-    # 현재 주간을 유지하되, 선택일 이후의 평일만 후보로 검색한다.
-    # 예: 수요일 수업을 선택하면 월/화 수업이 후보로 다시 나타나지 않는다.
+    # 선택일 당일을 포함한 미래 평일을 검색한다.
+    # 같은 날에는 다른 교시(예: 1교시 ↔ 4교시)도 후보가 될 수 있다.
     monday = source_date - timedelta(days=source_date.weekday())
     friday = monday + timedelta(days=4)
     search_dates = [
@@ -2041,9 +2057,16 @@ def get_single_lesson_1to1_candidates(
 
             for _, candidate in candidates.iterrows():
                 other_teacher = str(candidate["교사명"]).strip()
+                target_period = safe_int(candidate["교시"])
                 # 상대 교사는 선택한 원본 슬롯으로 이동할 수 있어야 한다.
                 key = (target_str, other_teacher, target_period)
-                if key in seen or not is_free(other_teacher, source_day, orig_period, source_str, source_tt):
+                if key in seen or target_period <= 0:
+                    continue
+                if target_str == source_str and target_period == safe_int(orig_period):
+                    continue
+                if not is_free(teacher, target_day, target_period, target_str, target_tt):
+                    continue
+                if not is_free(other_teacher, source_day, orig_period, source_str, source_tt):
                     continue
                 seen.add(key)
                 score = 200
@@ -3853,11 +3876,81 @@ init_state()
 # ==========================================================================================
 # 상단 가로 업무 Toolbar
 # ==========================================================================================
+@st.dialog("도구", width="small")
+def render_tools_dialog():
+    """상단 도구 창.
+
+    st.popover는 fragment 재실행/레이아웃 재계산 때 앵커 기준 위치가 누적 이동하는
+    현상이 있어 사용하지 않는다. Dialog는 브라우저 viewport 기준으로 고정 배치되므로
+    반복해서 열고 닫아도 왼쪽으로 밀리거나 폭이 누적해서 변하지 않는다.
+    """
+    if current_role() == ROLE_GUEST:
+        st.caption("게스트 모드에서는 사용할 수 있는 도구가 없습니다.")
+        return
+
+    if can_full_data() or is_teacher():
+        if st.button("🔄 시간표 새로고침", use_container_width=True, key="top_reload_timetable"):
+            load_timetable_from_gsheet.clear()
+            ti, tt = load_timetable_from_gsheet()
+            st.session_state.teachers, st.session_state.timetable = ti, tt
+            _invalidate_all_caches()
+            st.rerun()
+        if st.button("🔄 작업내역 새로고침", use_container_width=True, key="top_reload_work"):
+            load_work_data_from_gsheet.clear()
+            absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
+            st.session_state.absences = ensure_input_user(absences)
+            st.session_state.subs = ensure_input_user(subs)
+            st.session_state.swaps = ensure_input_user(swaps)
+            st.session_state.part_time = ensure_part_time_columns(part_time)
+            st.session_state.duties = ensure_duty_columns(duties)
+            _invalidate_all_caches()
+            st.rerun()
+        if st.button("💾 현재 작업 저장", use_container_width=True, type="primary", key="top_save_work"):
+            save_work_data_to_gsheet()
+        st.divider()
+        a, b = st.columns(2)
+        if a.button("↩ Undo", use_container_width=True, key="top_undo"):
+            if undo():
+                save_work_data_to_gsheet()
+                st.rerun()
+        if b.button("↪ Redo", use_container_width=True, key="top_redo"):
+            if redo():
+                save_work_data_to_gsheet()
+                st.rerun()
+
+    st.divider()
+    st.markdown('<div class="tool-section-title">출력</div>', unsafe_allow_html=True)
+    if st.button("결보강 계획서", use_container_width=True, key="top_personal_plan_open"):
+        st.session_state["top_output_mode"] = "personal_plan"
+    if is_edu_or_master() and st.button("전체 일일 내역서", use_container_width=True, key="top_daily_report_open"):
+        st.session_state["top_output_mode"] = "daily_report"
+
+    output_mode = st.session_state.get("top_output_mode")
+    if output_mode == "personal_plan":
+        plan_date = st.date_input("기준일", value=_today_kst(), key="top_plan_date", label_visibility="collapsed")
+        if st.button("파일 만들기", type="primary", use_container_width=True, key="top_personal_generate"):
+            html = build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
+            st.download_button("HTML 다운로드", html.encode("utf-8"), f"결보강계획서_{current_name()}_{plan_date}.html", "text/html", key="top_dl_personal")
+    elif output_mode == "daily_report" and is_edu_or_master():
+        rd = st.date_input("기준일", value=_today_kst(), key="top_report_date", label_visibility="collapsed")
+        if st.button("파일 만들기", type="primary", use_container_width=True, key="top_daily_generate"):
+            day = rd.strftime("%Y-%m-%d")
+            html = build_report_html(day)
+            xls = to_excel_bytes({
+                "결강": st.session_state.absences[st.session_state.absences["일자"] == day] if not st.session_state.absences.empty else pd.DataFrame(),
+                "보강": st.session_state.subs[st.session_state.subs["일자"] == day] if not st.session_state.subs.empty else pd.DataFrame(),
+                "맞교환": st.session_state.swaps,
+            })
+            st.download_button("HTML 다운로드", html.encode("utf-8"), f"내역서_{rd}.html", "text/html", key="top_dl_report_html")
+            st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx", key="top_dl_report_xlsx")
+
+
+@st.fragment
 def render_top_toolbar(visible_tabs):
     """ID/이름/권한과 업무 메뉴를 상단 한 줄에 배치한다.
 
-    Streamlit Cloud의 GitHub/설정/메뉴 영역과 겹치지 않도록 position:fixed를 사용하지 않는다.
-    데이터/출력 기능은 popover로 접어 주간 매트릭스의 가로 공간을 보존한다.
+    도구는 popover가 아니라 별도 dialog로 연다. 따라서 fragment 재실행이 발생해도
+    도구 창의 위치/폭이 앵커를 따라 누적 이동하지 않는다.
     """
     c_id, c_nav, c_tools, c_user = st.columns([1.55, 3.4, 1.0, .85], vertical_alignment="center")
     with c_id:
@@ -3865,60 +3958,18 @@ def render_top_toolbar(visible_tabs):
     with c_nav:
         if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs:
             st.session_state.active_tab = visible_tabs[0]
-        active = st.selectbox("업무 메뉴", visible_tabs, index=visible_tabs.index(st.session_state.active_tab), key="top_active_tab", label_visibility="collapsed")
+        previous_active = st.session_state.active_tab
+        active = st.selectbox("업무 메뉴", visible_tabs, index=visible_tabs.index(previous_active), key="top_active_tab", label_visibility="collapsed")
         st.session_state.active_tab = active
+        if active != previous_active:
+            st.rerun()
     with c_tools:
-        with st.popover("도구", use_container_width=True):
-            if current_role() != ROLE_GUEST:
-                if can_full_data() or is_teacher():
-                    if st.button("🔄 시간표 새로고침", use_container_width=True, key="top_reload_timetable"):
-                        load_timetable_from_gsheet.clear()
-                        ti, tt = load_timetable_from_gsheet()
-                        st.session_state.teachers, st.session_state.timetable = ti, tt
-                        _invalidate_all_caches()
-                        st.rerun()
-                    if st.button("🔄 작업내역 새로고침", use_container_width=True, key="top_reload_work"):
-                        load_work_data_from_gsheet.clear()
-                        absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
-                        st.session_state.absences = ensure_input_user(absences)
-                        st.session_state.subs = ensure_input_user(subs)
-                        st.session_state.swaps = ensure_input_user(swaps)
-                        st.session_state.part_time = ensure_part_time_columns(part_time)
-                        st.session_state.duties = ensure_duty_columns(duties)
-                        _invalidate_all_caches()
-                        st.rerun()
-                    if st.button("💾 현재 작업 저장", use_container_width=True, type="primary", key="top_save_work"):
-                        save_work_data_to_gsheet()
-                    st.divider()
-                    a,b=st.columns(2)
-                    if a.button("↩ Undo", use_container_width=True, key="top_undo"):
-                        if undo(): save_work_data_to_gsheet(); st.rerun()
-                    if b.button("↪ Redo", use_container_width=True, key="top_redo"):
-                        if redo(): save_work_data_to_gsheet(); st.rerun()
-                    if is_edu_or_master():
-                        try: st.caption(f"보강비 잔액 · {get_current_budget():,.0f}원")
-                        except Exception: pass
-                st.divider()
-                # 출력은 Expander를 사용하지 않는다. Streamlit의 확장/축소 애니메이션이
-                # 느리게 보이는 것을 피하고, 도구 Popover 안에서 즉시 필요한 컨트롤만 표시한다.
-                st.markdown('<div class="tool-section-title">출력</div>', unsafe_allow_html=True)
-                plan_date=calendar_picker("계획서 기준일", _today_kst(), key="top_plan_date")
-                if st.button("결보강 계획서", use_container_width=True, key="top_personal_plan"):
-                    html=build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
-                    st.download_button("HTML 다운로드", html.encode("utf-8"), f"결보강계획서_{current_name()}_{plan_date}.html", "text/html", key="top_dl_personal")
-                if is_edu_or_master():
-                    rd=calendar_picker("전체 내역서 일자", _today_kst(), key="top_report_date")
-                    if st.button("전체 일일 내역서", use_container_width=True, key="top_daily_report"):
-                        html=build_report_html(rd.strftime("%Y-%m-%d"))
-                        xls=to_excel_bytes({
-                            "결강": st.session_state.absences[st.session_state.absences["일자"]==rd.strftime("%Y-%m-%d")] if not st.session_state.absences.empty else pd.DataFrame(),
-                            "보강": st.session_state.subs[st.session_state.subs["일자"]==rd.strftime("%Y-%m-%d")] if not st.session_state.subs.empty else pd.DataFrame(),
-                            "맞교환": st.session_state.swaps})
-                        st.download_button("HTML 다운로드", html.encode("utf-8"), f"내역서_{rd}.html", "text/html", key="top_dl_report_html")
-                        st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx", key="top_dl_report_xlsx")
+        if st.button("도구", use_container_width=True, key="top_tools_open"):
+            render_tools_dialog()
     with c_user:
         if st.button("로그아웃", use_container_width=True, key="top_logout"):
-            for k in list(st.session_state.keys()): del st.session_state[k]
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
             st.rerun()
 
 
