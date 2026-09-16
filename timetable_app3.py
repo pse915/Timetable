@@ -2032,43 +2032,6 @@ def get_single_lesson_linked_cycles(
 # ==========================================================================================
 # 뷰 헬퍼
 # ==========================================================================================
-
-def weekly_matrix_column_config(df, first_label=None):
-    """주간(월~금 × 교시) 매트릭스의 가독성을 위한 열 너비 설정."""
-    if df is None or df.empty:
-        return {}
-    cfg = {}
-    first = first_label or ("교사명" if "교사명" in df.columns else "학급" if "학급" in df.columns else None)
-    for c in df.columns:
-        if c == first:
-            cfg[c] = st.column_config.TextColumn(c, width="medium")
-        else:
-            # 주간 35칸은 한 화면에 억지로 압축하지 않고, 각 셀의 최소 가독성을
-            # 확보한 뒤 데이터프레임 내부에서 가로 스크롤하도록 한다.
-            cfg[c] = st.column_config.TextColumn(c, width="medium")
-    return cfg
-
-def render_weekly_matrix(df, *, key=None, height=650, caption=True):
-    """모든 주간 매트릭스를 동일한 표시 규칙으로 렌더링한다.
-
-    월~금 × 교시 전체 열을 절대 제거하거나 접지 않는다.
-    셀 폭을 확보하여 내용이 지나치게 압축되지 않도록 하고, 화면보다 넓은
-    경우 데이터프레임 자체의 가로 스크롤로 전체 주간표를 탐색한다.
-    """
-    if df is None or df.empty:
-        st.info("표시할 주간 시간표가 없습니다.")
-        return None
-    if caption:
-        st.caption("📌 주간 전체(월~금 × 교시)를 유지합니다. 화면보다 넓으면 표 아래/내부를 좌우로 스크롤하세요.")
-    return st.dataframe(
-        df,
-        hide_index=True,
-        use_container_width=True,
-        height=height,
-        key=key,
-        column_config=weekly_matrix_column_config(df),
-    )
-
 @st.cache_data(show_spinner=False)
 def teacher_matrix(version=0):
     tt = st.session_state.timetable
@@ -2991,17 +2954,17 @@ if "시간표 조회" in tab_map:
                 st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
         elif view == "교사별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_week_ref")
-            render_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), key="view_teacher_week_matrix", height=650)
+            st.dataframe(effective_teacher_matrix(ref,ver,use_test=False),use_container_width=True,height=650,hide_index=True)
         elif view == "학급별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_class_ref")
-            render_weekly_matrix(class_matrix(ver, ref_date=ref), key="view_class_week_matrix", height=650)
+            st.dataframe(class_matrix(ver, ref_date=ref),use_container_width=True,height=650,hide_index=True)
         else:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
             ref=calendar_picker("주간 기준일",date.today(),key="view_ref")
             grid,dates=get_teacher_week_view(t,ref)
             st.caption(f"{dates[0]} ~ {dates[4]}")
-            render_weekly_matrix(grid, key="view_teacher_personal_week_matrix", height=430)
+            st.dataframe(grid,use_container_width=True,hide_index=True)
 
 # ------------------------------------------------------------------ 시간강사 관리
 if "시간강사 관리" in tab_map:
@@ -3542,7 +3505,7 @@ if "시간표 변경 테스트용" in tab_map:
         ref_preview = calendar_picker("미리보기 기준일", date.today(), key="test_preview_d")
         grid, dates = get_teacher_week_view(t_preview, ref_preview, use_test=True)
         st.caption(f"{dates[0]} ~ {dates[4]}  (테스트 반영됨)")
-        render_weekly_matrix(grid, key="test_week_preview_matrix", height=350)
+        st.dataframe(grid, use_container_width=True, height=350, hide_index=True)
 
         if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
@@ -3588,7 +3551,7 @@ if "변경된 교사 주간표" in tab_map:
                 with st.expander(f"👤 {t}", expanded=False):
                     st.caption("🔄 교환 이력 / 🟢 보강 처리 이력이 각 수업 칸에 표시됩니다.")
                     grid, _ = get_teacher_week_view(t, ref)
-                    render_weekly_matrix(grid, key=f"changed_teacher_week_matrix_{safe_int(hash(t) % 1000000)}", height=430)
+                    st.dataframe(grid, use_container_width=True, hide_index=True)
 
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
