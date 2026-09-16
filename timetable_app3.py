@@ -2212,196 +2212,283 @@ def _register_absence_from_weekly(lesson, reason, detail=""):
     return True
 
 
-def render_weekly_selection_panel(ref_date, *, use_test=False, title="선택 수업 작업"):
-    """주간표 셀 클릭 결과를 작업 패널로 연결한다."""
-    sel = _read_weekly_selection()
-    if not sel:
-        st.caption("수업 셀을 클릭하면 여기에서 결강·맞교환·보강 작업을 시작할 수 있습니다.")
-        return
-    lesson = _resolve_weekly_selection(sel, ref_date, use_test=use_test)
+def _weekly_display_matrix(matrix: pd.DataFrame) -> pd.DataFrame:
+    """주간표 표시용 복사본. 원본 데이터는 건드리지 않고 셀을 짧게 표현한다."""
+    if matrix is None or matrix.empty:
+        return matrix.copy(deep=True) if isinstance(matrix, pd.DataFrame) else pd.DataFrame()
+    out = matrix.copy(deep=True)
+    for col in out.columns:
+        if str(col) == "교사명" or str(col) == "학급":
+            continue
+        vals = []
+        for raw in out[col].tolist():
+            cls, subject, marker, icon = _weekly_cell_parts(raw)
+            if not cls and not subject:
+                vals.append("")
+            else:
+                # Streamlit dataframe은 줄바꿈을 지원하므로 3줄로 고정한다.
+                vals.append("\n".join([x for x in (cls, subject, icon) if x]))
+        out[col] = vals
+    return out
+
+
+def _weekly_styled_matrix(matrix: pd.DataFrame):
+    """요일 그룹/변경 상태를 강조한 pandas Styler를 반환한다."""
+    display = _weekly_display_matrix(matrix)
+    if display is None or display.empty:
+        return display
+    styler = display.style
+    # 셀 기본 가독성
+    styler = styler.set_properties(**{
+        "text-align": "center",
+        "vertical-align": "middle",
+        "white-space": "pre-wrap",
+        "line-height": "1.15",
+        "font-size": "12px",
+    })
+    if "교사명" in display.columns:
+        styler = styler.set_properties(subset=["교사명"], **{
+            "font-weight": "700", "text-align": "left", "white-space": "nowrap"
+        })
+    if "학급" in display.columns:
+        styler = styler.set_properties(subset=["학급"], **{
+            "font-weight": "700", "text-align": "left", "white-space": "nowrap"
+        })
+
+    # 요일별 아주 옅은 배경 + 요일 시작 열의 굵은 왼쪽 경계.
+    day_rgba = [
+        "rgba(59,130,246,.035)", "rgba(16,185,129,.035)", "rgba(245,158,11,.040)",
+        "rgba(139,92,246,.035)", "rgba(236,72,153,.035)"
+    ]
+    for di, day in enumerate(DAYS):
+        cols = [f"{day}{p}" for p in range(1, MAX_PERIOD + 1) if f"{day}{p}" in display.columns]
+        if not cols:
+            continue
+        styler = styler.set_properties(subset=cols, **{"background-color": day_rgba[di]})
+        first = cols[0]
+        styler = styler.set_properties(subset=[first], **{"border-left": "3px solid rgba(71,85,105,.42)"})
+
+    # 변경 상태 셀은 내용에 포함된 아이콘을 기준으로 강조한다.
+    def _status_style(v):
+        s = "" if v is None else str(v)
+        if "🔄" in s:
+            return "box-shadow: inset 0 0 0 2px rgba(239,68,68,.82); font-weight:700;"
+        if "🧪" in s:
+            return "box-shadow: inset 0 0 0 2px rgba(124,58,237,.82); font-weight:700;"
+        if "🟢" in s:
+            return "box-shadow: inset 0 0 0 2px rgba(22,163,74,.82); font-weight:700;"
+        if "🟡" in s:
+            return "box-shadow: inset 0 0 0 2px rgba(217,119,6,.82); font-weight:700;"
+        return ""
+    data_cols = [c for c in display.columns if str(c) not in ("교사명", "학급")]
+    if data_cols:
+        styler = styler.map(_status_style, subset=data_cols) if hasattr(styler, "map") else styler.applymap(_status_style, subset=data_cols)
+    return styler
+
+
+def _clear_weekly_selection():
+    st.session_state.pop("weekly_selected_lesson", None)
+    st.session_state.pop("weekly_swap_source", None)
+
+
+@st.dialog("🎯 선택한 수업", width="large")
+def _weekly_action_dialog():
+    lesson = st.session_state.get("weekly_selected_lesson")
     if not lesson:
-        st.warning("선택한 셀의 현재 적용 수업을 찾을 수 없습니다. 시간표가 변경되었을 수 있습니다.")
+        st.info("선택한 수업이 없습니다.")
         return
-    st.markdown(f"### 🎯 {title}")
-    status = lesson["변경유형"] if lesson["변경유형"] else "원본"
-    st.info(f"**{lesson['일자']} ({lesson['요일']}) · {lesson['교사명']} · {lesson['교시']}교시 · {lesson['학급']} · {lesson['과목']}**  |  현재 상태: **{status}**")
-    if lesson["변경유형"] != "원본":
-        st.caption(f"변경출처: {lesson['변경출처'] or '-'} · 변경ID: {lesson['변경ID'] or '-'} · 원본: {lesson['원본교사']} / {lesson['원본일자']} / {lesson['원본교시']}교시")
+    use_test = bool(st.session_state.get("weekly_dialog_use_test", False))
+    title = st.session_state.get("weekly_dialog_title", "주간표 작업")
+    status = lesson.get("변경유형") or "원본"
+    st.markdown(f"### {title}")
+    st.info(
+        f"**{lesson['일자']} ({lesson['요일']}) · {lesson['교사명']} · "
+        f"{lesson['교시']}교시 · {lesson['학급']} · {lesson['과목']}**\n\n"
+        f"현재 상태: **{status}**"
+    )
+    if status != "원본":
+        st.caption(
+            f"변경출처: {lesson.get('변경출처') or '-'} · 변경ID: {lesson.get('변경ID') or '-'} · "
+            f"원본: {lesson.get('원본교사') or '-'} / {lesson.get('원본일자') or '-'} / "
+            f"{lesson.get('원본교시') or '-'}교시"
+        )
 
     source = st.session_state.get("weekly_swap_source")
-    c1, c2, c3, c4 = st.columns(4)
+    if source:
+        st.warning(
+            f"🔄 맞교환 출발점: {source['일자']} {source['요일']} {source['교시']}교시 · "
+            f"{source['교사명']} · {source['학급']} · {source['과목']}"
+        )
+    c1, c2, c3 = st.columns(3)
     with c1:
-        if st.button("🔄 맞교환 출발점", key="wm_set_source"):
-            st.session_state.weekly_swap_source = lesson.copy(); st.rerun()
+        if st.button("🔄 이 수업을 교환 출발점으로", key="dlg_set_swap_source", use_container_width=True):
+            st.session_state.weekly_swap_source = lesson.copy()
+            st.rerun()
     with c2:
-        if source:
-            st.write(f"출발: {source['교사명']} {source['요일']} {source['교시']}교시")
+        can_swap = bool(source) and (source["일자"], source["교사명"], source["교시"]) != (lesson["일자"], lesson["교사명"], lesson["교시"])
+        if st.button("✅ 현재 셀과 맞교환", key="dlg_execute_swap", disabled=not can_swap, use_container_width=True):
+            ok = do_swap(source, lesson, source["일자"], lesson["일자"], is_test=use_test)
+            if ok:
+                st.session_state.pop("weekly_swap_source", None)
+                st.session_state.pop("weekly_selected_lesson", None)
+                st.success("맞교환이 반영되었습니다.")
+                st.rerun()
     with c3:
-        if source and (source["일자"], source["교사명"], source["교시"]) != (lesson["일자"], lesson["교사명"], lesson["교시"]):
-            if st.button("✅ 이 셀과 맞교환", key="wm_execute_swap"):
-                ok = do_swap(source, lesson, source["일자"], lesson["일자"], is_test=use_test)
-                if ok:
-                    st.session_state.pop("weekly_swap_source", None); st.success("맞교환이 반영되었습니다."); st.rerun()
-    with c4:
-        if st.button("✖ 선택 해제", key="wm_clear_selection"):
-            try:
-                for _k in ("wm", "wm_key", "wm_row_label", "wm_row", "wm_day", "wm_period"):
-                    if _k in st.query_params:
-                        del st.query_params[_k]
-            except Exception:
-                pass
-            st.session_state.pop("weekly_swap_source", None); st.rerun()
+        if st.button("✖ 선택/출발점 해제", key="dlg_clear_selection", use_container_width=True):
+            _clear_weekly_selection()
+            st.rerun()
 
     with st.expander("📌 이 수업을 결강으로 등록", expanded=False):
         r1, r2 = st.columns([1, 2])
-        with r1: reason = st.selectbox("사유", ABSENCE_REASONS, key="wm_abs_reason")
-        with r2: detail = st.text_input("상세사유", key="wm_abs_detail")
-        if st.button("결강 등록", type="primary", key="wm_abs_submit"):
+        with r1:
+            reason = st.selectbox("사유", ABSENCE_REASONS, key="dlg_abs_reason")
+        with r2:
+            detail = st.text_input("상세사유", key="dlg_abs_detail")
+        if st.button("결강 등록", type="primary", key="dlg_abs_submit", use_container_width=True):
             if _register_absence_from_weekly(lesson, reason, detail):
-                st.success("결강이 등록되었습니다."); st.rerun()
+                st.session_state.pop("weekly_selected_lesson", None)
+                st.success("결강이 등록되었습니다.")
+                st.rerun()
 
     with st.expander("👥 보강 교사 추천·배정", expanded=False):
-        cand = recommend_substitutes(lesson["요일"], lesson["교시"], lesson["과목"], lesson["학급"], lesson["교사명"], lesson["일자"], top_n=10, include_part_time=True)
+        cand = recommend_substitutes(
+            lesson["요일"], lesson["교시"], lesson["과목"], lesson["학급"], lesson["교사명"], lesson["일자"],
+            top_n=10, include_part_time=True
+        )
         if cand.empty:
             st.warning("현재 조건에서 추천 가능한 보강 교사가 없습니다.")
         else:
             st.dataframe(cand, use_container_width=True, hide_index=True, height=240)
             abs_df = st.session_state.absences
-            abs_match = abs_df[(abs_df["일자"].astype(str) == lesson["일자"]) &
-                               (abs_df["교사명"].astype(str).str.strip() == lesson["교사명"]) &
-                               (abs_df["교시"].apply(safe_int) == lesson["교시"])] if not abs_df.empty else pd.DataFrame()
+            abs_match = (
+                abs_df[(abs_df["일자"].astype(str) == lesson["일자"]) &
+                       (abs_df["교사명"].astype(str).str.strip() == lesson["교사명"]) &
+                       (abs_df["교시"].apply(safe_int) == lesson["교시"])]
+                if not abs_df.empty else pd.DataFrame()
+            )
             if not abs_match.empty:
                 cid = str(abs_match.iloc[0]["결강ID"])
                 labels = cand["보강교사"].astype(str).tolist()
-                pick = st.selectbox("보강 교사", labels, key="wm_sub_pick")
+                pick = st.selectbox("보강 교사", labels, key="dlg_sub_pick")
                 picked = cand[cand["보강교사"].astype(str) == str(pick)].iloc[0]
-                if st.button("🟢 선택 교사로 보강 배정", type="primary", key="wm_sub_submit"):
-                    ok = add_substitute(cid, lesson["일자"], lesson["요일"], lesson["교시"], lesson["학급"], lesson["과목"], lesson["교사명"], str(picked["보강교사"]), "주간표", picked.get("우선순위", ""), "주간 시간표 셀에서 배정")
-                    if ok: st.success("보강이 배정되었습니다."); st.rerun()
+                if st.button("🟢 선택 교사로 보강 배정", type="primary", key="dlg_sub_submit", use_container_width=True):
+                    ok = add_substitute(
+                        cid, lesson["일자"], lesson["요일"], lesson["교시"], lesson["학급"], lesson["과목"],
+                        lesson["교사명"], str(picked["보강교사"]), "주간표", picked.get("우선순위", ""),
+                        "주간 시간표 셀에서 배정"
+                    )
+                    if ok:
+                        st.session_state.pop("weekly_selected_lesson", None)
+                        st.success("보강이 배정되었습니다.")
+                        st.rerun()
             else:
-                st.caption("이 수업에 등록된 결강이 없습니다. 위의 '결강 등록'에서 먼저 결강을 등록하면 바로 보강 배정할 수 있습니다.")
+                st.caption("이 수업에 등록된 결강이 없습니다. 결강 등록 후 바로 보강을 배정할 수 있습니다.")
+
+
+def _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, *, use_test=False):
+    """st.dataframe의 단일 셀 선택을 현재 유효 시간표의 실제 수업으로 해석한다."""
+    if not selected_cells:
+        return None
+    try:
+        row_idx, column_name = selected_cells[0]
+        row_idx = int(row_idx)
+        column_name = str(column_name)
+    except Exception:
+        return None
+    if row_idx < 0 or row_idx >= len(matrix) or column_name in ("교사명", "학급"):
+        return None
+    day = column_name[:1]
+    period = safe_int(column_name[1:])
+    if day not in DAYS or not (1 <= period <= MAX_PERIOD):
+        return None
+    row_name = str(matrix.iloc[row_idx].get(row_label, "")).strip()
+    if not row_name or not str(matrix.iloc[row_idx].get(column_name, "")).strip():
+        return None
+    monday = ref_date - timedelta(days=ref_date.weekday())
+    picked_date = monday + timedelta(days=DAYS.index(day))
+    ds = picked_date.strftime("%Y-%m-%d")
+    ver = st.session_state.get("_data_version", 0)
+    e = get_effective_timetable_for_date(ds, ver, use_test=use_test)
+    if e.empty:
+        return None
+    if row_label == "교사명":
+        m = e[(e["교사명"].astype(str).str.strip() == row_name) & (e["교시"].apply(safe_int) == period)]
+    else:
+        m = e[(e["학급"].astype(str).str.strip() == row_name) & (e["교시"].apply(safe_int) == period)]
+    if m.empty:
+        return None
+    r = m.iloc[0]
+    return {
+        "교사명": str(r.get("교사명", "")).strip(), "일자": ds, "요일": day, "교시": period,
+        "학급": str(r.get("학급", "")).strip(), "과목": str(r.get("과목", "")).strip(),
+        "변경유형": str(r.get("변경유형", "원본")).strip(), "변경출처": str(r.get("변경출처", "")).strip(),
+        "변경ID": str(r.get("변경ID", "")).strip(), "원본교사": str(r.get("원본교사", r.get("교사명", ""))).strip(),
+        "원본일자": str(r.get("원본일자", ds)), "원본교시": safe_int(r.get("원본교시", period)),
+    }
+
+
+def render_weekly_selection_panel(ref_date, *, use_test=False, title="선택 수업 작업"):
+    """하위 호환용. 선택된 수업이 있으면 네이티브 팝업을 연다."""
+    lesson = st.session_state.get("weekly_selected_lesson")
+    if lesson:
+        st.session_state.weekly_dialog_use_test = use_test
+        st.session_state.weekly_dialog_title = title
+        _weekly_action_dialog()
+    else:
+        st.caption("주간표의 수업 셀을 클릭하면 작은 팝업에서 결강·맞교환·보강 작업을 시작할 수 있습니다.")
+
 
 def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", height=700,
-                         key="weekly_matrix", title=None, show_week_dates=True):
-    """주간 5일×7교시 전용 렌더러.
+                         key="weekly_matrix", title=None, show_week_dates=True, use_test=False, open_dialog=True):
+    """주간 5일×7교시 인터랙티브 렌더러.
 
-    날짜별 화면으로 분리하지 않고 월~금 전체를 유지한다. 요일별 그룹을 시각적으로
-    분리하고, 교사/학급명과 두 줄의 헤더를 고정한다. 셀은 학급(또는 교사) / 과목 /
-    변경 아이콘으로 압축 표시한다. 학교 설정상 월·금이 6교시여도 주간 비교의 열 구조는
-    월~금 모두 1~7교시(35열)로 고정하고, 실제 데이터가 없는 교시는 빈 셀로 표시한다.
+    기존 HTML 링크 방식은 클릭할 때 URL 이동으로 앱이 첫 화면처럼 보일 수 있으므로 제거한다.
+    대신 Streamlit의 dataframe 단일 셀 선택 이벤트를 사용하고, 선택 결과는 native dialog에서 처리한다.
+    주간 35교시는 그대로 유지하며 요일 그룹 배경/경계와 변경 상태를 스타일링한다.
     """
     if matrix is None or matrix.empty:
         st.info("표시할 주간 시간표가 없습니다.")
-        return
-
+        return None
     monday = ref_date - timedelta(days=ref_date.weekday())
-    display_periods = range(1, MAX_PERIOD + 1)
     if title:
         st.markdown(f"#### {title}")
     if show_week_dates:
         dates = [monday + timedelta(days=i) for i in range(5)]
         st.caption(" · ".join(f"{DAYS[i]} {dates[i]:%Y.%m.%d}" for i in range(5)))
+    st.caption("💡 수업 셀을 클릭하면 페이지 이동 없이 작은 팝업에서 맞교환·결강·보강을 조작할 수 있습니다.")
 
-    import html
-    available_cols = {str(c) for c in matrix.columns}
-    safe_key = html.escape(str(key), quote=True)
-
-    header_day = [f"<th class='wk-name' rowspan='2'>{html.escape(str(row_label))}</th>"]
-    header_period = []
-    for day_index, day in enumerate(DAYS):
-        day_date = monday + timedelta(days=day_index)
-        day_class = f"day-{day_index}"
-        header_day.append(
-            f"<th class='wk-day {day_class}' colspan='{MAX_PERIOD}' title='{day_date:%Y-%m-%d}'>"
-            f"<span class='wk-day-name'>{html.escape(day)}요일</span>"
-            f"<span class='wk-day-date'>{day_date:%m/%d}</span></th>"
-        )
-        for pno in display_periods:
-            header_period.append(f"<th class='wk-period {day_class}'>{pno}</th>")
-
-    rows_html = []
-    for _, row in matrix.iterrows():
-        row_name = html.escape(str(row.get(row_label, "")), quote=True)
-        cells = [f"<th class='wk-name wk-row-name'>{row_name}</th>"]
-        for day_index, day in enumerate(DAYS):
-            day_class = f"day-{day_index}"
-            for pno in display_periods:
-                col = f"{day}{pno}"
-                raw = row.get(col, "") if col in available_cols else ""
-                cls, subject, marker, icon = _weekly_cell_parts(raw)
-                if not cls and not subject:
-                    start_class = " day-start" if pno == 1 else ""
-                    cells.append(f"<td class='wk-cell empty {day_class}{start_class}' aria-label='{day}{pno}교시 공강'></td>")
-                    continue
-                marker_class = {"교환":"swap", "테스트교환":"test", "보강":"sub", "시간강사":"part"}.get(marker, "normal")
-                tooltip = html.escape(str(raw), quote=True)
-                content = f"<span class='wk-class'>{html.escape(cls)}</span>"
-                if subject:
-                    content += f"<span class='wk-subject'>{html.escape(subject)}</span>"
-                if icon:
-                    content += f"<span class='wk-icon' aria-label='{html.escape(marker, quote=True)}'>{icon}</span>"
-                start_class = " day-start" if pno == 1 else ""
-                href = "?" + _weekly_query_params(key, row_label, str(row.get(row_label, "")), day_index, pno)
-                cells.append(f"<td class='wk-cell {marker_class} {day_class}{start_class}' title='{tooltip}'><a class='wk-cell-link' href='{href}'>{content}</a></td>")
-        rows_html.append("<tr>" + "".join(cells) + "</tr>")
-
-    col_html = "<col class='wk-name-col'>" + "".join(
-        f"<col class='wk-period-col day-{i}'>" for i in range(5) for _ in display_periods
+    display = _weekly_styled_matrix(matrix)
+    column_config = {}
+    if row_label in display.columns:
+        column_config[row_label] = st.column_config.TextColumn(row_label, width="small")
+    for day in DAYS:
+        for p in range(1, MAX_PERIOD + 1):
+            col = f"{day}{p}"
+            if col in display.columns:
+                column_config[col] = st.column_config.TextColumn(f"{day}{p}", width="small")
+    event = st.dataframe(
+        display,
+        hide_index=True,
+        use_container_width=True,
+        height=height,
+        key=key,
+        on_select="rerun",
+        selection_mode="single-cell",
+        column_config=column_config,
     )
-    table = f'''
-    <div id="{safe_key}" class="weekly-matrix-wrap" style="max-height:{int(height)}px">
-      <table class="weekly-matrix" aria-label="주간 시간표">
-        <colgroup>{col_html}</colgroup>
-        <thead><tr>{''.join(header_day)}</tr><tr>{''.join(header_period)}</tr></thead>
-        <tbody>{''.join(rows_html)}</tbody>
-      </table>
-    </div>
-    <style>
-      .weekly-matrix-wrap {{ width:100%; max-width:100%; max-height:{int(height)}px; overflow:auto; overscroll-behavior:contain; border:1px solid rgba(100,116,139,.38); border-radius:10px; background:var(--background-color,#fff); box-shadow:0 1px 3px rgba(15,23,42,.08); }}
-      .weekly-matrix {{ border-collapse:separate; border-spacing:0; table-layout:fixed; width:max-content; min-width:2360px; font-size:12px; line-height:1.15; }}
-      .weekly-matrix th,.weekly-matrix td {{ box-sizing:border-box; border-right:1px solid rgba(100,116,139,.18); border-bottom:1px solid rgba(100,116,139,.18); padding:3px 4px; text-align:center; vertical-align:middle; }}
-      .weekly-matrix .wk-name-col {{ width:96px; min-width:96px; }}
-      .weekly-matrix .wk-period-col {{ width:64px; min-width:64px; max-width:64px; }}
-      .weekly-matrix thead th {{ position:sticky; top:0; z-index:20; background:var(--secondary-background-color,#f8fafc); font-weight:700; }}
-      .weekly-matrix thead tr:nth-child(2) th {{ top:34px; z-index:19; }}
-      .weekly-matrix .wk-day {{ height:34px; min-width:448px; padding:4px 6px; font-size:13px; letter-spacing:.01em; border-bottom:1px solid rgba(71,85,105,.35); }}
-      .weekly-matrix .wk-day-name {{ display:inline-block; margin-right:7px; font-weight:800; }}
-      .weekly-matrix .wk-day-date {{ display:inline-block; font-size:11px; font-weight:600; opacity:.72; }}
-      .weekly-matrix .wk-period {{ width:64px; min-width:64px; max-width:64px; height:25px; padding:2px; font-weight:700; font-size:11px; }}
-      .weekly-matrix .wk-name {{ position:sticky; left:0; z-index:22; width:96px; min-width:96px; max-width:96px; background:var(--secondary-background-color,#f8fafc); text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-right:2px solid rgba(71,85,105,.35) !important; }}
-      .weekly-matrix thead .wk-name {{ z-index:26; }}
-      .weekly-matrix .wk-row-name {{ font-weight:700; }}
-      .weekly-matrix .wk-cell {{ width:64px; min-width:64px; max-width:64px; height:58px; overflow:hidden; padding:3px 4px; }}
-      .weekly-matrix .wk-cell-link {{ display:flex; width:100%; height:100%; flex-direction:column; justify-content:center; align-items:center; color:inherit; text-decoration:none; border-radius:5px; }}
-      .weekly-matrix .wk-cell-link:focus-visible {{ outline:2px solid rgba(37,99,235,.9); outline-offset:-2px; }}
-      .weekly-matrix tbody td.wk-cell:not(.empty):hover {{ background:rgba(59,130,246,.08); }}
-      .weekly-matrix .wk-class {{ display:block; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
-      .weekly-matrix .wk-subject {{ display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; white-space:normal; overflow:hidden; overflow-wrap:anywhere; max-height:28px; font-size:11px; margin-top:1px; }}
-      .weekly-matrix .wk-icon {{ display:block; height:16px; font-size:13px; line-height:16px; margin-top:1px; }}
-      .weekly-matrix .empty {{ background:transparent; }}
-      .weekly-matrix .day-0 {{ background:rgba(59,130,246,.025); }}
-      .weekly-matrix .day-1 {{ background:rgba(16,185,129,.025); }}
-      .weekly-matrix .day-2 {{ background:rgba(245,158,11,.025); }}
-      .weekly-matrix .day-3 {{ background:rgba(139,92,246,.025); }}
-      .weekly-matrix .day-4 {{ background:rgba(236,72,153,.025); }}
-      .weekly-matrix thead .day-0 {{ background:rgba(59,130,246,.12); }}
-      .weekly-matrix thead .day-1 {{ background:rgba(16,185,129,.12); }}
-      .weekly-matrix thead .day-2 {{ background:rgba(245,158,11,.13); }}
-      .weekly-matrix thead .day-3 {{ background:rgba(139,92,246,.12); }}
-      .weekly-matrix thead .day-4 {{ background:rgba(236,72,153,.12); }}
-      .weekly-matrix .day-start {{ border-left:2px solid rgba(71,85,105,.32) !important; }}
-      .weekly-matrix .wk-day.day-0,.weekly-matrix .wk-day.day-1,.weekly-matrix .wk-day.day-2,.weekly-matrix .wk-day.day-3,.weekly-matrix .wk-day.day-4 {{ border-left:3px solid rgba(71,85,105,.42); }}
-      .weekly-matrix .swap {{ box-shadow:inset 0 0 0 2px rgba(239,68,68,.82); }}
-      .weekly-matrix .test {{ box-shadow:inset 0 0 0 2px rgba(124,58,237,.82); }}
-      .weekly-matrix .sub {{ box-shadow:inset 0 0 0 2px rgba(22,163,74,.82); }}
-      .weekly-matrix .part {{ box-shadow:inset 0 0 0 2px rgba(217,119,6,.82); }}
-      .weekly-matrix tbody tr:hover .wk-name {{ background:rgba(100,116,139,.12); }}
-      .weekly-matrix tbody td.wk-cell:hover {{ outline:2px solid rgba(59,130,246,.55); outline-offset:-2px; filter:brightness(.985); }}
-      .weekly-matrix tr:last-child td,.weekly-matrix tr:last-child th {{ border-bottom:0; }}
-      .weekly-matrix th:last-child,.weekly-matrix td:last-child {{ border-right:0; }}
-    </style>
-    '''
-    st.markdown(table, unsafe_allow_html=True)
+    try:
+        selected_cells = event.selection.cells
+    except Exception:
+        selected_cells = []
+    lesson = _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, use_test=use_test)
+    if lesson:
+        st.session_state.weekly_selected_lesson = lesson
+        st.session_state.weekly_dialog_use_test = bool(use_test)
+        st.session_state.weekly_dialog_title = title or "주간표 작업"
+        if open_dialog:
+            _weekly_action_dialog()
+    return lesson
+
 
 def get_teacher_week_view(teacher: str, ref_date: date, use_test=False):
     monday=ref_date-timedelta(days=ref_date.weekday()); week_dates=[monday+timedelta(days=i) for i in range(5)]
@@ -3330,13 +3417,11 @@ if "시간표 조회" in tab_map:
         elif view == "교사별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_week_ref")
             render_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', height=650, key='view_teacher_week_matrix', title='교사별 주간 시간표')
-            render_weekly_selection_panel(ref, use_test=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
         elif view == "학급별 주간 매트릭스":
             ref=calendar_picker("주간 기준일",date.today(),key="view_class_ref")
             render_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', height=650, key='view_class_week_matrix', title='학급별 주간 시간표')
-            render_weekly_selection_panel(ref, use_test=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_class')
         else:
@@ -3787,7 +3872,7 @@ if "시간표 변경 테스트용" in tab_map:
         ver = st.session_state.get("_data_version", 0)
         test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
-        render_weekly_matrix(test_matrix, test_week_anchor, row_label="교사명", height=420, key="test_week_preview", title="테스트 적용 주간표")
+        render_weekly_matrix(test_matrix, test_week_anchor, row_label="교사명", height=420, key="test_week_preview", title="테스트 적용 주간표", use_test=True, open_dialog=False)
         st.markdown("#### 수업 선택 — 아래 선택표에서 셀을 클릭")
         test_pick_a = None
         if test_matrix.empty:
