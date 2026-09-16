@@ -10,7 +10,7 @@
 import io
 import copy
 import uuid
-import time
+import time as _time
 from datetime import date, datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from collections import defaultdict
@@ -2441,13 +2441,13 @@ def _weekly_fragment_rerun():
 
 def _weekly_timed_status(label):
     """팝업 내부의 무거운 작업에 로딩 표시와 처리 시간을 제공한다."""
-    started = time.perf_counter()
+    started = _time.perf_counter()
     status = st.status(f"⏳ {label} · 처리 중...", expanded=True)
     return started, status
 
 
 def _weekly_finish_status(started, status, label, *, ok=True):
-    elapsed = time.perf_counter() - started
+    elapsed = _time.perf_counter() - started
     status.update(
         label=f"✅ {label} 완료 · {elapsed:.2f}초" if ok else f"⚠️ {label} 종료 · {elapsed:.2f}초",
         state="complete" if ok else "error",
