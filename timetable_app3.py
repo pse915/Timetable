@@ -4156,7 +4156,6 @@ if "시간표 변경 테스트용" in tab_map:
             st.success("테스트 상태가 초기화되었습니다.")
             st.rerun()
 
-        tlist = st.session_state.teachers["교사명"].tolist()
         st.markdown("#### 수업 선택 — **현재 적용 + 테스트 변경 결과**에서 수업 셀 하나를 클릭")
         st.caption("실제 변경과 현재까지의 테스트 변경을 모두 반영합니다. 선택한 현재 상태를 기준으로 다음 1:1 가능 위치를 계산합니다.")
         test_week_anchor = calendar_picker("테스트 검색 기준 주", _today_kst(), key="test_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표를 테스트 기준으로 사용합니다.")
@@ -4169,13 +4168,6 @@ if "시간표 변경 테스트용" in tab_map:
             test_matrix, test_week_anchor, row_label="교사명",
             key="test_week_preview", title="테스트 적용 주간표", use_test=True
         )
-
-        st.markdown("#### 테스트 적용 후 주간표 미리보기")
-        t_preview = st.selectbox("미리볼 교사", tlist, key="test_preview_t")
-        ref_preview = calendar_picker("미리보기 기준일", _today_kst(), key="test_preview_d")
-        grid, dates = get_teacher_week_view(t_preview, ref_preview, use_test=True)
-        st.caption(f"{dates[0]} ~ {dates[4]}  (테스트 반영됨)")
-        st.dataframe(grid, use_container_width=True, height=350, hide_index=True)
 
         if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
