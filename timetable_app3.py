@@ -1926,10 +1926,18 @@ def get_single_lesson_1to1_candidates(
     """
     source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
     source_day = WEEKDAY_KR[source_date.weekday()]
+    # 선택한 수업보다 이전 날짜는 교환 후보에서 제외한다.
+    # 현재 주간을 유지하되, 선택일 이후의 평일만 후보로 검색한다.
+    # 예: 수요일 수업을 선택하면 월/화 수업이 후보로 다시 나타나지 않는다.
     monday = source_date - timedelta(days=source_date.weekday())
-    search_dates = [monday + timedelta(days=i) for i in range(5)]
+    friday = monday + timedelta(days=4)
+    search_dates = [
+        source_date + timedelta(days=i)
+        for i in range((friday - source_date).days + 1)
+        if (source_date + timedelta(days=i)).weekday() < 5
+    ]
     if future_days > 0:
-        last_weekday = search_dates[-1]
+        last_weekday = friday
         search_dates.extend(
             last_weekday + timedelta(days=i)
             for i in range(1, future_days + 1)
@@ -1959,7 +1967,8 @@ def get_single_lesson_1to1_candidates(
 
     for target_date in search_dates:
         target_str = target_date.strftime("%Y-%m-%d")
-        if target_str == source_str:
+        # source_date 이전 날짜는 검색 대상이 아니다.
+        if target_str <= source_str:
             continue
         target_day = WEEKDAY_KR[target_date.weekday()]
         target_tt = get_effective_timetable_for_date(target_str, ver, use_test=use_test)
@@ -2022,7 +2031,8 @@ def get_single_lesson_linked_cycles(
     target_slots = []
     for target_date in search_dates:
         target_str = target_date.strftime("%Y-%m-%d")
-        if target_str == source_str:
+        # source_date 이전 날짜는 검색 대상이 아니다.
+        if target_str <= source_str:
             continue
         target_day = WEEKDAY_KR[target_date.weekday()]
         target_tt = get_effective_timetable_for_date(target_str, ver, use_test=use_test)
@@ -2401,7 +2411,9 @@ def _filter_current_swap_candidates(df, lesson, *, use_test=False):
         tt = str(r.get("상대교사", "")).strip()
         tc = str(r.get("상대학급", "")).strip()
         ts = str(r.get("상대과목", "")).strip()
-        if not td or not tt or tp <= 0 or not tc or not ts or td == source_date:
+        # 선택 수업보다 과거인 날짜는 오래된 후보로 간주하여 제거한다.
+        if (not td or not tt or tp <= 0 or not tc or not ts
+                or td == source_date or td < source_date):
             continue
         if td not in target_cache:
             target_cache[td] = get_effective_timetable_for_date(td, ver, use_test=bool(use_test))
@@ -2548,7 +2560,8 @@ def _weekly_action_dialog():
                 f"{row['상대교사']} · {row['상대학급']} {row['상대과목']}"
                 for _, row in shortlist.iterrows()
             ]
-            pick_label = st.selectbox("교환할 수업", labels, key="weekly_dialog_swap_pick")
+            dialog_instance = int(st.session_state.get("weekly_dialog_instance", 0) or 0)
+            pick_label = st.selectbox("교환할 수업", labels, key=f"weekly_dialog_swap_pick_{dialog_instance}")
             picked = shortlist.iloc[labels.index(pick_label)]
             st.caption(
                 f"상대 수업: **{picked['상대교사']} · {picked['이동희망일']} · "
@@ -2742,6 +2755,14 @@ def render_standard_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_l
     )
 
 
+def _weekly_selection_signature(selected_cells):
+    """주간표 dataframe 선택값을 안정적으로 비교하기 위한 불변 signature."""
+    try:
+        return tuple((int(r), str(c)) for r, c in selected_cells)
+    except Exception:
+        return tuple()
+
+
 def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", height=700,
                          key="weekly_matrix", title=None, show_week_dates=True, use_test=False, open_dialog=True):
     """주간 5일×7교시 인터랙티브 렌더러.
@@ -2812,6 +2833,19 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
             selected_cells = list(event.selection.cells)
         except Exception:
             selected_cells = []
+
+        # st.tabs() 안에서는 모든 탭의 dataframe이 같은 실행에서 렌더링된다.
+        # 따라서 각 dataframe의 selection이 session에 남아 있으면, 클릭하지 않은
+        # 다른 표가 '마지막 클릭'처럼 다시 전달되어 이전 수업으로 팝업이 바뀌는
+        # 문제가 생길 수 있다. 각 widget key별 마지막 selection을 기억하고,
+        # 실제로 selection이 변경된 widget만 새 선택으로 인정한다.
+        selection_seen_key = f"_weekly_selection_seen__{widget_key}"
+        current_signature = _weekly_selection_signature(selected_cells)
+        previous_signature = st.session_state.get(selection_seen_key, tuple())
+        selection_changed = current_signature != previous_signature
+        st.session_state[selection_seen_key] = current_signature
+        if not selection_changed:
+            selected_cells = []
     except TypeError:
         # 구버전 Streamlit에서는 selection API가 없을 수 있다.
         # 이 경우 표 자체는 정상 표시하고 URL 이동 방식으로 대체하지 않는다.
@@ -2838,6 +2872,9 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         st.session_state.pop("weekly_dialog_extra_days_input", None)
         st.session_state.weekly_dialog_use_test = bool(use_test)
         st.session_state.weekly_dialog_title = title or "주간표 작업"
+        # 새 수업을 클릭할 때 팝업 내부의 후보 selectbox도 새 위젯으로 만든다.
+        # 이전 수업의 선택 후보가 새 수업에 그대로 남는 것을 방지한다.
+        st.session_state["weekly_dialog_instance"] = int(st.session_state.get("weekly_dialog_instance", 0) or 0) + 1
         st.session_state.weekly_dialog_open = bool(open_dialog)
         # 중요: dialog는 이 함수에서 직접 렌더링하지 않는다.
     # st.tabs()는 모든 탭의 본문을 같은 실행에서 렌더링하므로, 여러 주간표가
