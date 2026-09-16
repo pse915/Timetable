@@ -4362,12 +4362,38 @@ if "시간표 변경 테스트용" in tab_map:
 if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
         st.subheader("📅 변경된 교사 주간 시간표")
-        ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
-        changed = get_changed_teachers_for_week(ref)
+
+        # 상단 영역은 달력과 변경 교사 목록을 좌우로 나눈다.
+        # 달력은 필요한 만큼만 사용하고, 남는 가로 공간에는 변경 교사를 배치해
+        # 날짜 선택과 대상 교사 확인을 한 화면에서 끝낼 수 있도록 한다.
+        top_calendar, top_teachers = st.columns([0.42, 0.58], vertical_alignment="top")
+        with top_calendar:
+            ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
+        with top_teachers:
+            changed = get_changed_teachers_for_week(ref)
+            st.markdown(
+                f"<div style='font-size:.82rem;font-weight:650;color:#374151;margin:.05rem 0 .45rem'>"
+                f"변경 교사 <span style='color:#6b7280;font-weight:500'>{len(changed)}명</span></div>",
+                unsafe_allow_html=True,
+            )
+            if changed:
+                # 이름은 3열로 배치해 긴 한 줄 목록보다 빠르게 훑을 수 있게 한다.
+                teacher_cols = st.columns(3)
+                for i, teacher_name in enumerate(changed):
+                    with teacher_cols[i % 3]:
+                        st.markdown(
+                            f"<div style='padding:.28rem .45rem;margin:0 0 .28rem;"
+                            f"border:1px solid #e5e7eb;border-radius:7px;background:#fafafa;"
+                            f"font-size:.78rem;color:#374151;white-space:nowrap;overflow:hidden;"
+                            f"text-overflow:ellipsis'>{teacher_name}</div>",
+                            unsafe_allow_html=True,
+                        )
+            else:
+                st.caption("이번 주차 변경 교사 없음")
+
         if not changed:
-            st.success("이번 주차 변경 교사 없음")
+            st.info("이번 주차 변경 교사 없음")
         else:
-            st.info(f"변경 교사 {len(changed)}명: {', '.join(changed)}")
             # 변경 교사마다 별도의 매트릭스를 만들지 않고, 한 개의 주간표에
             # 교사별 1행씩 배치한다. 기존 방식은 교사 수만큼 표가 반복되어
             # 화면이 길어지고, 같은 헤더가 계속 반복되어 가독성이 떨어졌다.
@@ -4871,3 +4897,4 @@ if "📑 회원별 탭 권한 관리" in tab_map:
 # 방금 클릭한 셀이 팝업에 표시된다. 또한 주간표 렌더러 안에서 dialog가 중복 생성되지 않는다.
 if st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
     _weekly_action_dialog()
+
