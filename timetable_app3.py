@@ -35,14 +35,26 @@ st.markdown("""
         border-bottom: 1px solid #cbd5e1 !important;
     }
     /* 모든 주간 교사 매트릭스: 셀 내부 줄바꿈과 충분한 높이를 강제 */
-    [data-testid="stDataFrame"] [role="gridcell"] {
+    /* Streamlit DataFrame의 실제 텍스트 자식까지 줄바꿈을 강제한다.
+       일부 Streamlit 버전은 gridcell 자체가 아니라 내부 div/span에
+       white-space: nowrap를 적용하므로 부모만 바꾸면 줄바꿈이 되지 않는다. */
+    [data-testid="stDataFrame"] [role="gridcell"],
+    [data-testid="stDataFrame"] [role="gridcell"] > div,
+    [data-testid="stDataFrame"] [role="gridcell"] div,
+    [data-testid="stDataFrame"] [role="gridcell"] span {
         white-space: pre-wrap !important;
-        overflow: hidden !important;
+        overflow: visible !important;
         text-overflow: clip !important;
-        line-height: 1.18 !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
+        line-height: 1.12 !important;
         vertical-align: middle !important;
-        padding-top: 4px !important;
-        padding-bottom: 4px !important;
+    }
+    [data-testid="stDataFrame"] [role="gridcell"] {
+        height: auto !important;
+        min-height: 58px !important;
+        padding-top: 5px !important;
+        padding-bottom: 5px !important;
     }
     [data-testid="stDataFrame"] [role="columnheader"] {
         white-space: nowrap !important;
@@ -621,13 +633,11 @@ def weekly_matrix_column_config(df):
 
 
 def render_interactive_weekly_matrix(df, *, key, height=620, caption=None):
-    """
-    모든 셀 선택형 교사 주간 매트릭스를 공통 HTML 매트릭스로 표시한다.
+    """주간 교사 매트릭스 하나로 표시와 셀 선택을 동시에 처리한다.
 
-    중요: 주간 구조(교사명 + 월1~금7)는 절대로 바꾸지 않는다.
-    화면에 보이는 주 표는 HTML로 렌더링하여 학급/과목을 2줄로 강제하고,
-    실제 셀 선택은 바로 아래의 Streamlit 선택용 그리드에서 수행한다.
-    이렇게 하면 st.dataframe의 브라우저/Streamlit 버전에 따른 줄바꿈·열 폭 문제를 피할 수 있다.
+    주간 구조(교사명 + 월1~금7)는 그대로 유지한다. 별도의 '보기 표 +
+    선택 표'를 중복 출력하지 않고, 하나의 Streamlit 선택 그리드만 사용한다.
+    셀 값은 학급/과목/변경상태를 줄바꿈으로 넣어 한 셀에서 바로 읽고 클릭할 수 있게 한다.
     """
     if df is None or df.empty:
         st.info("표시할 시간표가 없습니다.")
@@ -635,70 +645,33 @@ def render_interactive_weekly_matrix(df, *, key, height=620, caption=None):
     if caption:
         st.caption(caption)
 
-    # 1) 사용자에게 보여주는 주간표: HTML/CSS로 강제 줄바꿈
-    columns = list(df.columns)
-    display_df = df.copy()
-    html_parts = [
-        '<div class="weekly-matrix-wrap interactive-weekly-matrix">',
-        '<table class="weekly-matrix interactive-weekly-table"><thead><tr>'
-    ]
-    for i, col in enumerate(columns):
-        cls = "teacher-col" if i == 0 else "period-col"
-        html_parts.append(f'<th class="{cls}">{escape(str(col))}</th>')
-    html_parts.append('</tr></thead><tbody>')
-
-    for _, row in display_df.iterrows():
-        html_parts.append('<tr>')
-        for i, col in enumerate(columns):
-            if i == 0:
-                teacher = escape(str(row.get(col, "")))
-                html_parts.append(f'<td class="teacher-col"><strong>{teacher}</strong></td>')
-                continue
-            c, subj, change = _weekly_cell_lines(row.get(col, ""))
-            if not c and not subj and not change:
-                html_parts.append('<td class="empty period-col">·</td>')
-            else:
-                lines = []
-                if c:
-                    lines.append(f'<div class="class-line">{escape(c)}</div>')
-                if subj:
-                    lines.append(f'<div class="subject-line">{escape(subj)}</div>')
-                if change:
-                    lines.append(f'<div class="change-line">{escape(change)}</div>')
-                html_parts.append(f'<td class="period-col">{"".join(lines)}</td>')
-        html_parts.append('</tr>')
-    html_parts.append('</tbody></table></div>')
-    st.markdown("".join(html_parts), unsafe_allow_html=True)
-
-    # 2) 실제 선택용 그리드: 선택 기능은 그대로 유지한다.
-    #    보기 표와 분리하므로 선택 그리드가 주간표의 가독성을 망치지 않는다.
-    with st.expander("🖱️ 수업 셀 선택하기 (클릭하여 작업 대상 지정)", expanded=False):
-        st.caption("위의 읽기 쉬운 주간표는 표시 전용입니다. 작업할 수업을 지정하려면 이 영역을 열고 동일한 주간 매트릭스의 셀을 클릭하세요.")
-        matrix = compact_interactive_weekly_matrix(df)
-        try:
-            event = st.dataframe(
-                matrix,
-                hide_index=True,
-                use_container_width=True,
-                height=min(max(height, 360), 620),
-                key=f"{key}_selector",
-                on_select="rerun",
-                selection_mode="single-cell",
-                row_height=58,
-                column_config=weekly_matrix_column_config(matrix),
-            )
-            return event
-        except TypeError:
-            # 구버전 Streamlit 호환: row_height/column_config 등의 선택적 인자가 없는 경우
-            return st.dataframe(
-                matrix,
-                hide_index=True,
-                use_container_width=True,
-                height=min(max(height, 360), 620),
-                key=f"{key}_selector_fallback",
-                on_select="rerun",
-                selection_mode="single-cell",
-            )
+    matrix = compact_interactive_weekly_matrix(df)
+    # 선택용 데이터프레임 자체가 곧 화면에 보이는 주간표다.
+    # hidden/expander를 사용하지 않아 동일한 표를 두 번 렌더링하지 않는다.
+    try:
+        event = st.dataframe(
+            matrix,
+            hide_index=True,
+            use_container_width=True,
+            height=min(max(height, 420), 760),
+            key=key,
+            on_select="rerun",
+            selection_mode="single-cell",
+            row_height=64,
+            column_config=weekly_matrix_column_config(matrix),
+        )
+    except TypeError:
+        # 구버전 Streamlit 호환
+        event = st.dataframe(
+            matrix,
+            hide_index=True,
+            use_container_width=True,
+            height=min(max(height, 420), 760),
+            key=key,
+            on_select="rerun",
+            selection_mode="single-cell",
+        )
+    return event
 
 
 def get_all_teacher_names():
@@ -3474,7 +3447,7 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         st.caption("현재 적용된 맞교환·보강·시간강사 변경을 반영합니다. 선택한 현재 수업 상태를 기준으로 1:1 가능 위치를 계산합니다.")
         week_anchor = calendar_picker("검색 기준 주", date.today(), key="week_1to1_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표가 아래 매트릭스에 표시됩니다.")
         ver = st.session_state.get("_data_version", 0)
-        lesson_matrix = compact_interactive_weekly_matrix(effective_teacher_matrix(week_anchor, ver, use_test=False).copy())
+        lesson_matrix = effective_teacher_matrix(week_anchor, ver, use_test=False).copy()
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 시간강사 대체는 교사명(원본교사) 형태")
 
         if lesson_matrix.empty:
@@ -3709,7 +3682,7 @@ if "시간표 변경 테스트용" in tab_map:
         st.caption("실제 변경과 현재까지의 테스트 변경을 모두 반영합니다. 선택한 현재 상태를 기준으로 다음 1:1 가능 위치를 계산합니다.")
         test_week_anchor = calendar_picker("테스트 검색 기준 주", date.today(), key="test_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표를 테스트 기준으로 사용합니다.")
         ver = st.session_state.get("_data_version", 0)
-        test_matrix = compact_interactive_weekly_matrix(effective_teacher_matrix(test_week_anchor, ver, use_test=True))
+        test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
         test_pick_a = None
         if test_matrix.empty:
