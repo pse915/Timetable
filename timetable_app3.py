@@ -2265,17 +2265,27 @@ def _weekly_styled_matrix(matrix: pd.DataFrame):
 def _clear_weekly_selection():
     st.session_state.pop("weekly_selected_lesson", None)
     st.session_state.pop("weekly_swap_source", None)
+    st.session_state.pop("weekly_dialog_action_mode", None)
+    st.session_state.pop("weekly_dialog_open", None)
 
 
-@st.dialog("🎯 선택한 수업", width="large")
+@st.dialog("🎯 수업 작업", width="large")
 def _weekly_action_dialog():
+    """주간표 셀을 클릭했을 때 바로 작업 메뉴를 보여주는 컨텍스트 팝업.
+
+    더 이상 '교환 출발점'을 별도로 지정하지 않는다.
+    선택한 수업을 기준으로 1:1 후보와 연계 순환 후보를 즉시 계산하고,
+    필요한 경우 후보를 선택해 바로 실행/테스트한다.
+    """
     lesson = st.session_state.get("weekly_selected_lesson")
     if not lesson:
         st.info("선택한 수업이 없습니다.")
         return
+
     use_test = bool(st.session_state.get("weekly_dialog_use_test", False))
     title = st.session_state.get("weekly_dialog_title", "주간표 작업")
     status = lesson.get("변경유형") or "원본"
+
     st.markdown(f"### {title}")
     st.info(
         f"**{lesson['일자']} ({lesson['요일']}) · {lesson['교사명']} · "
@@ -2289,32 +2299,127 @@ def _weekly_action_dialog():
             f"{lesson.get('원본교시') or '-'}교시"
         )
 
-    source = st.session_state.get("weekly_swap_source")
-    if source:
-        st.warning(
-            f"🔄 맞교환 출발점: {source['일자']} {source['요일']} {source['교시']}교시 · "
-            f"{source['교사명']} · {source['학급']} · {source['과목']}"
-        )
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button("🔄 이 수업을 교환 출발점으로", key="dlg_set_swap_source", use_container_width=True):
-            st.session_state.weekly_swap_source = lesson.copy()
+    ver = st.session_state.get("_data_version", 0)
+    extra_days = st.session_state.get("weekly_dialog_extra_days", 7)
+    try:
+        extra_days = int(extra_days)
+    except Exception:
+        extra_days = 7
+
+    # 팝업 안에서 바로 후보를 계산한다. 출발점 설정 단계가 없다.
+    df_swap = get_single_lesson_1to1_candidates(
+        lesson["교사명"], lesson["일자"], safe_int(lesson["교시"]),
+        str(lesson["학급"]), str(lesson["과목"]),
+        future_days=extra_days, version=ver, use_test=use_test
+    )
+    cycles, cycle_msg = get_single_lesson_linked_cycles(
+        lesson["교사명"], lesson["일자"], safe_int(lesson["교시"]),
+        str(lesson["학급"]), str(lesson["과목"]),
+        future_days=extra_days, version=ver, min_cycle=2, max_cycle=3, use_test=use_test
+    )
+
+    # 검색 범위는 팝업 안에서 바로 조정할 수 있다.
+    extra_days = st.slider(
+        "미래 추가 검색 일수", 0, 14, extra_days,
+        key="weekly_dialog_extra_days_input",
+        help="선택한 수업 이후 평일을 얼마나 더 검색할지 정합니다."
+    )
+    if extra_days != st.session_state.get("weekly_dialog_extra_days"):
+        st.session_state.weekly_dialog_extra_days = extra_days
+        st.rerun()
+
+    # ================================================================
+    # ① 우클릭 메뉴처럼 핵심 작업을 바로 선택
+    # ================================================================
+    action_mode = st.session_state.get("weekly_dialog_action_mode", "swap")
+    a1, a2 = st.columns(2)
+    with a1:
+        if st.button("🔄 1:1 맞교환", type="primary" if action_mode == "swap" else "secondary", key="dlg_action_swap", use_container_width=True):
+            st.session_state.weekly_dialog_action_mode = "swap"
             st.rerun()
-    with c2:
-        can_swap = bool(source) and (source["일자"], source["교사명"], source["교시"]) != (lesson["일자"], lesson["교사명"], lesson["교시"])
-        if st.button("✅ 현재 셀과 맞교환", key="dlg_execute_swap", disabled=not can_swap, use_container_width=True):
-            ok = do_swap(source, lesson, source["일자"], lesson["일자"], is_test=use_test)
-            if ok:
-                st.session_state.pop("weekly_swap_source", None)
-                st.session_state.pop("weekly_selected_lesson", None)
-                st.success("맞교환이 반영되었습니다.")
-                st.rerun()
-    with c3:
-        if st.button("✖ 선택/출발점 해제", key="dlg_clear_selection", use_container_width=True):
-            _clear_weekly_selection()
+    with a2:
+        if st.button("🔗 연계 순환 테스트", type="primary" if action_mode == "cycle" else "secondary", key="dlg_action_cycle", use_container_width=True):
+            st.session_state.weekly_dialog_action_mode = "cycle"
             st.rerun()
 
-    with st.expander("📌 이 수업을 결강으로 등록", expanded=False):
+    # ================================================================
+    # ② 1:1 맞교환
+    # ================================================================
+    if action_mode == "swap":
+        if df_swap.empty:
+            st.info("현재 조건에서 가능한 1:1 맞교환 위치가 없습니다.")
+        else:
+            st.caption(f"가능한 1:1 교환 후보 {len(df_swap)}건 · 동일 학급을 우선 검색했습니다.")
+            labels = []
+            for i, row in df_swap.head(12).iterrows():
+                labels.append(
+                    f"{row['이동희망일']} ({row['이동요일']}) · {row['이동요일']}{safe_int(row['원본교시'])}교시 · "
+                    f"{row['상대교사']} · {row['상대학급']} {row['상대과목']}"
+                )
+            pick_label = st.selectbox(
+                "교환할 수업",
+                labels,
+                key="weekly_dialog_swap_pick"
+            )
+            picked_idx = labels.index(pick_label)
+            picked = df_swap.head(12).iloc[picked_idx]
+            st.caption(
+                f"상대 수업: **{picked['상대교사']} · {picked['이동희망일']} · "
+                f"{safe_int(picked['원본교시'])}교시 · {picked['상대학급']} · {picked['상대과목']}**"
+            )
+            b_info = {
+                "교사명": str(picked["상대교사"]),
+                "일자": str(picked["이동희망일"]),
+                "요일": str(picked["이동요일"]),
+                "교시": safe_int(picked["원본교시"]),
+                "학급": str(picked["상대학급"]),
+                "과목": str(picked["상대과목"]),
+            }
+            button_label = "🧪 1:1 맞교환 테스트" if use_test else "✅ 1:1 맞교환 실행"
+            if st.button(button_label, type="primary", key="dlg_direct_swap", use_container_width=True):
+                ok = do_swap(
+                    lesson, b_info, lesson["일자"], b_info["일자"],
+                    is_test=use_test
+                )
+                if ok:
+                    st.session_state.pop("weekly_selected_lesson", None)
+                    st.success("테스트 맞교환이 적용되었습니다." if use_test else "1:1 맞교환이 반영되었습니다.")
+                    st.rerun()
+                else:
+                    st.error("현재 상태에서는 이 1:1 맞교환을 적용할 수 없습니다. 최신 시간표 상태를 다시 확인해 주세요.")
+
+    # ================================================================
+    # ③ 연계 순환 테스트
+    # ================================================================
+    if action_mode == "cycle":
+        st.caption(cycle_msg or "선택한 수업을 시작점으로 연계 순환 가능성을 검사합니다.")
+        if not cycles:
+            st.info("현재 조건에서 가능한 2·3인 연계 순환 경로가 없습니다.")
+        else:
+            for idx, cyc in enumerate(cycles[:6]):
+                with st.container(border=True):
+                    st.markdown(
+                        f"**{'🔗' if cyc['length'] > 2 else '↔️'} "
+                        f"{cyc['length']}인 순환 · 점수 {cyc.get('score', '')}**"
+                    )
+                    st.caption(cyc.get("path_desc", ""))
+                    st.caption("학급의 담당교사·과목·시수가 보존되는 순환 후보입니다.")
+                    if st.button(
+                        "🧪 이 연계 순환 테스트",
+                        key=f"dlg_cycle_test_{idx}",
+                        use_container_width=True
+                    ):
+                        ok = apply_cycle_swaps(cyc["moves"], is_test=True)
+                        if ok is not False:
+                            st.session_state["test_has_cycle"] = True
+                            st.session_state.pop("weekly_selected_lesson", None)
+                            st.success(f"테스트 {cyc['length']}인 연계 순환이 적용되었습니다. 실제 저장되지는 않습니다.")
+                            st.rerun()
+
+    # ================================================================
+    # ③ 결강 / 보강
+    # ================================================================
+    with st.expander("📌 결강으로 등록", expanded=False):
         r1, r2 = st.columns([1, 2])
         with r1:
             reason = st.selectbox("사유", ABSENCE_REASONS, key="dlg_abs_reason")
@@ -2360,6 +2465,9 @@ def _weekly_action_dialog():
             else:
                 st.caption("이 수업에 등록된 결강이 없습니다. 결강 등록 후 바로 보강을 배정할 수 있습니다.")
 
+    if st.button("✖ 닫기", key="dlg_close", use_container_width=True):
+        _clear_weekly_selection()
+        st.rerun()
 
 def _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, *, use_test=False):
     """st.dataframe의 단일 셀 선택을 현재 유효 시간표의 실제 수업으로 해석한다."""
@@ -2481,10 +2589,15 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
     if lesson:
         # 선택 상태는 URL이 아니라 session_state에만 저장한다.
         st.session_state.weekly_selected_lesson = lesson
+        st.session_state.weekly_dialog_action_mode = "swap"
         st.session_state.weekly_dialog_use_test = bool(use_test)
         st.session_state.weekly_dialog_title = title or "주간표 작업"
+        st.session_state.weekly_dialog_open = bool(open_dialog)
         if open_dialog:
             _weekly_action_dialog()
+    elif open_dialog and st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
+        # 팝업 내부 버튼을 눌러 rerun된 경우에도 선택 수업을 유지하여 같은 팝업을 다시 연다.
+        _weekly_action_dialog()
     return lesson
 
 
@@ -3870,101 +3983,14 @@ if "시간표 변경 테스트용" in tab_map:
         ver = st.session_state.get("_data_version", 0)
         test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
-        render_weekly_matrix(test_matrix, test_week_anchor, row_label="교사명", height=420, key="test_week_preview", title="테스트 적용 주간표", use_test=True, open_dialog=False)
-        st.markdown("#### 수업 선택 — 아래 선택표에서 셀을 클릭")
-        test_pick_a = None
-        if test_matrix.empty:
-            st.warning("테스트용 시간표 데이터가 없습니다.")
-        else:
-            test_event = st.dataframe(
-                test_matrix, hide_index=True, use_container_width=True, height=520,
-                key="test_lesson_matrix", on_select="rerun", selection_mode="single-cell"
-            )
-            test_cells = test_event.selection.cells
-            if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
-                st.caption("※ 원본 선택표에는 테스트 결과를 반영하지 않습니다. 이미 테스트에 사용된 수업을 다시 원본으로 선택할 수 없습니다.")
-            test_extra_days = st.slider("테스트 미래 추가 검색 일수", 0, 14, 7, key="test_extra_days")
-            if test_cells:
-                test_row_idx, test_column = test_cells[0]
-                test_day = str(test_column)[:1]
-                test_period = safe_int(str(test_column)[1:])
-                test_value = str(test_matrix.iloc[test_row_idx][test_column]).strip()
-                if test_day in DAYS and test_period >= 1 and test_value:
-                    test_teacher = str(test_matrix.iloc[test_row_idx]["교사명"]).strip()
-                    test_monday = test_week_anchor - timedelta(days=test_week_anchor.weekday())
-                    test_date = test_monday + timedelta(days=DAYS.index(test_day))
-                    test_date_str = test_date.strftime("%Y-%m-%d")
-                    test_tt = get_effective_timetable_for_date(test_date_str, ver, use_test=True)
-                    test_lesson = test_tt[
-                        (test_tt["교사명"] == test_teacher)
-                        & (test_tt["요일"] == test_day)
-                        & (test_tt["교시"] == test_period)
-                    ]
-                    if not test_lesson.empty:
-                        test_lesson = test_lesson.iloc[0]
-                        test_pick_a = {
-                            "교사명": test_teacher, "일자": test_date_str, "요일": test_day,
-                            "교시": test_period, "학급": test_lesson["학급"], "과목": test_lesson["과목"]
-                        }
-                        origin_info = _effective_swap_origin_info(test_teacher, test_date_str, test_period, use_test=True)
-                        sub_info = _effective_sub_origin_info(test_teacher, test_date_str, test_period)
-                        info_lines = [f"**현재 적용 테스트 수업**: {test_date_str} ({test_day}) {test_period}교시 · {test_lesson['학급']} · {test_lesson['과목']}"]
-                        if origin_info:
-                            info_lines.append(f"🔄 교환 변경 이력: {origin_info}")
-                        if sub_info:
-                            info_lines.append(f"🟢 보강 처리 이력: {sub_info}")
-                        st.info("  \n".join(info_lines))
-                else:
-                    st.info("교사명이나 빈칸이 아닌 수업 셀을 클릭하세요.")
-            else:
-                st.info("매트릭스에서 테스트할 원본 수업 셀 하나를 클릭하세요.")
-
-        if test_pick_a:
-            df_swap = get_single_lesson_1to1_candidates(
-                test_pick_a["교사명"], test_pick_a["일자"], test_pick_a["교시"],
-                str(test_pick_a["학급"]), str(test_pick_a["과목"]),
-                future_days=test_extra_days, version=ver, use_test=True
-            )
-            cycles, cycle_msg = ([], "")
-            if df_swap.empty:
-                cycles, cycle_msg = get_single_lesson_linked_cycles(
-                    test_pick_a["교사명"], test_pick_a["일자"], test_pick_a["교시"],
-                    str(test_pick_a["학급"]), str(test_pick_a["과목"]),
-                    future_days=test_extra_days, version=ver, min_cycle=2, max_cycle=3, use_test=True
-                )
-
-            t1, t2 = st.tabs(["1:1 맞교환 테스트", "연계 순환 교환 테스트"])
-            with t1:
-                if df_swap.empty:
-                    st.info("동일 학급 1:1 후보 없음")
-                else:
-                    for idx, row in df_swap.iterrows():
-                        label = f"{row['이동희망일']} ({row['이동요일']}) 현재 {row['원본교시']}교시 · {row['상대교사']} · {row['상대수업']}"
-                        if st.button(f"[테스트] {label}", key=f"test_matrix_swap_{idx}"):
-                            b_info = {
-                                "교사명": row["상대교사"], "일자": row["이동희망일"], "요일": row["이동요일"],
-                                "교시": safe_int(row["원본교시"]),
-                                "학급": str(row["상대수업"]).split()[0],
-                                "과목": " ".join(str(row["상대수업"]).split()[1:])
-                            }
-                            if do_swap(test_pick_a, b_info, test_pick_a["일자"], row["이동희망일"], is_test=True):
-                                st.success("테스트 맞교환이 적용되었습니다. 저장되지 않습니다.")
-                            else:
-                                st.warning("이미 테스트에서 사용된 슬롯이 포함되어 있어 이 교환은 적용하지 않았습니다.")
-                            st.rerun()
-            with t2:
-                st.caption(cycle_msg or "1:1 후보가 있을 때는 연계 순환을 표시하지 않습니다.")
-                if not cycles:
-                    st.info("테스트용 2·3인 순환 경로 없음")
-                else:
-                    for idx, cyc in enumerate(cycles):
-                        with st.expander(f"{'✅' if cyc['length']==2 else '🔗'} {cyc['length']}인 순환", expanded=(idx==0)):
-                            st.markdown(f"**경로**: `{cyc['path_desc']}`")
-                            if st.button("[테스트] 이 순환 적용", key=f"test_matrix_cyc_{idx}"):
-                                apply_cycle_swaps(cyc["moves"], is_test=True)
-                                st.session_state["test_has_cycle"] = True
-                                st.success(f"테스트 {cyc['length']}인 순환이 적용되었습니다. 저장되지 않습니다.")
-                                st.rerun()
+        # 테스트 화면도 별도의 선택표를 두지 않고, 위 주간 매트릭스 자체를 작업 시작점으로 사용한다.
+        # 셀을 클릭하면 동일한 네이티브 팝업에서 1:1 맞교환 테스트와 연계 순환 테스트를 바로 선택한다.
+        render_weekly_matrix(
+            test_matrix, test_week_anchor, row_label="교사명", height=520,
+            key="test_week_preview", title="테스트 적용 주간표",
+            use_test=True, open_dialog=True
+        )
+        st.caption("💡 수업 셀을 클릭하면 팝업에서 바로 **1:1 맞교환 테스트 / 연계 순환 테스트**를 선택할 수 있습니다. 별도의 출발점 지정은 필요하지 않습니다.")
 
         st.markdown("#### 테스트 적용 후 주간표 미리보기")
         t_preview = st.selectbox("미리볼 교사", tlist, key="test_preview_t")
