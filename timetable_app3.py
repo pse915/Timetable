@@ -2511,13 +2511,13 @@ def _weekly_action_dialog():
     # 검색 범위는 실제 검색 작업을 선택했을 때만 노출한다.
     # 팝업 속도를 위해 기본은 선택한 주간(월~금)만 검색한다.
     # 미래 날짜 검색은 사용자가 필요할 때만 확장한다.
-    extra_days = int(st.session_state.get("weekly_dialog_extra_days", 0) or 0)
+    extra_days = int(st.session_state.get("weekly_dialog_extra_days", 7) or 7)
     if action_mode in ("swap", "cycle"):
         with st.expander("🔎 검색 범위 확장", expanded=False):
             extra_days = st.slider(
-                "미래 추가 검색 일수", 0, 14, extra_days,
+                "미래 추가 검색 일수", 0, 21, extra_days,
                 key="weekly_dialog_extra_days_input",
-                help="기본값은 현재 주간만 검색합니다. 필요할 때 미래 평일을 추가합니다.",
+                help="기본값은 미래 7일을 추가 검색합니다. 필요할 때 검색 범위를 조정할 수 있습니다.",
             )
             if extra_days != st.session_state.get("weekly_dialog_extra_days"):
                 st.session_state.weekly_dialog_extra_days = extra_days
@@ -2868,7 +2868,7 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         # 셀을 새로 선택하면 항상 1:1 맞교환을 기본 작업으로 연다.
         st.session_state.weekly_dialog_action_mode = "swap"
         # 이전 셀에서 확장했던 미래 검색 범위를 새 셀에 그대로 물려주지 않는다.
-        st.session_state.weekly_dialog_extra_days = 0
+        st.session_state.weekly_dialog_extra_days = 7
         st.session_state.pop("weekly_dialog_extra_days_input", None)
         st.session_state.weekly_dialog_use_test = bool(use_test)
         st.session_state.weekly_dialog_title = title or "주간표 작업"
