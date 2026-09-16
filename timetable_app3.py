@@ -91,6 +91,61 @@ st.markdown("""
         white-space: normal;
         word-break: keep-all;
     }
+    .weekly-matrix td {
+        height: 43px;
+        white-space: normal;
+        word-break: keep-all;
+    }
+    /* 주간 매트릭스는 35개 교시 열을 유지하되 각 셀을 좁고 일정하게 만든다.
+       학급/과목은 셀 안에서 명확히 2줄로 보이도록 한다. */
+    .interactive-weekly-table {
+        min-width: 1490px;
+        table-layout: fixed;
+    }
+    .interactive-weekly-table th.period-col,
+    .interactive-weekly-table td.period-col {
+        width: 40px;
+        min-width: 40px;
+        max-width: 40px;
+        padding-left: 2px;
+        padding-right: 2px;
+    }
+    .interactive-weekly-table td.period-col {
+        height: 62px;
+        overflow: hidden;
+        vertical-align: middle;
+    }
+    .interactive-weekly-table .class-line {
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1.05;
+        white-space: nowrap;
+    }
+    .interactive-weekly-table .subject-line {
+        font-size: 9px;
+        line-height: 1.05;
+        overflow-wrap: anywhere;
+        word-break: break-all;
+    }
+    .interactive-weekly-table .change-line {
+        font-size: 8px;
+        line-height: 1.0;
+        margin-top: 2px;
+        overflow-wrap: anywhere;
+    }
+    .interactive-weekly-table th {
+        height: 30px;
+    }
+    .interactive-weekly-table .teacher-col {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        background: white;
+    }
+    .interactive-weekly-table thead .teacher-col {
+        z-index: 3;
+        background: #f1f3f6;
+    }
     .weekly-matrix .class-line { font-weight: 600; }
     .weekly-matrix .subject-line { font-size: 10.5px; color: #334155; }
     .weekly-matrix .change-line { font-size: 9px; margin-top: 2px; }
@@ -566,24 +621,84 @@ def weekly_matrix_column_config(df):
 
 
 def render_interactive_weekly_matrix(df, *, key, height=620, caption=None):
-    """모든 셀 선택형 교사 주간 매트릭스를 동일한 표시 규칙으로 렌더링."""
+    """
+    모든 셀 선택형 교사 주간 매트릭스를 공통 HTML 매트릭스로 표시한다.
+
+    중요: 주간 구조(교사명 + 월1~금7)는 절대로 바꾸지 않는다.
+    화면에 보이는 주 표는 HTML로 렌더링하여 학급/과목을 2줄로 강제하고,
+    실제 셀 선택은 바로 아래의 Streamlit 선택용 그리드에서 수행한다.
+    이렇게 하면 st.dataframe의 브라우저/Streamlit 버전에 따른 줄바꿈·열 폭 문제를 피할 수 있다.
+    """
     if df is None or df.empty:
         st.info("표시할 시간표가 없습니다.")
         return None
     if caption:
         st.caption(caption)
-    matrix = compact_interactive_weekly_matrix(df)
-    return st.dataframe(
-        matrix,
-        hide_index=True,
-        use_container_width=True,
-        height=height,
-        key=key,
-        on_select="rerun",
-        selection_mode="single-cell",
-        row_height=60,
-        column_config=weekly_matrix_column_config(matrix),
-    )
+
+    # 1) 사용자에게 보여주는 주간표: HTML/CSS로 강제 줄바꿈
+    columns = list(df.columns)
+    display_df = df.copy()
+    html_parts = [
+        '<div class="weekly-matrix-wrap interactive-weekly-matrix">',
+        '<table class="weekly-matrix interactive-weekly-table"><thead><tr>'
+    ]
+    for i, col in enumerate(columns):
+        cls = "teacher-col" if i == 0 else "period-col"
+        html_parts.append(f'<th class="{cls}">{escape(str(col))}</th>')
+    html_parts.append('</tr></thead><tbody>')
+
+    for _, row in display_df.iterrows():
+        html_parts.append('<tr>')
+        for i, col in enumerate(columns):
+            if i == 0:
+                teacher = escape(str(row.get(col, "")))
+                html_parts.append(f'<td class="teacher-col"><strong>{teacher}</strong></td>')
+                continue
+            c, subj, change = _weekly_cell_lines(row.get(col, ""))
+            if not c and not subj and not change:
+                html_parts.append('<td class="empty period-col">·</td>')
+            else:
+                lines = []
+                if c:
+                    lines.append(f'<div class="class-line">{escape(c)}</div>')
+                if subj:
+                    lines.append(f'<div class="subject-line">{escape(subj)}</div>')
+                if change:
+                    lines.append(f'<div class="change-line">{escape(change)}</div>')
+                html_parts.append(f'<td class="period-col">{"".join(lines)}</td>')
+        html_parts.append('</tr>')
+    html_parts.append('</tbody></table></div>')
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
+
+    # 2) 실제 선택용 그리드: 선택 기능은 그대로 유지한다.
+    #    보기 표와 분리하므로 선택 그리드가 주간표의 가독성을 망치지 않는다.
+    with st.expander("🖱️ 수업 셀 선택하기 (클릭하여 작업 대상 지정)", expanded=False):
+        st.caption("위의 읽기 쉬운 주간표는 표시 전용입니다. 작업할 수업을 지정하려면 이 영역을 열고 동일한 주간 매트릭스의 셀을 클릭하세요.")
+        matrix = compact_interactive_weekly_matrix(df)
+        try:
+            event = st.dataframe(
+                matrix,
+                hide_index=True,
+                use_container_width=True,
+                height=min(max(height, 360), 620),
+                key=f"{key}_selector",
+                on_select="rerun",
+                selection_mode="single-cell",
+                row_height=58,
+                column_config=weekly_matrix_column_config(matrix),
+            )
+            return event
+        except TypeError:
+            # 구버전 Streamlit 호환: row_height/column_config 등의 선택적 인자가 없는 경우
+            return st.dataframe(
+                matrix,
+                hide_index=True,
+                use_container_width=True,
+                height=min(max(height, 360), 620),
+                key=f"{key}_selector_fallback",
+                on_select="rerun",
+                selection_mode="single-cell",
+            )
 
 
 def get_all_teacher_names():
