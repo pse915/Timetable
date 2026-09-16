@@ -37,6 +37,14 @@ st.markdown("""
     /* Apple-like: 화면을 업무표에 최대한 할당하고 장식은 최소화 */
     .block-container { max-width: 100%; padding-top: .55rem; padding-bottom: .55rem; padding-left: .75rem; padding-right: .75rem; }
     [data-testid="stHeader"] { background: transparent; }
+    /* Streamlit Cloud 상단 GitHub/설정 메뉴와 충돌하지 않도록 앱 toolbar는 fixed가 아닌 일반 flow */
+    .app-topbar { width:100%; min-height:40px; display:flex; align-items:center; gap:.55rem; padding:.12rem .2rem .36rem; margin:-.08rem 0 .25rem; border-bottom:1px solid #e5e7eb; }
+    .app-identity { white-space:nowrap; color:#6b7280; font-size:.76rem; line-height:1.15; letter-spacing:-.01em; }
+    .app-identity strong { color:#374151; font-weight:650; }
+    .app-topbar .stButton > button, .app-topbar [data-testid="stPopover"] > button { min-height:34px !important; padding:.1rem .55rem !important; border-radius:9px !important; font-size:.78rem !important; }
+    /* Cloud 기본 header 아래의 dialog가 상단/하단에 잘리지 않도록 dialog 자체에만 최대 높이를 준다. */
+    [data-testid="stDialog"] > div, div[role="dialog"] { max-height:calc(100vh - 4.5rem) !important; }
+    [data-testid="stDialog"] > div > div, div[role="dialog"] > div { max-height:calc(100vh - 4.5rem) !important; overflow-y:auto !important; }
     [data-testid="stDataFrame"] { border: 1px solid #d6d9df !important; border-radius: 10px; overflow: hidden; }
     [data-testid="stDataFrame"] [role="gridcell"],
     [data-testid="stDataFrame"] [role="columnheader"] {
@@ -3819,88 +3827,74 @@ if not st.session_state.logged_in:
 init_state()
 
 # ==========================================================================================
-# 사이드바
+# 상단 가로 업무 Toolbar
 # ==========================================================================================
-with st.sidebar:
-    st.markdown(f"**아이디** : `{current_user()}`")
-    st.markdown(f"**이름** : `{current_name()}`")
-    st.markdown(f"**권한** : `{current_role()}`")
-    if st.button("로그아웃", use_container_width=True):
-        for k in list(st.session_state.keys()):
-            del st.session_state[k]
-        st.rerun()
+def render_top_toolbar(visible_tabs):
+    """ID/이름/권한과 업무 메뉴를 상단 한 줄에 배치한다.
 
-    st.divider()
+    Streamlit Cloud의 GitHub/설정/메뉴 영역과 겹치지 않도록 position:fixed를 사용하지 않는다.
+    데이터/출력 기능은 popover로 접어 주간 매트릭스의 가로 공간을 보존한다.
+    """
+    c_id, c_nav, c_tools, c_user = st.columns([1.55, 3.4, 1.0, .85], vertical_alignment="center")
+    with c_id:
+        st.markdown(f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_user()} · {current_role()}</div>', unsafe_allow_html=True)
+    with c_nav:
+        if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs:
+            st.session_state.active_tab = visible_tabs[0]
+        active = st.selectbox("업무 메뉴", visible_tabs, index=visible_tabs.index(st.session_state.active_tab), key="top_active_tab", label_visibility="collapsed")
+        st.session_state.active_tab = active
+    with c_tools:
+        with st.popover("도구", use_container_width=True):
+            if current_role() != ROLE_GUEST:
+                if can_full_data() or is_teacher():
+                    if st.button("🔄 시간표 새로고침", use_container_width=True, key="top_reload_timetable"):
+                        load_timetable_from_gsheet.clear()
+                        ti, tt = load_timetable_from_gsheet()
+                        st.session_state.teachers, st.session_state.timetable = ti, tt
+                        _invalidate_all_caches()
+                        st.rerun()
+                    if st.button("🔄 작업내역 새로고침", use_container_width=True, key="top_reload_work"):
+                        load_work_data_from_gsheet.clear()
+                        absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
+                        st.session_state.absences = ensure_input_user(absences)
+                        st.session_state.subs = ensure_input_user(subs)
+                        st.session_state.swaps = ensure_input_user(swaps)
+                        st.session_state.part_time = ensure_part_time_columns(part_time)
+                        st.session_state.duties = ensure_duty_columns(duties)
+                        _invalidate_all_caches()
+                        st.rerun()
+                    if st.button("💾 현재 작업 저장", use_container_width=True, type="primary", key="top_save_work"):
+                        save_work_data_to_gsheet()
+                    st.divider()
+                    a,b=st.columns(2)
+                    if a.button("↩ Undo", use_container_width=True, key="top_undo"):
+                        if undo(): save_work_data_to_gsheet(); st.rerun()
+                    if b.button("↪ Redo", use_container_width=True, key="top_redo"):
+                        if redo(): save_work_data_to_gsheet(); st.rerun()
+                    if is_edu_or_master():
+                        try: st.caption(f"보강비 잔액 · {get_current_budget():,.0f}원")
+                        except Exception: pass
+                st.divider()
+                with st.expander("📄 출력", expanded=False):
+                    plan_date=calendar_picker("계획서 기준일", _today_kst(), key="top_plan_date")
+                    if st.button("📋 결보강 계획서", use_container_width=True, key="top_personal_plan"):
+                        html=build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
+                        st.download_button("HTML 다운로드", html.encode("utf-8"), f"결보강계획서_{current_name()}_{plan_date}.html", "text/html", key="top_dl_personal")
+                    if is_edu_or_master():
+                        rd=calendar_picker("전체 내역서 일자", _today_kst(), key="top_report_date")
+                        if st.button("📊 전체 일일 내역서", use_container_width=True, key="top_daily_report"):
+                            html=build_report_html(rd.strftime("%Y-%m-%d"))
+                            xls=to_excel_bytes({
+                                "결강": st.session_state.absences[st.session_state.absences["일자"]==rd.strftime("%Y-%m-%d")] if not st.session_state.absences.empty else pd.DataFrame(),
+                                "보강": st.session_state.subs[st.session_state.subs["일자"]==rd.strftime("%Y-%m-%d")] if not st.session_state.subs.empty else pd.DataFrame(),
+                                "맞교환": st.session_state.swaps})
+                            st.download_button("HTML 다운로드", html.encode("utf-8"), f"내역서_{rd}.html", "text/html", key="top_dl_report_html")
+                            st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx", key="top_dl_report_xlsx")
+    with c_user:
+        if st.button("로그아웃", use_container_width=True, key="top_logout"):
+            for k in list(st.session_state.keys()): del st.session_state[k]
+            st.rerun()
 
-    if current_role() != ROLE_GUEST:
-        st.header("데이터")
-        if can_full_data() or is_teacher():
-            if st.button("🔄 원본 시간표 다시 불러오기", use_container_width=True):
-                load_timetable_from_gsheet.clear()
-                ti, tt = load_timetable_from_gsheet()
-                st.session_state.teachers = ti
-                st.session_state.timetable = tt
-                _invalidate_all_caches()
-                st.rerun()
-            if st.button("🔄 작업 내역 다시 불러오기", use_container_width=True):
-                load_work_data_from_gsheet.clear()
-                absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
-                st.session_state.absences = ensure_input_user(absences)
-                st.session_state.subs = ensure_input_user(subs)
-                st.session_state.swaps = ensure_input_user(swaps)
-                st.session_state.part_time = ensure_part_time_columns(part_time)
-                st.session_state.duties = ensure_duty_columns(duties)
-                _invalidate_all_caches()
-                st.rerun()
-            if st.button("💾 현재 작업 저장", use_container_width=True, type="primary"):
-                if save_work_data_to_gsheet():
-                    st.success("저장 완료")
-
-        st.divider()
-        c1, c2 = st.columns(2)
-        if c1.button("↩ Undo", use_container_width=True):
-            if undo():
-                save_work_data_to_gsheet()
-                st.rerun()
-        if c2.button("↪ Redo", use_container_width=True):
-            if redo():
-                save_work_data_to_gsheet()
-                st.rerun()
-
-        st.divider()
-        if is_edu_or_master():
-            try:
-                curr_budget = get_current_budget()
-                st.metric("보강비 잔액", f"{curr_budget:,.0f}원")
-            except Exception:
-                pass
-
-        st.divider()
-        st.subheader("📄 내역서 / 계획서 출력")
-
-        plan_date = calendar_picker("계획서 기준일", _today_kst(), key="plan_date")
-        if st.button("📋 결보강 계획서 (본인용)", use_container_width=True, type="primary"):
-            html = build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
-            st.download_button(
-                "HTML 다운로드 (인쇄 → PDF로 저장 추천)",
-                html.encode("utf-8"),
-                f"결보강계획서_{current_name()}_{plan_date}.html",
-                "text/html",
-                key="dl_personal"
-            )
-            st.info("다운로드한 HTML을 브라우저에서 열고 Ctrl+P → PDF로 저장하시면 양식과 거의 동일한 PDF가 생성됩니다.")
-
-        if is_edu_or_master():
-            rd = calendar_picker("전체 내역서 일자", _today_kst(), key="sidebar_rd")
-            if st.button("📊 전체 일일 내역서", use_container_width=True):
-                html = build_report_html(rd.strftime("%Y-%m-%d"))
-                st.download_button("HTML 다운로드 (전체)", html.encode("utf-8"), f"내역서_{rd}.html", "text/html")
-                xls = to_excel_bytes({
-                    "결강": st.session_state.absences[st.session_state.absences["일자"] == rd.strftime("%Y-%m-%d")] if not st.session_state.absences.empty else pd.DataFrame(),
-                    "보강": st.session_state.subs[st.session_state.subs["일자"] == rd.strftime("%Y-%m-%d")] if not st.session_state.subs.empty else pd.DataFrame(),
-                    "맞교환": st.session_state.swaps
-                })
-                st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx")
 
 if current_role() == ROLE_GUEST:
     st.title("게스트 모드")
@@ -3939,15 +3933,9 @@ if not visible_tabs:
     st.stop()
 
 # 한 번에 하나의 업무 화면만 렌더링해 비활성 화면의 계산을 막는다.
-if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs:
-    st.session_state.active_tab = visible_tabs[0]
-active_tab = st.selectbox(
-    "업무 메뉴", visible_tabs,
-    index=visible_tabs.index(st.session_state.active_tab),
-    key="main_active_tab",
-    label_visibility="collapsed",
-)
-st.session_state.active_tab = active_tab
+# 메뉴/사용자 정보는 상단 가로 toolbar로 통합한다.
+render_top_toolbar(visible_tabs)
+active_tab = st.session_state.active_tab
 tab_map = {active_tab: st.container()}
 
 # 주간표 팝업은 현재 활성 화면의 주간표가 선택 상태를 기록한 뒤
@@ -4773,3 +4761,4 @@ if "📑 회원별 탭 권한 관리" in tab_map:
 # 방금 클릭한 셀이 팝업에 표시된다. 또한 주간표 렌더러 안에서 dialog가 중복 생성되지 않는다.
 if st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
     _weekly_action_dialog()
+
