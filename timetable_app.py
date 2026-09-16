@@ -43,6 +43,10 @@ st.markdown("""
     .app-identity { white-space:nowrap; color:#6b7280; font-size:.76rem; line-height:1.15; letter-spacing:-.01em; }
     .app-identity strong { color:#374151; font-weight:650; }
     .app-topbar .stButton > button, .app-topbar [data-testid="stPopover"] > button { min-height:34px !important; padding:.1rem .55rem !important; border-radius:9px !important; font-size:.78rem !important; }
+    .tool-section-title { color:#6b7280; font-size:.72rem; font-weight:600; letter-spacing:.01em; margin:.15rem 0 .35rem .05rem; }
+    .apple-note { margin:.05rem 0 .45rem; color:#6b7280; font-size:.76rem; line-height:1.35; }
+    .apple-note strong { color:#4b5563; font-weight:600; }
+    .sandbox-title { margin:.1rem 0 .1rem; color:#1d1d1f; font-size:1rem; font-weight:600; letter-spacing:-.015em; }
     /* Cloud 기본 header 아래의 dialog가 상단/하단에 잘리지 않도록 dialog 자체에만 최대 높이를 준다. */
     [data-testid="stDialog"] > div, div[role="dialog"] { max-height:calc(100vh - 4.5rem) !important; }
     [data-testid="stDialog"] > div > div, div[role="dialog"] > div { max-height:calc(100vh - 4.5rem) !important; overflow-y:auto !important; }
@@ -3876,21 +3880,23 @@ def render_top_toolbar(visible_tabs):
                         try: st.caption(f"보강비 잔액 · {get_current_budget():,.0f}원")
                         except Exception: pass
                 st.divider()
-                with st.expander("📄 출력", expanded=False):
-                    plan_date=calendar_picker("계획서 기준일", _today_kst(), key="top_plan_date")
-                    if st.button("📋 결보강 계획서", use_container_width=True, key="top_personal_plan"):
-                        html=build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
-                        st.download_button("HTML 다운로드", html.encode("utf-8"), f"결보강계획서_{current_name()}_{plan_date}.html", "text/html", key="top_dl_personal")
-                    if is_edu_or_master():
-                        rd=calendar_picker("전체 내역서 일자", _today_kst(), key="top_report_date")
-                        if st.button("📊 전체 일일 내역서", use_container_width=True, key="top_daily_report"):
-                            html=build_report_html(rd.strftime("%Y-%m-%d"))
-                            xls=to_excel_bytes({
-                                "결강": st.session_state.absences[st.session_state.absences["일자"]==rd.strftime("%Y-%m-%d")] if not st.session_state.absences.empty else pd.DataFrame(),
-                                "보강": st.session_state.subs[st.session_state.subs["일자"]==rd.strftime("%Y-%m-%d")] if not st.session_state.subs.empty else pd.DataFrame(),
-                                "맞교환": st.session_state.swaps})
-                            st.download_button("HTML 다운로드", html.encode("utf-8"), f"내역서_{rd}.html", "text/html", key="top_dl_report_html")
-                            st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx", key="top_dl_report_xlsx")
+                # 출력은 Expander를 사용하지 않는다. Streamlit의 확장/축소 애니메이션이
+                # 느리게 보이는 것을 피하고, 도구 Popover 안에서 즉시 필요한 컨트롤만 표시한다.
+                st.markdown('<div class="tool-section-title">출력</div>', unsafe_allow_html=True)
+                plan_date=calendar_picker("계획서 기준일", _today_kst(), key="top_plan_date")
+                if st.button("결보강 계획서", use_container_width=True, key="top_personal_plan"):
+                    html=build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
+                    st.download_button("HTML 다운로드", html.encode("utf-8"), f"결보강계획서_{current_name()}_{plan_date}.html", "text/html", key="top_dl_personal")
+                if is_edu_or_master():
+                    rd=calendar_picker("전체 내역서 일자", _today_kst(), key="top_report_date")
+                    if st.button("전체 일일 내역서", use_container_width=True, key="top_daily_report"):
+                        html=build_report_html(rd.strftime("%Y-%m-%d"))
+                        xls=to_excel_bytes({
+                            "결강": st.session_state.absences[st.session_state.absences["일자"]==rd.strftime("%Y-%m-%d")] if not st.session_state.absences.empty else pd.DataFrame(),
+                            "보강": st.session_state.subs[st.session_state.subs["일자"]==rd.strftime("%Y-%m-%d")] if not st.session_state.subs.empty else pd.DataFrame(),
+                            "맞교환": st.session_state.swaps})
+                        st.download_button("HTML 다운로드", html.encode("utf-8"), f"내역서_{rd}.html", "text/html", key="top_dl_report_html")
+                        st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx", key="top_dl_report_xlsx")
     with c_user:
         if st.button("로그아웃", use_container_width=True, key="top_logout"):
             for k in list(st.session_state.keys()): del st.session_state[k]
@@ -4222,8 +4228,8 @@ if "통계" in tab_map:
 # ------------------------------------------------------------------ 시간표 변경 테스트용
 if "시간표 변경 테스트용" in tab_map:
     with tab_map["시간표 변경 테스트용"]:
-        st.subheader("🧪 시간표 변경 테스트용 (저장 안 됨 · 샌드박스)")
-        st.info("연계공강(순환) 시 **수업계 선생님에게 연락해주세요**")
+        st.markdown('<div class="sandbox-title">🧪 시간표 변경 테스트</div>', unsafe_allow_html=True)
+        st.markdown('<div class="apple-note">저장되지 않는 테스트 공간 · 연계공강(순환) 발생 시 <strong>수업계에 확인해주세요.</strong></div>', unsafe_allow_html=True)
 
         if st.button("🔄 테스트 상태 초기화", type="secondary"):
             st.session_state.test_swaps = pd.DataFrame()
