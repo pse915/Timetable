@@ -38,7 +38,8 @@ st.markdown("""
     .block-container { max-width: 100%; padding-top: .55rem; padding-bottom: .55rem; padding-left: .75rem; padding-right: .75rem; }
     [data-testid="stHeader"] { background: transparent; }
     /* Streamlit Cloud 상단 GitHub/설정 메뉴와 충돌하지 않도록 앱 toolbar는 fixed가 아닌 일반 flow */
-    .app-topbar { width:100%; min-height:40px; display:flex; align-items:center; gap:.55rem; padding:.12rem .2rem .36rem; margin:-.08rem 0 .25rem; border-bottom:1px solid #e5e7eb; }
+    .app-top-safe-space { height:30px; width:100%; flex:0 0 30px; pointer-events:none; }
+    .app-topbar { position:relative; z-index:2; width:100%; min-height:40px; display:flex; align-items:center; gap:.55rem; padding:.12rem .2rem .36rem; margin:-.08rem 0 .25rem; border-bottom:1px solid #e5e7eb; }
     .app-identity { white-space:nowrap; color:#6b7280; font-size:.76rem; line-height:1.15; letter-spacing:-.01em; }
     .app-identity strong { color:#374151; font-weight:650; }
     .app-topbar .stButton > button, .app-topbar [data-testid="stPopover"] > button { min-height:34px !important; padding:.1rem .55rem !important; border-radius:9px !important; font-size:.78rem !important; }
@@ -3934,6 +3935,7 @@ if not visible_tabs:
 
 # 한 번에 하나의 업무 화면만 렌더링해 비활성 화면의 계산을 막는다.
 # 메뉴/사용자 정보는 상단 가로 toolbar로 통합한다.
+st.markdown('<div class="app-top-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
 render_top_toolbar(visible_tabs)
 active_tab = st.session_state.active_tab
 tab_map = {active_tab: st.container()}
