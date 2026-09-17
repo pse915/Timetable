@@ -5449,7 +5449,8 @@ if "변경된 교사 주간표" in tab_map:
                         render_standard_weekly_matrix(
                             teacher_grid, ref, row_label="교시",
                             key=f"changed_teacher_week_{idx}",
-                            title=None, use_test=False, height=286
+                            title=None, use_test=False, height=286,
+                            open_dialog=False
                         )
 
 # ------------------------------------------------------------------ 복무 관리 & 판단
