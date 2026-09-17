@@ -4083,10 +4083,15 @@ def render_top_toolbar(visible_tabs):
         active = st.selectbox("업무 메뉴", visible_tabs, index=visible_tabs.index(previous_active), key="top_active_tab", label_visibility="collapsed")
         st.session_state.active_tab = active
         if active != previous_active:
-            # 탭을 전환할 때는 직전 탭의 주간표 선택/팝업 상태를 완전히 폐기한다.
-            # 그렇지 않으면 새 탭을 렌더링하기 전에 마지막 수업 선택이 남아
-            # 앱 마지막의 공통 Dialog 조건을 만족하면서 이전 팝업이 다시 열린다.
+            # 탭 전환은 '새 업무 화면'으로 취급한다. 직전 화면에서 선택했던
+            # 수업/팝업 상태를 그대로 두면, 새 탭을 연 직후 이전 수업 dialog가
+            # 다시 나타날 수 있다. 특히 빈 공간을 눌러 선택을 해제한 뒤 탭을
+            # 바꾸는 경우 dataframe 위젯의 내부 selection이 rerun에서 재전달될
+            # 수 있으므로, 선택값 + dialog + 후보 캐시 + widget epoch를 함께 초기화한다.
             _clear_weekly_selection()
+            st.session_state.pop("weekly_dialog_use_test", None)
+            st.session_state.pop("weekly_dialog_title", None)
+            st.session_state.pop("weekly_dialog_instance", None)
             st.rerun()
     with c_tools:
         if st.button("도구", use_container_width=True, key="top_tools_open"):
