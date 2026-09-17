@@ -34,43 +34,158 @@ st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", l
 
 st.markdown("""
 <style>
-    /* Apple-like: 화면을 업무표에 최대한 할당하고 장식은 최소화 */
-    .block-container { max-width: 100%; padding-top: .55rem; padding-bottom: .55rem; padding-left: .75rem; padding-right: .75rem; }
-    [data-testid="stHeader"] { background: transparent; }
-    /* Streamlit Cloud 상단 GitHub/설정 메뉴와 충돌하지 않도록 앱 toolbar는 fixed가 아닌 일반 flow */
-    .app-top-safe-space { height:30px; width:100%; flex:0 0 30px; pointer-events:none; }
-    /* 도구 dialog는 Streamlit의 기본 중앙 정렬/폭 계산을 그대로 사용한다.
-       transform, margin, width를 강제로 덮어쓰면 rerun 때 dialog의 기준점이
-       바뀌면서 왼쪽으로 누적 이동하는 현상이 생길 수 있으므로 건드리지 않는다. */
-    [data-testid="stDialog"] button,
-    [data-testid="stDialog"] input,
-    [data-testid="stDialog"] [role="button"] {
-        transition: none !important;
-        animation: none !important;
-    }
-    .app-topbar { position:relative; z-index:2; width:100%; min-height:40px; display:flex; align-items:center; gap:.55rem; padding:.12rem .2rem .36rem; margin:-.08rem 0 .25rem; border-bottom:1px solid #e5e7eb; }
-    .app-identity { white-space:nowrap; color:#6b7280; font-size:.76rem; line-height:1.15; letter-spacing:-.01em; }
-    .app-identity strong { color:#374151; font-weight:650; }
-    .app-topbar .stButton > button, .app-topbar [data-testid="stPopover"] > button { min-height:34px !important; padding:.1rem .55rem !important; border-radius:9px !important; font-size:.78rem !important; }
-    .tool-section-title { color:#6b7280; font-size:.72rem; font-weight:600; letter-spacing:.01em; margin:.15rem 0 .35rem .05rem; }
-    .apple-note { margin:.05rem 0 .45rem; color:#6b7280; font-size:.76rem; line-height:1.35; }
-    .apple-note strong { color:#4b5563; font-weight:600; }
-    .sandbox-title { margin:.1rem 0 .1rem; color:#1d1d1f; font-size:1rem; font-weight:600; letter-spacing:-.015em; }
-    /* Cloud 기본 header 아래에서 도구 내용만 세로 스크롤한다.
-       dialog의 외곽 wrapper에는 width/margin/transform을 적용하지 않는다. */
-    [data-testid="stDialog"] > div > div { max-height:calc(100vh - 4.5rem) !important; overflow-y:auto !important; }
-    [data-testid="stDataFrame"] { border: 1px solid #d6d9df !important; border-radius: 10px; overflow: hidden; }
-    [data-testid="stDataFrame"] [role="gridcell"],
-    [data-testid="stDataFrame"] [role="columnheader"] {
-        border-right: 1px solid #e5e7eb !important;
-        border-bottom: 1px solid #e5e7eb !important;
-    }
-    [data-testid="stDataFrame"] [role="columnheader"] { font-weight: 650 !important; }
-    .login-box { max-width: 420px; margin: 80px auto; padding: 30px; border: 1px solid #cfd4dc; border-radius: 12px; background: #f8fafc; }
-    div[data-testid="stVerticalBlock"] > div:has(> div > .compact-nav) { margin-bottom: .15rem; }
-    .compact-nav { color:#6b7280; font-size:.78rem; margin:0 0 .25rem .15rem; }
-    /* 매트릭스는 페이지보다 내부 표가 우선 스크롤되도록 높이를 확보 */
-    .matrix-shell { margin-top: .15rem; }
+/* =====================================================================================
+   AI SERVICE / APPLE DARK DESIGN SYSTEM
+   Streamlit의 기능·위젯 구조는 유지하고, 시각 언어만 하나의 제품처럼 통일한다.
+   ===================================================================================== */
+:root {
+    --ai-bg:#000000;
+    --ai-surface:#0d0d0f;
+    --ai-surface-2:#141416;
+    --ai-border:rgba(255,255,255,.10);
+    --ai-border-soft:rgba(255,255,255,.07);
+    --ai-text:#f5f5f7;
+    --ai-muted:#86868b;
+    --ai-muted-2:#636366;
+    --ai-white:#ffffff;
+}
+
+html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
+    background:var(--ai-bg) !important;
+    color:var(--ai-text) !important;
+}
+[data-testid="stHeader"] { background:rgba(0,0,0,.72) !important; backdrop-filter:blur(18px); }
+[data-testid="stToolbar"] { background:transparent !important; }
+[data-testid="stDecoration"] { display:none !important; }
+.block-container { max-width:100%; padding-top:.55rem; padding-bottom:1rem; padding-left:1rem; padding-right:1rem; }
+
+/* top safe area + product navigation */
+.app-top-safe-space { height:30px; width:100%; flex:0 0 30px; pointer-events:none; }
+.app-topbar {
+    position:relative; z-index:2; width:100%; min-height:44px; display:flex; align-items:center;
+    gap:.65rem; padding:.18rem .3rem .42rem; margin:-.08rem 0 .5rem;
+    border-bottom:1px solid var(--ai-border-soft);
+}
+.app-identity { white-space:nowrap; color:var(--ai-muted); font-size:.74rem; line-height:1.15; letter-spacing:-.015em; }
+.app-identity strong { color:var(--ai-text); font-weight:650; }
+.app-topbar .stButton > button, .app-topbar [data-testid="stPopover"] > button {
+    min-height:34px !important; padding:.1rem .65rem !important; border-radius:10px !important;
+    font-size:.77rem !important; background:rgba(255,255,255,.055) !important;
+    color:var(--ai-text) !important; border:1px solid var(--ai-border) !important;
+}
+
+/* typography */
+h1,h2,h3,h4,h5,h6,p,label,span,div { letter-spacing:-.012em; }
+h1 { font-weight:700 !important; letter-spacing:-.045em !important; }
+h2,h3 { font-weight:650 !important; letter-spacing:-.035em !important; }
+[data-testid="stCaptionContainer"], .stCaption { color:var(--ai-muted) !important; }
+.stMarkdown, .stText { color:var(--ai-text); }
+
+/* buttons / controls */
+.stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
+    border-radius:12px !important; border:1px solid var(--ai-border) !important;
+    background:linear-gradient(180deg, rgba(255,255,255,.085), rgba(255,255,255,.045)) !important;
+    color:var(--ai-text) !important; box-shadow:0 1px 0 rgba(255,255,255,.04) inset !important;
+    transition:transform .35s ease, background .35s ease, border-color .35s ease, box-shadow .35s ease !important;
+}
+.stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover {
+    background:rgba(255,255,255,.11) !important; border-color:rgba(255,255,255,.18) !important;
+    transform:translateY(-1px); box-shadow:0 8px 28px rgba(0,0,0,.35) !important;
+}
+.stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
+    color:#050505 !important; background:linear-gradient(180deg,#fff,#dcdcdc) !important;
+    border-color:rgba(255,255,255,.65) !important; font-weight:650 !important;
+}
+
+/* inputs */
+[data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"] > div,
+[data-testid="stDateInput"] > div > div {
+    background:rgba(255,255,255,.045) !important; color:var(--ai-text) !important;
+    border-color:var(--ai-border) !important; border-radius:12px !important;
+}
+input, textarea { color:var(--ai-text) !important; }
+input::placeholder, textarea::placeholder { color:var(--ai-muted-2) !important; }
+[data-baseweb="select"] * { color:var(--ai-text) !important; }
+
+/* cards / containers */
+[data-testid="stVerticalBlockBorderWrapper"], [data-testid="stExpander"] {
+    background:rgba(255,255,255,.025) !important; border:1px solid var(--ai-border-soft) !important;
+    border-radius:18px !important;
+}
+[data-testid="stExpander"] summary { color:var(--ai-text) !important; }
+hr, [data-testid="stDivider"] { border-color:var(--ai-border-soft) !important; }
+
+/* dataframe: dense, premium, readable */
+[data-testid="stDataFrame"] {
+    border:1px solid var(--ai-border) !important; border-radius:14px; overflow:hidden;
+    background:#080809 !important; box-shadow:0 12px 40px rgba(0,0,0,.22);
+}
+[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataFrame"] [role="columnheader"] {
+    border-right:1px solid rgba(255,255,255,.065) !important;
+    border-bottom:1px solid rgba(255,255,255,.065) !important;
+    color:#f5f5f7 !important; background:#080809 !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"] { font-weight:650 !important; background:#111113 !important; }
+
+/* tabs / radio / segmented controls */
+[data-baseweb="tab-list"] { background:transparent !important; gap:.25rem; }
+[data-baseweb="tab"] { color:var(--ai-muted) !important; }
+[data-baseweb="tab"][aria-selected="true"] { color:var(--ai-text) !important; }
+[data-testid="stRadio"] label, [data-testid="stCheckbox"] label { color:var(--ai-text) !important; }
+
+/* native dialog: do not override its positioning */
+[data-testid="stDialog"] { color:var(--ai-text) !important; }
+[data-testid="stDialog"] button, [data-testid="stDialog"] input, [data-testid="stDialog"] [role="button"] {
+    transition:none !important; animation:none !important;
+}
+[data-testid="stDialog"] > div > div {
+    max-height:calc(100vh - 4.5rem) !important; overflow-y:auto !important;
+    background:#0d0d0f !important; border:1px solid var(--ai-border) !important;
+    border-radius:20px !important; color:var(--ai-text) !important;
+}
+
+/* small product labels */
+.tool-section-title { color:var(--ai-muted) !important; font-size:.72rem; font-weight:600; letter-spacing:.01em; margin:.15rem 0 .35rem .05rem; }
+.apple-note { margin:.05rem 0 .45rem; color:var(--ai-muted) !important; font-size:.76rem; line-height:1.35; }
+.apple-note strong { color:#b5b5b9 !important; font-weight:600; }
+.sandbox-title { margin:.1rem 0 .1rem; color:var(--ai-text) !important; font-size:1rem; font-weight:600; letter-spacing:-.015em; }
+.compact-nav { color:var(--ai-muted) !important; font-size:.78rem; margin:0 0 .25rem .15rem; }
+.matrix-shell { margin-top:.15rem; }
+
+/* changed-teacher compact chips */
+.changed-teacher-chip {
+    padding:.32rem .5rem; margin:0 0 .28rem; border:1px solid var(--ai-border-soft);
+    border-radius:10px; background:rgba(255,255,255,.035); font-size:.78rem;
+    color:#d8d8dc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+
+/* login = AI service landing */
+.login-box {
+    max-width:520px; margin:10vh auto 0; padding:2.25rem; border:1px solid var(--ai-border);
+    border-radius:28px; background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.018));
+    box-shadow:0 30px 100px rgba(0,0,0,.45); backdrop-filter:blur(18px);
+}
+.ai-hero-kicker { color:#a1a1a6; font-size:.76rem; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
+.ai-hero-title {
+    margin:.55rem 0 .65rem; font-size:clamp(2.7rem,7vw,5.8rem); line-height:.96;
+    font-weight:700; letter-spacing:-.065em;
+    background:linear-gradient(180deg,#fff 15%,#bdbdc2 100%); -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.ai-hero-sub { color:#86868b; font-size:1rem; line-height:1.55; max-width:680px; margin:0 auto 1.25rem; }
+.ai-prompt-glow { position:relative; margin:1.25rem auto 0; max-width:720px; }
+.ai-prompt-glow:after {
+    content:""; position:absolute; left:8%; right:8%; bottom:-8px; height:18px;
+    background:radial-gradient(ellipse,rgba(255,255,255,.18),transparent 68%); filter:blur(10px); pointer-events:none;
+}
+
+@media (max-width: 900px) {
+    .app-topbar { gap:.35rem; }
+    .app-identity { display:none; }
+    .block-container { padding-left:.55rem; padding-right:.55rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+    * { scroll-behavior:auto !important; transition:none !important; animation:none !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -3775,7 +3890,7 @@ def show_login_page():
     IMAGE_URL = "https://i.imgur.com/Gl0YDO3.jpeg"
     st.markdown(
         f"""
-        <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;">
+        <div style="background:rgba(255,255,255,.035); padding:20px; border:1px solid rgba(255,255,255,.08); border-radius: 18px; text-align: center; margin-bottom: 20px;">
             <img src="{IMAGE_URL}" width="150" style="object-fit: contain;">
         </div>
         """, 
@@ -3783,15 +3898,17 @@ def show_login_page():
     )
     # ==============================
 
-    st.title(f"📘 {SCHOOL_NAME}")
-    st.subheader("시간표 · 결보강 관리 시스템")
-    st.caption(f"{SCHOOL_YEAR}학년도")
+    st.markdown(f"<div class='ai-hero-kicker'>{SCHOOL_YEAR} · SCHOOL OPERATIONS</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='ai-hero-title'>{SCHOOL_NAME}</div>", unsafe_allow_html=True)
+    st.markdown("<div class='ai-hero-sub'>시간표와 결보강 업무를 하나의 흐름으로 연결하는<br>학교 업무 운영 시스템</div>", unsafe_allow_html=True)
+    st.markdown("<div class='ai-prompt-glow'>", unsafe_allow_html=True)
 
     if st.session_state.login_locked:
         st.error(f"🚫 로그인 시도가 {MAX_LOGIN_ATTEMPTS}회를 초과하여 차단되었습니다.")
         st.stop()
 
     id_input = st.text_input("아이디", placeholder="아이디를 입력하세요", key="login_id")
+    st.markdown("</div>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
         if st.button("로그인", type="primary", use_container_width=True):
@@ -4383,9 +4500,7 @@ if "변경된 교사 주간표" in tab_map:
                     with teacher_cols[i % 3]:
                         st.markdown(
                             f"<div style='padding:.28rem .45rem;margin:0 0 .28rem;"
-                            f"border:1px solid #e5e7eb;border-radius:7px;background:#fafafa;"
-                            f"font-size:.78rem;color:#374151;white-space:nowrap;overflow:hidden;"
-                            f"text-overflow:ellipsis'>{teacher_name}</div>",
+                            f"font-size:.78rem'>{teacher_name}</div>",
                             unsafe_allow_html=True,
                         )
             else:
