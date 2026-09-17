@@ -2410,11 +2410,17 @@ def _weekly_display_matrix(matrix: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _weekly_styled_matrix(matrix: pd.DataFrame):
-    """요일 그룹/변경 상태를 강조한 pandas Styler를 반환한다."""
+def _weekly_styled_matrix(matrix: pd.DataFrame, *, drop_teacher_name: bool = False):
+    """요일 그룹/변경 상태를 강조한 pandas Styler를 반환한다.
+
+    교사별 개별 주간표는 교사명이 카드 헤더에 이미 표시되므로 표시용
+    DataFrame에서만 교사명 열을 제거한다. 반드시 Styler 생성 전에 처리한다.
+    """
     display = _weekly_display_matrix(matrix)
     if display is None or display.empty:
         return display
+    if drop_teacher_name and "교사명" in display.columns:
+        display = display.drop(columns=["교사명"])
     styler = display.style
     # 셀 기본 가독성
     styler = styler.set_properties(**{
@@ -2983,12 +2989,10 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
     # 현재 주라면 이미 지나간 평일의 수업 셀은 숨긴다.
     # 단, 기준일을 과거/미래 주로 선택한 경우에는 역사 조회를 위해 그대로 보여준다.
     visible_matrix = _hide_past_week_slots(matrix, ref_date, hide_past=True)
-    display = _weekly_styled_matrix(visible_matrix)
     # 변경 교사 개별 주간표는 교시(1~7) × 월~금 형태로 렌더링한다.
-    # 교사명은 카드 헤더로 이미 표시하므로 표 안에서는 숨겨 가로 공간을 확보한다.
+    # 교사명은 카드 헤더로 이미 표시하므로 표시용 DataFrame에서만 숨긴다.
     teacher_period_grid = row_label == "교시" and all(d in visible_matrix.columns for d in DAYS)
-    if teacher_period_grid and "교사명" in display.columns:
-        display = display.drop(columns=["교사명"])
+    display = _weekly_styled_matrix(visible_matrix, drop_teacher_name=teacher_period_grid)
     column_config = {}
     # 일반 주간표는 35개 슬롯을 압축하고, 변경 교사 개별표는
     # 이미지처럼 교시 1~7 × 월~금 5열로 넓게 표시한다.
