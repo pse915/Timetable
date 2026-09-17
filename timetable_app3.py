@@ -258,6 +258,11 @@ input::placeholder, textarea::placeholder { color:#8e8e93 !important; }
     min-height:46px;
 }
 [data-testid="stExpander"] summary:hover { background:#fafafc !important; }
+[data-testid="stExpander"] summary [class*="material-symbols"] {
+    font-family:"Material Symbols Rounded", "Material Symbols Outlined", sans-serif !important;
+    font-size:20px !important;
+    line-height:1 !important;
+}
 hr, [data-testid="stDivider"] { border-color:var(--apple-line-soft) !important; }
 
 /* DataFrame / matrix */
@@ -903,11 +908,11 @@ hr, [data-testid="stDivider"] { border-color:var(--apple-line-soft) !important; 
     }
 }
 
-/* 선택한 폰트가 모든 Streamlit/BaseWeb 내부 요소에도 전달되도록 */
-body, button, input, textarea, select,
-[data-testid="stAppViewContainer"] *,
-[data-testid="stDialog"] *,
-[data-baseweb] * {
+/* 선택한 폰트는 실제 텍스트 컨트롤에만 적용.
+   중요: Streamlit/BaseWeb의 Material Symbols 아이콘까지 font-family를 덮어쓰면
+   keyboard_arrow_down / arrow_right 같은 아이콘 이름이 글자로 노출되는 버그가 생긴다. */
+html, body,
+button, input, textarea, select {
     font-family:var(--app-font, "SF Pro Text", "SF Pro Display", -apple-system,
                  BlinkMacSystemFont, "Inter", "Apple SD Gothic Neo",
                  "Noto Sans KR", sans-serif) !important;
@@ -948,10 +953,7 @@ html, body,
     color:var(--tesla-ink) !important;
 }
 
-body, button, input, textarea, select,
-[data-testid="stAppViewContainer"] *,
-[data-testid="stDialog"] *,
-[data-baseweb] * {
+html, body, button, input, textarea, select {
     font-family:var(--app-font, "Universal Sans Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", Arial, sans-serif) !important;
     -webkit-font-smoothing:antialiased;
     text-rendering:optimizeLegibility;
