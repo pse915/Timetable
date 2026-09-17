@@ -622,6 +622,35 @@ hr, [data-testid="stDivider"] { border-color:var(--apple-line-soft) !important; 
     .apple-section-label { margin-top:8px; }
 }
 
+/* 주간 작업 Dialog의 검색 범위/slider는 레이아웃 점프 없이 고정 높이로 표시 */
+.weekly-search-range {
+    margin:10px 0 2px !important;
+    padding:8px 0 0 !important;
+    color:var(--apple-ink) !important;
+    font-size:13px !important;
+    line-height:20px !important;
+}
+.weekly-search-range span { color:var(--apple-muted) !important; font-weight:400 !important; }
+[data-testid="stDialog"] [data-testid="stSlider"] {
+    margin:0 !important;
+    padding:4px 0 0 !important;
+}
+[data-testid="stDialog"] [data-testid="stSlider"] > label {
+    position:static !important;
+    display:block !important;
+    margin:0 0 6px !important;
+    padding:0 !important;
+    line-height:20px !important;
+    min-height:20px !important;
+}
+[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"] {
+    min-height:36px !important;
+    margin:0 !important;
+}
+[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"] > div {
+    line-height:normal !important;
+}
+
 /* -----------------------------------------------------------------------------
    Apple Dark UI refinement
    - 브라우저/OS가 다크 모드일 때 전체 업무 UI를 같은 색상 토큰으로 전환
@@ -692,6 +721,10 @@ hr, [data-testid="stDivider"] { border-color:var(--apple-line-soft) !important; 
     .app-identity strong {
         color:var(--apple-ink) !important;
     }
+
+    .weekly-search-range { color:#f5f5f7 !important; }
+    .weekly-search-range span { color:#a1a1a6 !important; }
+    [data-testid="stDialog"] [data-testid="stSlider"] > label { color:#f5f5f7 !important; }
 
     /* 상단 업무 메뉴 */
     .app-topbar {
@@ -883,7 +916,7 @@ body, button, input, textarea, select,
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 
 # ==========================================================================================
 # UI 폰트 설정
@@ -3495,18 +3528,23 @@ def _weekly_action_dialog():
     # 미래 날짜 검색은 사용자가 필요할 때만 확장한다.
     extra_days = int(st.session_state.get("weekly_dialog_extra_days", 7))
     if action_mode in ("swap", "cycle"):
-        with st.expander("🔎 검색 범위 확장", expanded=False):
-            extra_days = st.slider(
-                "미래 추가 검색 일수", 0, 21, extra_days,
-                key="weekly_dialog_extra_days_input",
-                help="기본값은 미래 7일을 추가 검색합니다. 필요할 때 검색 범위를 조정할 수 있습니다.",
-            )
-            if extra_days != st.session_state.get("weekly_dialog_extra_days"):
-                st.session_state.weekly_dialog_extra_days = extra_days
-                # 범위가 바뀐 경우에만 후보 캐시를 무효화한다.
-                st.session_state.pop("weekly_swap_candidates_key", None)
-                st.session_state.pop("weekly_cycle_candidates_key", None)
-                _weekly_fragment_rerun()
+        # Expander의 열림/닫힘 애니메이션은 Dialog 안에서 BaseWeb 레이아웃을
+        # 재계산하면서 제목과 slider가 순간적으로 겹쳐 보이는 경우가 있다.
+        # 검색 범위는 보조 설정이지만 실제로 자주 쓰이므로 고정된 compact section으로
+        # 표시해 레이아웃 점프를 없앤다.
+        st.markdown('<div class="weekly-search-range">🔎 <strong>검색 범위</strong><span> · 기본 미래 7일 추가</span></div>', unsafe_allow_html=True)
+        extra_days = st.slider(
+            "미래 추가 검색 일수", 0, 21, extra_days,
+            key="weekly_dialog_extra_days_input",
+            help="미래 날짜를 추가로 검색할 범위입니다.",
+        )
+        st.caption(f"미래 {extra_days}일 추가 검색")
+        if extra_days != st.session_state.get("weekly_dialog_extra_days"):
+            st.session_state.weekly_dialog_extra_days = extra_days
+            # 범위가 바뀐 경우에만 후보 캐시를 무효화한다.
+            st.session_state.pop("weekly_swap_candidates_key", None)
+            st.session_state.pop("weekly_cycle_candidates_key", None)
+            _weekly_fragment_rerun()
 
     # ----------------------------------------------------------------
     # 1:1 교환: 사용자가 버튼을 누른 뒤에만 후보 검색
@@ -3772,11 +3810,11 @@ def render_weekly_selection_panel(ref_date, *, use_test=False, title="선택 수
         st.caption("주간표의 수업 셀을 클릭하면 작은 팝업에서 결강·맞교환·보강 작업을 시작할 수 있습니다.")
 
 
-def render_standard_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", key="weekly_matrix", title=None, use_test=False, height=900):
-    """모든 탭이 동일한 주간 매트릭스 렌더러 설정을 사용하도록 하는 표준 래퍼."""
+def render_standard_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", key="weekly_matrix", title=None, use_test=False, height=900, open_dialog=True):
+    """공통 주간 매트릭스 렌더러. open_dialog=False면 조회 전용으로 셀 클릭을 소비한다."""
     return render_weekly_matrix(
         matrix, ref_date, row_label=row_label, height=height, key=key,
-        title=title, show_week_dates=True, use_test=use_test, open_dialog=True
+        title=title, show_week_dates=True, use_test=use_test, open_dialog=open_dialog
     )
 
 
@@ -3892,6 +3930,12 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         return None
 
     lesson = _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, use_test=use_test)
+    if lesson and not open_dialog:
+        # 조회 전용 매트릭스에서는 셀 선택 자체는 허용하되 작업 상태를 만들지 않는다.
+        # 다른 탭으로 이동했을 때 직전 조회표의 selection이 작업 팝업을 재호출하는
+        # 것을 막기 위해 기존 주간 작업 상태도 함께 비운다.
+        _clear_weekly_selection()
+        return None
     if lesson:
         # 선택 상태는 URL이 아니라 session_state에만 저장한다.
         st.session_state.weekly_selected_lesson = lesson
@@ -5004,12 +5048,12 @@ if "시간표 조회" in tab_map:
                 st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
         elif view == "교사별 주간":
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_week_ref")
-            render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False)
+            render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
         elif view == "학급별 주간":
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_class_ref")
-            render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False)
+            render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_class_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체학급_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_class')
         else:
@@ -5019,7 +5063,7 @@ if "시간표 조회" in tab_map:
             teacher_week = effective_teacher_matrix(ref, ver, use_test=False)
             if not teacher_week.empty and t:
                 teacher_week = teacher_week[teacher_week["교사명"].astype(str).str.strip() == str(t).strip()].reset_index(drop=True)
-            render_standard_weekly_matrix(teacher_week, ref, row_label="교사명", key="view_single_teacher_week_matrix", title=f"{t} 주간 시간표", use_test=False)
+            render_standard_weekly_matrix(teacher_week, ref, row_label="교사명", key="view_single_teacher_week_matrix", title=f"{t} 주간 시간표", use_test=False, open_dialog=False)
 
 # ------------------------------------------------------------------ 시간강사 관리
 if "시간강사 관리" in tab_map:
