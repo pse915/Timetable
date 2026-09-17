@@ -1971,14 +1971,39 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
 
 
 def apply_cycle_swaps(moves, is_test=False):
-    if not moves: return False
+    if not moves:
+        return False
     if is_test:
-        for m in moves:
-            a_info = {"교사명": m["teacher"], "요일": m.get("day_from", WEEKDAY_KR[datetime.strptime(m["from_date"], "%Y-%m-%d").weekday()]), "교시": m["from_period"], "학급": m["class"], "과목": m["subject"]}
-            to_day = WEEKDAY_KR[datetime.strptime(m["to_date"], "%Y-%m-%d").weekday()]
-            if not do_linked_swap(a_info, m.get("next_teacher", m["teacher"]), m["from_date"], m["to_date"], to_day, m["to_period"], is_test=True, subject_b=m.get("target_subject", m["subject"])):
-                return False
-        return True
+        # 테스트 순환도 반드시 atomic하게 처리한다. 중간 단계에서 하나라도 실패하면
+        # 앞에서 추가된 test_swaps까지 원상복구해야 한다. 그렇지 않으면 사용자는
+        # "순환 테스트 실패"를 보았는데 일부 테스트 교환만 남는 문제가 발생한다.
+        before = st.session_state.get("test_swaps", pd.DataFrame()).copy(deep=True)
+        before_has_cycle = bool(st.session_state.get("test_has_cycle", False))
+        try:
+            for m in moves:
+                a_info = {
+                    "교사명": m["teacher"],
+                    "요일": m.get("day_from", WEEKDAY_KR[datetime.strptime(m["from_date"], "%Y-%m-%d").weekday()]),
+                    "교시": m["from_period"],
+                    "학급": m["class"],
+                    "과목": m["subject"],
+                }
+                to_day = WEEKDAY_KR[datetime.strptime(m["to_date"], "%Y-%m-%d").weekday()]
+                if not do_linked_swap(
+                    a_info, m.get("next_teacher", m["teacher"]),
+                    m["from_date"], m["to_date"], to_day, m["to_period"],
+                    is_test=True, subject_b=m.get("target_subject", m["subject"])
+                ):
+                    raise ValueError("순환 테스트의 일부 이동을 적용할 수 없습니다.")
+            return True
+        except Exception:
+            st.session_state.test_swaps = before
+            st.session_state["test_has_cycle"] = before_has_cycle
+            get_effective_timetable_for_date.clear()
+            effective_teacher_matrix.clear()
+            get_single_lesson_1to1_candidates.clear()
+            get_single_lesson_linked_cycles.clear()
+            return False
     # 순환 전체를 하나의 atomic 작업으로 기록/저장한다.
     before = st.session_state.swaps.copy(deep=True)
     for m in moves:
