@@ -3068,11 +3068,17 @@ def _weekly_action_dialog():
                     ok = False
                 if ok:
                     st.success("테스트 맞교환이 적용되었습니다." if use_test else "1:1 맞교환이 반영되었습니다.")
-                    # 전체 앱 rerun 대신 dialog fragment만 갱신한다. 팝업을 유지한 채 결과를 보여준다.
                     st.session_state.weekly_dialog_result = (
                         "테스트 맞교환이 적용되었습니다." if use_test else "1:1 맞교환이 반영되었습니다."
                     )
-                    _weekly_fragment_rerun()
+                    if use_test:
+                        # 테스트 데이터는 dialog fragment 밖의 '현재 테스트 중인 맞교환 목록'에도
+                        # 즉시 표시되어야 하므로 dialog만 재실행하면 안 된다.
+                        # 전체 rerun으로 테스트 탭 본문까지 다시 렌더링한다.
+                        st.rerun()
+                    else:
+                        # 실제 변경은 기존의 가벼운 dialog fragment 갱신을 유지한다.
+                        _weekly_fragment_rerun()
                 else:
                     st.error("현재 상태에서는 이 1:1 맞교환을 적용할 수 없습니다. 최신 시간표 상태를 다시 확인해 주세요.")
 
@@ -3122,7 +3128,9 @@ def _weekly_action_dialog():
                             st.session_state["test_has_cycle"] = True
                             st.session_state.weekly_dialog_result = f"테스트 {cyc['length']}인 연계 순환이 적용되었습니다. 실제 저장되지는 않습니다."
                             st.success(st.session_state.weekly_dialog_result)
-                            _weekly_fragment_rerun()
+                            # 연계 순환 테스트도 결과 목록이 dialog 밖의 테스트 탭 본문에
+                            # 즉시 나타나야 하므로 전체 rerun한다.
+                            st.rerun()
 
     # ----------------------------------------------------------------
     # 결강: 입력 UI만 표시하고, 후보 검색은 하지 않는다.
