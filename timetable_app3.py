@@ -5,6 +5,7 @@
 - 결보강 계획서: 보강수업 칸에 '보강 배정된 교사'가 나오도록 수정
 - 연계 순환 알고리즘 대폭 가속
 - 모든 기존 기능 유지
+- Tesla-inspired 디자인 기조 버전
 """
 
 import io
@@ -30,22 +31,1175 @@ from openpyxl.worksheet.page import PageMargins
 # ==========================================================================================
 # 0. 기본 설정
 # ==========================================================================================
-st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", layout="wide")
+st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
-    [data-testid="stDataFrame"] { border: 1px solid #94a3b8 !important; border-radius: 6px; }
-    [data-testid="stDataFrame"] [role="gridcell"], 
-    [data-testid="stDataFrame"] [role="columnheader"] {
-        border-right: 1px solid #cbd5e1 !important;
-        border-bottom: 1px solid #cbd5e1 !important;
+/* =====================================================================================
+   Apple / ChatGPT-inspired UI system
+   - Light: pure white Apple UI as the primary experience
+   - Dark: restrained system-dark fallback
+   - Optimized for Chrome 1920×1080 and responsive down to mobile
+   ===================================================================================== */
+:root {
+    --apple-bg:#ffffff;
+    --apple-surface:#ffffff;
+    --apple-surface-soft:#f5f5f7;
+    --apple-surface-pearl:#fafafc;
+    --apple-ink:#1d1d1f;
+    --apple-ink-2:#3a3a3c;
+    --apple-muted:#6e6e73;
+    --apple-muted-2:#86868b;
+    --apple-line:#d2d2d7;
+    --apple-line-soft:#e5e5ea;
+    --apple-blue:#0066cc;
+    --apple-blue-hover:#0071e3;
+    --apple-focus:rgba(0,102,204,.22);
+    --apple-radius-sm:8px;
+    --apple-radius-md:12px;
+    --apple-radius-lg:18px;
+    --apple-radius-xl:22px;
+}
+
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stApp"],
+[data-testid="stMain"] {
+    background:var(--apple-bg) !important;
+    color:var(--apple-ink) !important;
+}
+
+body, button, input, textarea, select, [data-testid="stDataFrame"] {
+    font-family:var(--app-font, "SF Pro Text", "SF Pro Display", -apple-system,
+                 BlinkMacSystemFont, "Inter", "Apple SD Gothic Neo", "Noto Sans KR",
+                 sans-serif) !important;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+}
+
+[data-testid="stHeader"] {
+    background:rgba(255,255,255,.78) !important;
+    backdrop-filter:saturate(180%) blur(18px);
+    -webkit-backdrop-filter:saturate(180%) blur(18px);
+    border-bottom:1px solid rgba(210,210,215,.72);
+}
+[data-testid="stToolbar"], [data-testid="stDecoration"] { background:transparent !important; }
+[data-testid="stDecoration"] { display:none !important; }
+
+.block-container {
+    width:100% !important;
+    max-width:none !important;
+    padding-top:.55rem !important;
+    padding-bottom:1.25rem !important;
+    padding-left:clamp(.75rem, 1.15vw, 1.5rem) !important;
+    padding-right:clamp(.75rem, 1.15vw, 1.5rem) !important;
+}
+
+/* Cloud header와 실제 앱 toolbar 사이에 확실한 안전 공간 */
+.app-top-safe-space { height:30px; width:100%; flex:0 0 30px; pointer-events:none; }
+
+.app-topbar {
+    position:relative;
+    z-index:2;
+    width:100%;
+    min-height:44px;
+    display:flex;
+    align-items:center;
+    gap:.55rem;
+    padding:.18rem .25rem .38rem;
+    margin:-.08rem 0 .65rem;
+    border-bottom:1px solid var(--apple-line-soft);
+}
+.app-identity {
+    white-space:nowrap;
+    color:var(--apple-muted);
+    font-size:.74rem;
+    line-height:1.15;
+    letter-spacing:-.018em;
+}
+.app-identity strong { color:var(--apple-ink); font-weight:650; }
+.app-topbar .stButton > button {
+    min-height:34px !important;
+    padding:.1rem .72rem !important;
+    border-radius:999px !important;
+    font-size:.77rem !important;
+}
+
+/* Typography */
+h1,h2,h3,h4,h5,h6,p,label,span,div { letter-spacing:-.012em; }
+h1 { font-weight:650 !important; letter-spacing:-.045em !important; }
+h2 { font-weight:650 !important; letter-spacing:-.035em !important; }
+h3 { font-weight:600 !important; letter-spacing:-.03em !important; }
+[data-testid="stCaptionContainer"], .stCaption { color:var(--apple-muted) !important; }
+
+/* Buttons — Apple pill */
+.stButton > button,
+.stDownloadButton > button,
+.stFormSubmitButton > button {
+    min-height:36px !important;
+    border-radius:999px !important;
+    border:1px solid var(--apple-line) !important;
+    background:#fff !important;
+    color:var(--apple-ink) !important;
+    box-shadow:none !important;
+    transition:background .12s ease, border-color .12s ease, transform .08s ease !important;
+}
+.stButton > button:hover,
+.stDownloadButton > button:hover,
+.stFormSubmitButton > button:hover {
+    background:var(--apple-surface-soft) !important;
+    border-color:#b8b8be !important;
+    transform:none;
+    box-shadow:none !important;
+}
+.stButton > button:focus-visible,
+.stDownloadButton > button:focus-visible,
+.stFormSubmitButton > button:focus-visible {
+    outline:3px solid var(--apple-focus) !important;
+    outline-offset:1px;
+}
+.stButton > button[kind="primary"],
+.stFormSubmitButton > button[kind="primary"] {
+    color:#fff !important;
+    background:var(--apple-blue) !important;
+    border-color:var(--apple-blue) !important;
+    font-weight:600 !important;
+}
+.stButton > button[kind="primary"]:hover,
+.stFormSubmitButton > button[kind="primary"]:hover {
+    background:var(--apple-blue-hover) !important;
+    border-color:var(--apple-blue-hover) !important;
+}
+
+/* Inputs / selects */
+[data-baseweb="input"],
+[data-baseweb="textarea"],
+[data-baseweb="select"] > div,
+[data-testid="stDateInput"] > div > div {
+    background:#fff !important;
+    color:var(--apple-ink) !important;
+    border-color:#c7c7cc !important;
+    border-radius:var(--apple-radius-md) !important;
+    box-shadow:none !important;
+}
+[data-baseweb="input"]:focus-within,
+[data-baseweb="textarea"]:focus-within,
+[data-baseweb="select"]:focus-within {
+    border-color:#8ebcf0 !important;
+    box-shadow:0 0 0 3px var(--apple-focus) !important;
+}
+input, textarea { color:var(--apple-ink) !important; background:#fff !important; }
+input::placeholder, textarea::placeholder { color:#8e8e93 !important; }
+[data-baseweb="select"] * { color:var(--apple-ink) !important; }
+
+/* Navigation — Apple-style segmented control */
+[data-testid="stRadio"] {
+    margin:0 !important;
+}
+[data-testid="stRadio"] > div {
+    width:100% !important;
+}
+[data-testid="stRadio"] [role="radiogroup"] {
+    display:flex !important;
+    align-items:center !important;
+    gap:3px !important;
+    width:100% !important;
+    padding:3px !important;
+    background:#f5f5f7 !important;
+    border:1px solid #e5e5ea !important;
+    border-radius:999px !important;
+    overflow-x:auto !important;
+    scrollbar-width:none;
+}
+[data-testid="stRadio"] [role="radiogroup"]::-webkit-scrollbar { display:none; }
+[data-testid="stRadio"] [role="radio"] {
+    flex:0 0 auto !important;
+    min-height:32px !important;
+    padding:0 13px !important;
+    border-radius:999px !important;
+    color:#6e6e73 !important;
+    font-size:13px !important;
+    font-weight:400 !important;
+    letter-spacing:-.2px !important;
+    transition:background .18s ease, color .18s ease, transform .18s ease !important;
+}
+[data-testid="stRadio"] [role="radio"]:hover { background:#ebebf0 !important; color:#1d1d1f !important; }
+[data-testid="stRadio"] [role="radio"][aria-checked="true"] {
+    background:#ffffff !important;
+    color:#1d1d1f !important;
+    font-weight:600 !important;
+    box-shadow:0 1px 3px rgba(0,0,0,.10) !important;
+}
+[data-testid="stRadio"] [role="radio"] > div:first-child { display:none !important; }
+
+/* Apple section rhythm */
+.apple-page-head {
+    display:flex; align-items:flex-end; justify-content:space-between; gap:24px;
+    padding:22px 4px 16px; margin:0 0 8px;
+    border-bottom:1px solid #f0f0f0;
+}
+.apple-page-head h1 { margin:0 !important; font-family:var(--app-font, "SF Pro Display", system-ui, -apple-system, sans-serif) !important;
+    font-size:34px !important; line-height:1.1 !important; font-weight:600 !important; letter-spacing:-.55px !important; }
+.apple-page-head p { margin:7px 0 0 !important; color:#7a7a7a !important; font-size:14px !important; line-height:1.43 !important; }
+.apple-section { margin:14px 0 22px; }
+.apple-section-label { color:#7a7a7a; font-size:12px; font-weight:600; letter-spacing:-.12px; margin:0 0 8px 2px; }
+
+/* Cards / expanders — no heavy elevation */
+[data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stExpander"] {
+    background:#fff !important;
+    border:1px solid #e0e0e0 !important;
+    border-radius:18px !important;
+    box-shadow:none !important;
+}
+[data-testid="stExpander"] summary {
+    color:#1d1d1f !important;
+    font-weight:600 !important;
+    min-height:46px;
+}
+[data-testid="stExpander"] summary:hover { background:#fafafc !important; }
+hr, [data-testid="stDivider"] { border-color:var(--apple-line-soft) !important; }
+
+/* DataFrame / matrix */
+.matrix-shell { margin-top:.2rem; }
+[data-testid="stDataFrame"] {
+    border:1px solid #d2d2d7 !important;
+    border-radius:14px !important;
+    overflow:hidden !important;
+    background:#fff !important;
+    box-shadow:none !important;
+}
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stDataFrame"] [role="columnheader"] {
+    color:var(--apple-ink) !important;
+    border-right:1px solid var(--apple-line-soft) !important;
+    border-bottom:1px solid var(--apple-line-soft) !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"] {
+    background:#f5f5f7 !important;
+    color:#3a3a3c !important;
+    font-weight:600 !important;
+}
+[data-testid="stDataFrame"] [role="gridcell"] { background:#fff !important; }
+
+/* Changed-teacher section */
+.changed-teacher-week-card { margin:.38rem 0 .72rem; }
+.changed-teacher-chip {
+    padding:.36rem .55rem;
+    margin:0 0 .3rem;
+    border:1px solid var(--apple-line-soft);
+    border-radius:10px;
+    background:var(--apple-surface-pearl);
+    font-size:.78rem;
+    color:var(--apple-ink-2);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.tool-section-title {
+    color:var(--apple-muted) !important;
+    font-size:.72rem;
+    font-weight:600;
+    margin:.15rem 0 .35rem .05rem;
+}
+.apple-note { margin:.05rem 0 .45rem; color:var(--apple-muted) !important; font-size:.76rem; line-height:1.4; }
+.apple-note strong { color:var(--apple-ink-2) !important; font-weight:600; }
+.sandbox-title { margin:.1rem 0 .1rem; color:var(--apple-ink) !important; font-size:1rem; font-weight:600; }
+.compact-nav { color:var(--apple-muted) !important; font-size:.78rem; margin:0 0 .28rem .15rem; }
+
+/* Dialog — clean frosted Apple surface, no forced transform/margin/width */
+[data-testid="stDialog"] { color:var(--apple-ink) !important; }
+[data-testid="stDialog"] > div > div {
+    max-height:calc(100vh - 4.5rem) !important;
+    overflow-y:auto !important;
+    background:rgba(255,255,255,.97) !important;
+    border:1px solid var(--apple-line) !important;
+    border-radius:22px !important;
+    color:var(--apple-ink) !important;
+    box-shadow:0 24px 70px rgba(0,0,0,.16) !important;
+}
+[data-testid="stDialog"] button,
+[data-testid="stDialog"] input,
+[data-testid="stDialog"] [role="button"] {
+    transition:none !important;
+    animation:none !important;
+}
+
+/* Login / AI landing area */
+.ai-hero-kicker {
+    color:var(--apple-muted);
+    font-size:.76rem;
+    font-weight:600;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+}
+.ai-hero-title {
+    margin:.55rem 0 .65rem;
+    font-size:clamp(2.8rem,6vw,5.6rem);
+    line-height:.98;
+    font-weight:650;
+    letter-spacing:-.065em;
+    color:#1d1d1f;
+}
+.ai-hero-sub { color:var(--apple-muted); font-size:1rem; line-height:1.55; max-width:680px; margin:0 auto 1.25rem; }
+.ai-prompt-glow { position:relative; margin:1.25rem auto 0; max-width:720px; }
+.ai-prompt-glow:after { display:none; }
+
+@media (min-width:1600px) {
+    .block-container { padding-left:1.25rem !important; padding-right:1.25rem !important; }
+    [data-testid="stDataFrame"] { font-size:.9rem; }
+}
+@media (max-width:1100px) {
+    .app-topbar { gap:.35rem; }
+    .app-identity { display:none; }
+}
+@media (max-width:900px) {
+    .block-container { padding-left:.55rem !important; padding-right:.55rem !important; }
+    [data-baseweb="tab-list"] { overflow-x:auto; }
+    [data-baseweb="tab"] { white-space:nowrap; }
+}
+
+/* System dark fallback: same design language, inverted surfaces */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --apple-bg:#000000; --apple-surface:#0d0d0f; --apple-surface-soft:#1c1c1e;
+        --apple-surface-pearl:#151517; --apple-ink:#f5f5f7; --apple-ink-2:#e5e5ea;
+        --apple-muted:#98989d; --apple-muted-2:#6e6e73; --apple-line:#38383d;
+        --apple-line-soft:#28282c; --apple-blue:#2997ff; --apple-blue-hover:#47a6ff;
+        --apple-focus:rgba(41,151,255,.28);
     }
-    .login-box { max-width: 420px; margin: 80px auto; padding: 30px; border: 1px solid #cbd5e1; border-radius: 12px; background: #f8fafc; }
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"], [data-testid="stMain"] { background:#000 !important; color:#f5f5f7 !important; }
+    [data-testid="stHeader"] { background:rgba(0,0,0,.78) !important; border-bottom-color:#28282c !important; }
+    .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button { background:#151517 !important; color:#f5f5f7 !important; border-color:#38383d !important; }
+    .stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover { background:#202023 !important; }
+    .stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] { background:#f5f5f7 !important; color:#111113 !important; border-color:#f5f5f7 !important; }
+    [data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"] > div, [data-testid="stDateInput"] > div > div, input, textarea { background:#151517 !important; color:#f5f5f7 !important; border-color:#38383d !important; }
+    [data-baseweb="select"] * { color:#f5f5f7 !important; }
+    [data-testid="stVerticalBlockBorderWrapper"], [data-testid="stExpander"] { background:#0d0d0f !important; border-color:#38383d !important; }
+    [data-testid="stExpander"] summary { color:#f5f5f7 !important; }
+    [data-baseweb="tab-list"] { background:#1c1c1e !important; border-color:#28282c !important; }
+    [data-baseweb="tab"][aria-selected="true"] { background:#2c2c2e !important; color:#fff !important; }
+    [data-testid="stRadio"] [role="radiogroup"] { background:#1c1c1e !important; border-color:#38383d !important; }
+    [data-testid="stRadio"] [role="radio"] { color:#98989d !important; }
+    [data-testid="stRadio"] [role="radio"]:hover { background:#2c2c2e !important; color:#f5f5f7 !important; }
+    [data-testid="stRadio"] [role="radio"][aria-checked="true"] { background:#2c2c2e !important; color:#fff !important; box-shadow:0 1px 3px rgba(0,0,0,.35) !important; }
+    [data-testid="stDataFrame"] { background:#0d0d0f !important; border-color:#48484d !important; }
+    [data-testid="stDataFrame"] [role="gridcell"] { background:#0d0d0f !important; color:#f5f5f7 !important; border-color:#28282c !important; }
+    [data-testid="stDataFrame"] [role="columnheader"] { background:#1c1c1e !important; color:#f5f5f7 !important; border-color:#38383d !important; }
+    [data-testid="stDialog"] > div > div { background:rgba(13,13,15,.98) !important; color:#f5f5f7 !important; border-color:#38383d !important; box-shadow:0 24px 70px rgba(0,0,0,.5) !important; }
+    .changed-teacher-chip { background:#151517; border-color:#303035; color:#e5e5ea; }
+    .ai-hero-title { color:#fff !important; }
+}
+</style>
+<style>
+
+/* -----------------------------------------------------------------------------
+   Apple 업무형 리뉴얼 v3
+   - 장식보다 작업 흐름을 우선
+   - primary action = Action Blue
+   - 카드/버튼의 무거운 그림자 제거
+   - 44px 터치 영역과 명확한 정보 계층
+   ----------------------------------------------------------------------------- */
+.app-top-safe-space { height:30px !important; }
+.app-topbar {
+    min-height:52px !important;
+    padding:4px 4px 9px !important;
+    margin:0 0 4px !important;
+    border-bottom:1px solid #e5e5ea !important;
+}
+.app-identity {
+    font-size:13px !important;
+    color:#6e6e73 !important;
+    letter-spacing:-.22px !important;
+}
+.app-identity strong { color:#1d1d1f !important; font-weight:600 !important; }
+
+/* 상단 업무 메뉴만 segmented navigation으로 사용 */
+.app-topbar [data-testid="stRadio"] { width:100% !important; }
+.app-topbar [data-testid="stRadio"] [role="radiogroup"] {
+    justify-content:flex-start !important;
+    gap:2px !important;
+    padding:3px !important;
+    background:#f5f5f7 !important;
+    border:1px solid #e0e0e0 !important;
+    border-radius:9999px !important;
+}
+.app-topbar [data-testid="stRadio"] [role="radio"] {
+    min-height:38px !important;
+    padding:0 14px !important;
+    font-size:13px !important;
+    color:#6e6e73 !important;
+    border-radius:9999px !important;
+}
+.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
+    background:#fff !important;
+    color:#1d1d1f !important;
+    font-weight:600 !important;
+    box-shadow:none !important;
+    border:1px solid #e0e0e0 !important;
+}
+.app-topbar .stButton > button {
+    min-height:40px !important;
+    font-size:13px !important;
+    padding:0 15px !important;
+    border-radius:9999px !important;
+}
+
+/* 모든 일반 버튼: 44px에 가까운 편안한 작업 영역 */
+.stButton > button,
+.stDownloadButton > button,
+.stFormSubmitButton > button {
+    min-height:42px !important;
+    padding:8px 18px !important;
+    border-radius:9999px !important;
+    border:1px solid #d2d2d7 !important;
+    background:#fff !important;
+    color:#1d1d1f !important;
+    box-shadow:none !important;
+    transition:background .12s ease, border-color .12s ease, transform .08s ease !important;
+}
+.stButton > button:hover,
+.stDownloadButton > button:hover,
+.stFormSubmitButton > button:hover {
+    background:#f5f5f7 !important;
+    border-color:#b8b8be !important;
+    box-shadow:none !important;
+    transform:none !important;
+}
+.stButton > button:active,
+.stDownloadButton > button:active,
+.stFormSubmitButton > button:active { transform:scale(.98) !important; }
+.stButton > button[kind="primary"],
+.stFormSubmitButton > button[kind="primary"] {
+    min-height:44px !important;
+    background:#0066cc !important;
+    border-color:#0066cc !important;
+    color:#fff !important;
+    font-weight:600 !important;
+}
+.stButton > button[kind="primary"]:hover,
+.stFormSubmitButton > button[kind="primary"]:hover {
+    background:#0071e3 !important;
+    border-color:#0071e3 !important;
+}
+
+/* 일반 보기 방식 radio는 업무메뉴와 다른 문법으로 */
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"] {
+    background:transparent !important;
+    border:0 !important;
+    padding:0 !important;
+    gap:8px !important;
+    overflow:visible !important;
+}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"] {
+    min-height:38px !important;
+    padding:7px 14px !important;
+    border:1px solid #e0e0e0 !important;
+    border-radius:9999px !important;
+    background:#fff !important;
+    color:#6e6e73 !important;
+}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"] {
+    background:#f5f5f7 !important;
+    color:#1d1d1f !important;
+    border-color:#c7c7cc !important;
+    font-weight:600 !important;
+    box-shadow:none !important;
+}
+
+/* 페이지 헤더: 업무 제목 + 설명을 더 조용하게 */
+.apple-page-head {
+    padding:18px 4px 14px !important;
+    margin:0 0 10px !important;
+    border-bottom:1px solid #f0f0f0 !important;
+}
+.apple-page-head h1 {
+    font-size:32px !important;
+    line-height:1.12 !important;
+    font-weight:600 !important;
+    letter-spacing:-.8px !important;
+}
+.apple-page-head p {
+    margin-top:6px !important;
+    font-size:14px !important;
+    line-height:1.5 !important;
+    color:#6e6e73 !important;
+}
+.apple-section-label {
+    font-size:12px !important;
+    color:#6e6e73 !important;
+    white-space:nowrap;
+}
+
+/* 업무 카드 / expander */
+[data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stExpander"] {
+    border:1px solid #e0e0e0 !important;
+    border-radius:18px !important;
+    box-shadow:none !important;
+    background:#fff !important;
+}
+[data-testid="stExpander"] summary {
+    min-height:50px !important;
+    padding:8px 14px !important;
+    font-size:15px !important;
+    color:#1d1d1f !important;
+}
+
+/* 입력 컨트롤: 검색/선택은 pill, 날짜도 충분한 높이 */
+[data-baseweb="input"],
+[data-baseweb="textarea"],
+[data-baseweb="select"] > div,
+[data-testid="stDateInput"] > div > div {
+    min-height:42px !important;
+    border-radius:11px !important;
+    border-color:#c7c7cc !important;
+    box-shadow:none !important;
+}
+[data-baseweb="select"] > div { min-height:42px !important; }
+
+/* 핵심 매트릭스: 얇은 선 + 충분한 행 높이 */
+.matrix-shell { margin-top:4px !important; }
+[data-testid="stDataFrame"] {
+    border:1px solid #d2d2d7 !important;
+    border-radius:14px !important;
+    box-shadow:none !important;
+    overflow:hidden !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"] {
+    background:#f5f5f7 !important;
+    color:#3a3a3c !important;
+    font-size:12px !important;
+    font-weight:600 !important;
+}
+[data-testid="stDataFrame"] [role="gridcell"] {
+    background:#fff !important;
+    color:#1d1d1f !important;
+    font-size:13px !important;
+}
+
+/* 테스트 샌드박스: '안전한 작업 공간'의 시각적 계층 */
+.sandbox-title {
+    margin:2px 0 3px !important;
+    font-size:24px !important;
+    line-height:1.2 !important;
+    font-weight:600 !important;
+    letter-spacing:-.5px !important;
+}
+.sandbox-title + .apple-note {
+    margin-bottom:14px !important;
+}
+.sandbox-title ~ [data-testid="stButton"] button { min-height:44px !important; }
+.apple-note {
+    color:#6e6e73 !important;
+    font-size:13px !important;
+    line-height:1.55 !important;
+}
+.apple-note strong { color:#1d1d1f !important; font-weight:600 !important; }
+
+/* 테스트 목록/관리 결과표는 white utility surface */
+[data-testid="stDataFrame"] + div { min-height:0; }
+
+/* Dialog는 작업 집중 공간. 외부 위치/transform은 건드리지 않는다. */
+[data-testid="stDialog"] > div > div {
+    border:1px solid #d2d2d7 !important;
+    border-radius:18px !important;
+    box-shadow:0 18px 50px rgba(0,0,0,.12) !important;
+}
+[data-testid="stDialog"] .stButton > button { min-height:44px !important; }
+
+/* 모바일에서는 메뉴가 잘리지 않고 가로 스크롤 */
+@media (max-width:1100px) {
+    .app-identity { display:none !important; }
+    .app-topbar { gap:4px !important; }
+    .app-topbar [data-testid="stRadio"] [role="radio"] { padding:0 11px !important; }
+}
+@media (max-width:700px) {
+    .block-container { padding-left:10px !important; padding-right:10px !important; }
+    .apple-page-head { padding-top:14px !important; }
+    .apple-page-head h1 { font-size:27px !important; }
+    .apple-page-head { display:block !important; }
+    .apple-section-label { margin-top:8px; }
+}
+
+/* 주간 작업 Dialog의 검색 범위/slider는 레이아웃 점프 없이 고정 높이로 표시 */
+.weekly-search-range {
+    margin:10px 0 2px !important;
+    padding:8px 0 0 !important;
+    color:var(--apple-ink) !important;
+    font-size:13px !important;
+    line-height:20px !important;
+}
+.weekly-search-range span { color:var(--apple-muted) !important; font-weight:400 !important; }
+[data-testid="stDialog"] [data-testid="stSlider"] {
+    margin:0 !important;
+    padding:4px 0 0 !important;
+}
+[data-testid="stDialog"] [data-testid="stSlider"] > label {
+    position:static !important;
+    display:block !important;
+    margin:0 0 6px !important;
+    padding:0 !important;
+    line-height:20px !important;
+    min-height:20px !important;
+}
+[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"] {
+    min-height:36px !important;
+    margin:0 !important;
+}
+[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"] > div {
+    line-height:normal !important;
+}
+
+/* -----------------------------------------------------------------------------
+   Apple Dark UI refinement
+   - 브라우저/OS가 다크 모드일 때 전체 업무 UI를 같은 색상 토큰으로 전환
+   - 순수 검정보다 눈부심을 줄인 #1c1c1e 계열 surface 사용
+   - 매트릭스의 셀 경계/헤더/상태 표시를 별도로 보정
+   ----------------------------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --apple-bg:#000000;
+        --apple-surface:#1c1c1e;
+        --apple-surface-soft:#2c2c2e;
+        --apple-surface-pearl:#232326;
+        --apple-ink:#f5f5f7;
+        --apple-ink-2:#e5e5ea;
+        --apple-muted:#a1a1a6;
+        --apple-muted-2:#8e8e93;
+        --apple-line:#48484a;
+        --apple-line-soft:#38383a;
+        --apple-blue:#2997ff;
+        --apple-blue-hover:#47a6ff;
+        --apple-focus:rgba(41,151,255,.32);
+    }
+
+    html, body,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stApp"],
+    [data-testid="stMain"],
+    [data-testid="stMainBlockContainer"] {
+        background:var(--apple-bg) !important;
+        color:var(--apple-ink) !important;
+    }
+
+    [data-testid="stHeader"] {
+        background:rgba(0,0,0,.86) !important;
+        border-bottom:1px solid #2c2c2e !important;
+    }
+
+    [data-testid="stHeader"] *,
+    [data-testid="stMain"] *,
+    [data-testid="stAppViewContainer"] * {
+        scrollbar-color:#48484a transparent;
+    }
+
+    /* Streamlit 기본 텍스트 계층 */
+    h1,h2,h3,h4,h5,h6,
+    p, label, span, div, li, td, th {
+        color:inherit;
+    }
+    [data-testid="stCaptionContainer"],
+    .stCaption,
+    .apple-page-head p,
+    .apple-section-label,
+    .apple-note,
+    .compact-nav,
+    .tool-section-title {
+        color:var(--apple-muted) !important;
+    }
+
+    .apple-page-head {
+        border-bottom-color:#2c2c2e !important;
+    }
+    .apple-page-head h1,
+    .sandbox-title,
+    .ai-hero-title {
+        color:var(--apple-ink) !important;
+    }
+    .apple-note strong,
+    .app-identity strong {
+        color:var(--apple-ink) !important;
+    }
+
+    .weekly-search-range { color:#f5f5f7 !important; }
+    .weekly-search-range span { color:#a1a1a6 !important; }
+    [data-testid="stDialog"] [data-testid="stSlider"] > label { color:#f5f5f7 !important; }
+
+    /* 상단 업무 메뉴 */
+    .app-topbar {
+        border-bottom-color:#2c2c2e !important;
+    }
+    .app-identity {
+        color:var(--apple-muted) !important;
+    }
+    .app-topbar [data-testid="stRadio"] [role="radiogroup"] {
+        background:#1c1c1e !important;
+        border-color:#38383a !important;
+    }
+    .app-topbar [data-testid="stRadio"] [role="radio"] {
+        color:#a1a1a6 !important;
+    }
+    .app-topbar [data-testid="stRadio"] [role="radio"]:hover {
+        background:#2c2c2e !important;
+        color:#f5f5f7 !important;
+    }
+    .app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
+        background:#3a3a3c !important;
+        color:#fff !important;
+        border-color:#48484a !important;
+    }
+
+    /* 일반 버튼 */
+    .stButton > button,
+    .stDownloadButton > button,
+    .stFormSubmitButton > button {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+    }
+    .stButton > button:hover,
+    .stDownloadButton > button:hover,
+    .stFormSubmitButton > button:hover {
+        background:#2c2c2e !important;
+        border-color:#636366 !important;
+    }
+    .stButton > button[kind="primary"],
+    .stFormSubmitButton > button[kind="primary"] {
+        background:var(--apple-blue) !important;
+        color:#fff !important;
+        border-color:var(--apple-blue) !important;
+    }
+    .stButton > button[kind="primary"]:hover,
+    .stFormSubmitButton > button[kind="primary"]:hover {
+        background:var(--apple-blue-hover) !important;
+        border-color:var(--apple-blue-hover) !important;
+    }
+
+    /* 입력/선택 */
+    [data-baseweb="input"],
+    [data-baseweb="textarea"],
+    [data-baseweb="select"] > div,
+    [data-testid="stDateInput"] > div > div,
+    [data-testid="stNumberInput"] > div > div,
+    input, textarea {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+        caret-color:#2997ff !important;
+    }
+    input::placeholder,
+    textarea::placeholder {
+        color:#8e8e93 !important;
+    }
+    [data-baseweb="select"] *,
+    [data-baseweb="input"] *,
+    [data-baseweb="textarea"] * {
+        color:#f5f5f7 !important;
+    }
+    [data-baseweb="select"] > div:hover {
+        border-color:#636366 !important;
+    }
+    [data-baseweb="input"]:focus-within,
+    [data-baseweb="textarea"]:focus-within,
+    [data-baseweb="select"]:focus-within {
+        border-color:#2997ff !important;
+        box-shadow:0 0 0 3px rgba(41,151,255,.25) !important;
+    }
+
+    /* 팝업/메뉴/캘린더 등 BaseWeb overlay */
+    [data-baseweb="popover"],
+    [data-baseweb="menu"],
+    [role="listbox"],
+    [data-baseweb="calendar"],
+    [data-baseweb="modal"] {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+    }
+    [role="option"]:hover,
+    [role="menuitem"]:hover {
+        background:#2c2c2e !important;
+    }
+
+    /* 카드 / expander */
+    [data-testid="stVerticalBlockBorderWrapper"],
+    [data-testid="stExpander"] {
+        background:#1c1c1e !important;
+        border-color:#38383a !important;
+        color:#f5f5f7 !important;
+    }
+    [data-testid="stExpander"] summary {
+        color:#f5f5f7 !important;
+    }
+    [data-testid="stExpander"] summary:hover {
+        background:#232326 !important;
+    }
+    hr, [data-testid="stDivider"] {
+        border-color:#38383a !important;
+    }
+
+    /* 핵심 주간 매트릭스 */
+    [data-testid="stDataFrame"] {
+        background:#1c1c1e !important;
+        border-color:#48484a !important;
+    }
+    [data-testid="stDataFrame"] [role="columnheader"] {
+        background:#2c2c2e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+    }
+    [data-testid="stDataFrame"] [role="gridcell"] {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#38383a !important;
+    }
+    [data-testid="stDataFrame"] [role="gridcell"]:hover {
+        background:#252528 !important;
+    }
+
+    /* 변경 교사 chip / 상태성 UI */
+    .changed-teacher-chip {
+        background:#232326 !important;
+        color:#e5e5ea !important;
+        border-color:#38383a !important;
+    }
+
+    /* Dialog */
+    [data-testid="stDialog"] {
+        color:#f5f5f7 !important;
+    }
+    [data-testid="stDialog"] > div > div {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+        box-shadow:0 24px 70px rgba(0,0,0,.58) !important;
+    }
+    [data-testid="stDialog"] .stButton > button {
+        background:#2c2c2e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+    }
+    [data-testid="stDialog"] .stButton > button[kind="primary"] {
+        background:#2997ff !important;
+        color:#fff !important;
+        border-color:#2997ff !important;
+    }
+
+    /* 알림/메시지 컨테이너는 원래 의미를 유지하되 다크 surface로 */
+    [data-testid="stAlert"] {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+    }
+
+    /* 링크/포커스 */
+    a {
+        color:#2997ff !important;
+    }
+    *:focus-visible {
+        outline-color:#2997ff !important;
+    }
+}
+
+/* 선택한 폰트가 모든 Streamlit/BaseWeb 내부 요소에도 전달되도록 */
+body, button, input, textarea, select,
+[data-testid="stAppViewContainer"] *,
+[data-testid="stDialog"] *,
+[data-baseweb] * {
+    font-family:var(--app-font, "SF Pro Text", "SF Pro Display", -apple-system,
+                 BlinkMacSystemFont, "Inter", "Apple SD Gothic Neo",
+                 "Noto Sans KR", sans-serif) !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+# ==========================================================================================
+# Tesla-inspired design system variant
+# - Source: user-provided teslaDESIGN.md
+# - White canvas, Electric Blue CTA, flat UI, 4px controls, no gradients/shadows/pills
+# - Adapted for a dense school timetable workflow rather than a photography-first landing page.
+# ==========================================================================================
+st.markdown("""
+<style>
+:root {
+    --tesla-bg:#ffffff;
+    --tesla-surface:#ffffff;
+    --tesla-ash:#f4f4f4;
+    --tesla-ink:#171a20;
+    --tesla-graphite:#393c41;
+    --tesla-pewter:#5c5e62;
+    --tesla-placeholder:#8e8e8e;
+    --tesla-line:#eeeeee;
+    --tesla-line-strong:#d0d1d2;
+    --tesla-blue:#3e6ae1;
+    --tesla-blue-hover:#3457bd;
+    --tesla-focus:rgba(62,106,225,.22);
+}
+
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stApp"],
+[data-testid="stMain"] {
+    background:var(--tesla-bg) !important;
+    color:var(--tesla-ink) !important;
+}
+
+body, button, input, textarea, select,
+[data-testid="stAppViewContainer"] *,
+[data-testid="stDialog"] *,
+[data-baseweb] * {
+    font-family:var(--app-font, "Universal Sans Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", Arial, sans-serif) !important;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+}
+
+/* Tesla-style top navigation: quiet, flat, no segmented pill */
+.app-topbar {
+    min-height:46px !important;
+    padding:4px 0 7px !important;
+    margin:0 0 8px !important;
+    border-bottom:0 !important;
+}
+.app-identity {
+    color:var(--tesla-pewter) !important;
+    font-size:14px !important;
+    letter-spacing:0 !important;
+}
+.app-identity strong { color:var(--tesla-ink) !important; font-weight:500 !important; }
+.app-topbar [data-testid="stRadio"] [role="radiogroup"] {
+    background:transparent !important;
+    border:0 !important;
+    border-radius:0 !important;
+    padding:0 !important;
+    gap:2px !important;
+}
+.app-topbar [data-testid="stRadio"] [role="radio"] {
+    min-height:32px !important;
+    padding:4px 14px !important;
+    border-radius:4px !important;
+    color:var(--tesla-graphite) !important;
+    font-size:14px !important;
+    font-weight:500 !important;
+    background:transparent !important;
+    border:0 !important;
+}
+.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
+    background:var(--tesla-ash) !important;
+    color:var(--tesla-ink) !important;
+    box-shadow:none !important;
+    border:0 !important;
+}
+
+/* Flat technical controls */
+.stButton > button,
+.stDownloadButton > button,
+.stFormSubmitButton > button {
+    min-height:40px !important;
+    padding:4px 16px !important;
+    border-radius:4px !important;
+    border:1px solid var(--tesla-line-strong) !important;
+    background:#fff !important;
+    color:var(--tesla-graphite) !important;
+    box-shadow:none !important;
+    transition:background-color .33s cubic-bezier(.5,0,0,.75), border-color .33s cubic-bezier(.5,0,0,.75), color .33s cubic-bezier(.5,0,0,.75) !important;
+    transform:none !important;
+}
+.stButton > button:hover,
+.stDownloadButton > button:hover,
+.stFormSubmitButton > button:hover {
+    background:var(--tesla-ash) !important;
+    border-color:var(--tesla-line-strong) !important;
+    box-shadow:none !important;
+    transform:none !important;
+}
+.stButton > button[kind="primary"],
+.stFormSubmitButton > button[kind="primary"] {
+    min-height:40px !important;
+    background:var(--tesla-blue) !important;
+    border-color:var(--tesla-blue) !important;
+    color:#fff !important;
+    font-weight:500 !important;
+}
+.stButton > button[kind="primary"]:hover,
+.stFormSubmitButton > button[kind="primary"]:hover {
+    background:var(--tesla-blue-hover) !important;
+    border-color:var(--tesla-blue-hover) !important;
+}
+
+/* Non-toolbar radios */
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"] {
+    background:transparent !important;
+    border:0 !important;
+    padding:0 !important;
+    gap:4px !important;
+}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"] {
+    min-height:34px !important;
+    padding:4px 14px !important;
+    border:1px solid var(--tesla-line-strong) !important;
+    border-radius:4px !important;
+    background:#fff !important;
+    color:var(--tesla-graphite) !important;
+    font-size:14px !important;
+    font-weight:500 !important;
+}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"] {
+    background:var(--tesla-ash) !important;
+    color:var(--tesla-ink) !important;
+    border-color:var(--tesla-line-strong) !important;
+    box-shadow:none !important;
+}
+
+/* Typography: 400/500 only, normal tracking */
+.apple-page-head {
+    padding:16px 0 12px !important;
+    margin:0 0 10px !important;
+    border-bottom:0 !important;
+}
+.apple-page-head h1 {
+    color:var(--tesla-ink) !important;
+    font-size:32px !important;
+    line-height:1.2 !important;
+    font-weight:500 !important;
+    letter-spacing:0 !important;
+}
+.apple-page-head p {
+    color:var(--tesla-graphite) !important;
+    font-size:14px !important;
+    line-height:20px !important;
+    letter-spacing:0 !important;
+}
+.apple-section-label { color:var(--tesla-pewter) !important; font-size:14px !important; }
+
+/* Flat containers: spacing, not shadows, supplies hierarchy */
+[data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stExpander"] {
+    border:0 !important;
+    border-radius:0 !important;
+    box-shadow:none !important;
+    background:#fff !important;
+}
+[data-testid="stExpander"] summary {
+    min-height:40px !important;
+    padding:6px 0 !important;
+    color:var(--tesla-ink) !important;
+    font-size:14px !important;
+    font-weight:500 !important;
+}
+
+[data-baseweb="input"],
+[data-baseweb="textarea"],
+[data-baseweb="select"] > div,
+[data-testid="stDateInput"] > div > div {
+    min-height:40px !important;
+    border-radius:4px !important;
+    border-color:var(--tesla-line-strong) !important;
+    box-shadow:none !important;
+    background:#fff !important;
+    color:var(--tesla-ink) !important;
+}
+
+/* Timetable matrix: light separators only; no card shadow/border */
+[data-testid="stDataFrame"] {
+    border:0 !important;
+    border-radius:0 !important;
+    box-shadow:none !important;
+    overflow:hidden !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"] {
+    background:var(--tesla-ash) !important;
+    color:var(--tesla-graphite) !important;
+    font-size:12px !important;
+    font-weight:500 !important;
+    border-bottom:1px solid var(--tesla-line) !important;
+}
+[data-testid="stDataFrame"] [role="gridcell"] {
+    background:#fff !important;
+    color:var(--tesla-ink) !important;
+    font-size:13px !important;
+    border-right:1px solid var(--tesla-line) !important;
+    border-bottom:1px solid var(--tesla-line) !important;
+}
+
+/* Search-range block: label is rendered by our own HTML, slider label is collapsed */
+.weekly-search-range {
+    margin:10px 0 2px !important;
+    padding:8px 0 0 !important;
+    color:var(--tesla-ink) !important;
+    font-size:14px !important;
+    line-height:20px !important;
+}
+.weekly-search-range span { color:var(--tesla-pewter) !important; font-weight:400 !important; }
+[data-testid="stDialog"] [data-testid="stSlider"] { margin:0 !important; padding:2px 0 0 !important; }
+[data-testid="stDialog"] [data-testid="stSlider"] > label { display:none !important; }
+[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"] { min-height:34px !important; margin:0 !important; }
+
+/* Dialog: flat Tesla-style panel */
+[data-testid="stDialog"] > div > div {
+    border:0 !important;
+    border-radius:4px !important;
+    box-shadow:0 10px 30px rgba(0,0,0,.10) !important;
+    background:#fff !important;
+}
+[data-testid="stDialog"] .stButton > button { min-height:40px !important; border-radius:4px !important; }
+
+/* Links / status copy */
+a { color:var(--tesla-blue) !important; }
+[data-testid="stCaptionContainer"], .stCaption { color:var(--tesla-pewter) !important; }
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --tesla-bg:#171a20;
+        --tesla-surface:#171a20;
+        --tesla-ash:#23272d;
+        --tesla-ink:#ffffff;
+        --tesla-graphite:#d0d1d2;
+        --tesla-pewter:#aeb0b4;
+        --tesla-placeholder:#8e8e8e;
+        --tesla-line:#2d3138;
+        --tesla-line-strong:#4a4f57;
+        --tesla-blue:#3e6ae1;
+        --tesla-blue-hover:#5278e8;
+    }
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"], [data-testid="stMain"] { background:var(--tesla-bg) !important; color:var(--tesla-ink) !important; }
+    [data-testid="stHeader"] { background:rgba(23,26,32,.88) !important; border-bottom:0 !important; }
+    .app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"],
+    [data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"] { background:var(--tesla-ash) !important; color:#fff !important; }
+    .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button,
+    [data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"] > div,
+    [data-testid="stDateInput"] > div > div { background:var(--tesla-surface) !important; color:var(--tesla-ink) !important; border-color:var(--tesla-line-strong) !important; }
+    .stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover { background:var(--tesla-ash) !important; }
+    [data-testid="stDataFrame"] [role="columnheader"] { background:var(--tesla-ash) !important; color:var(--tesla-graphite) !important; border-color:var(--tesla-line) !important; }
+    [data-testid="stDataFrame"] [role="gridcell"] { background:var(--tesla-surface) !important; color:var(--tesla-ink) !important; border-color:var(--tesla-line) !important; }
+    [data-testid="stDialog"] > div > div { background:var(--tesla-surface) !important; color:var(--tesla-ink) !important; }
+    .apple-page-head h1, .apple-section-label, [data-testid="stDialog"], [data-testid="stDialog"] * { color:var(--tesla-ink) !important; }
+    .apple-page-head p, .app-identity, [data-testid="stCaptionContainer"], .stCaption, .weekly-search-range span { color:var(--tesla-pewter) !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
+APP_VERSION = "2.1.2-Tesla"
+
+# ==========================================================================================
+# UI 폰트 설정
+# - 외부 웹폰트 다운로드에 의존하지 않고, 사용자의 OS에 설치된 폰트를 우선 사용한다.
+# - 한국어 fallback을 충분히 제공하여 학교 PC에서도 깨지지 않게 한다.
+# ==========================================================================================
+UI_FONT_OPTIONS = {
+    "Universal Sans (Tesla)": '"Universal Sans Text", "Universal Sans Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", Arial, sans-serif',
+    "시스템 기본 (Apple / Windows)": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif',
+    "Pretendard": '"Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif',
+    "Noto Sans KR": '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif',
+    "Inter": '"Inter", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif',
+}
+UI_FONT_DEFAULT = "Universal Sans (Tesla)"
+
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
 MAX_PERIOD = 7
@@ -111,18 +1265,33 @@ ROLE_GUEST = "게스트"
 MASTER_ID = "pse915"
 
 ALL_TABS = [
+    # 매일 사용하는 수업 업무를 먼저 배치하고, 관리 업무를 뒤에 묶는다.
     "시간표 조회",
-    "시간강사 관리",
     "결강·보강",
     "시간표 맞교환 & 변경 추천",
-    "통계",
     "시간표 변경 테스트용",
     "변경된 교사 주간표",
+    "시간강사 관리",
+    "통계",
     "📋 복무 관리 & 판단",
     "🛠️ 다중 출장·전체 조정 추천",
     "🔑 아이디·권한 관리",
     "📑 회원별 탭 권한 관리"
 ]
+
+NAV_LABELS = {
+    "시간표 조회": "시간표",
+    "시간강사 관리": "시간강사",
+    "결강·보강": "결강·보강",
+    "시간표 맞교환 & 변경 추천": "맞교환",
+    "통계": "통계",
+    "시간표 변경 테스트용": "테스트",
+    "변경된 교사 주간표": "변경 교사",
+    "📋 복무 관리 & 판단": "복무",
+    "🛠️ 다중 출장·전체 조정 추천": "다중 조정",
+    "🔑 아이디·권한 관리": "아이디",
+    "📑 회원별 탭 권한 관리": "탭 권한",
+}
 
 DEFAULT_TABS = {
     ROLE_MASTER: ALL_TABS,
@@ -384,7 +1553,7 @@ def _daily_schedule_matrix(ref_date: date, *, teacher_filter=None, use_test=Fals
 
 def daily_schedule_picker(ref_date=None, key="daily_schedule", *, teacher_filter=None, use_test=False,
                           multi=False, height=430, help_text=None):
-    """달력에서 날짜를 고른 뒤 그 날짜의 시간표 매트릭스에서 수업 셀을 선택한다."""
+    """달력 → 선택 날짜의 교사×교시 매트릭스. 날짜/대상별 위젯 상태를 분리한다."""
     ref_date = ref_date or _today_kst()
     picked_date = calendar_picker("날짜", ref_date, key=f"{key}_date")
     ver=st.session_state.get("_data_version",0)
@@ -393,14 +1562,23 @@ def daily_schedule_picker(ref_date=None, key="daily_schedule", *, teacher_filter
     if matrix.empty:
         st.info("선택한 날짜의 시간표가 없습니다.")
         return picked_date, matrix, []
+    teacher_key = str(teacher_filter or "all").strip().replace(" ", "_")
+    matrix_key = f"{key}_matrix_{picked_date:%Y%m%d}_{teacher_key}_{'test' if use_test else 'live'}"
+    state_key = f"_{key}_selected_cells_{picked_date:%Y%m%d}_{teacher_key}_{'test' if use_test else 'live'}"
     event=st.dataframe(matrix, hide_index=True, use_container_width=True, height=height,
-                       key=f"{key}_matrix", on_select="rerun",
+                       key=matrix_key, on_select="rerun",
                        selection_mode="multi-cell" if multi else "single-cell")
     cells=getattr(getattr(event,"selection",None),"cells",[]) or []
+    if cells:
+        st.session_state[state_key]=list(cells)
+    elif event is not None and state_key in st.session_state:
+        # 새 클릭에서 selection이 비어 전달되는 경우(빈 셀/선택 해제)
+        # 직전 셀 선택을 재사용하지 않는다.
+        st.session_state[state_key]=[]
+    saved_cells=st.session_state.get(state_key,[])
     selections=[]
-    for row_idx,col_name in cells:
-        if row_idx<0 or row_idx>=len(matrix) or col_name=="교사명":
-            continue
+    for row_idx,col_name in saved_cells:
+        if row_idx<0 or row_idx>=len(matrix) or col_name=="교사명": continue
         teacher=str(matrix.iloc[row_idx]["교사명"]).strip()
         period=safe_int(str(col_name).replace("교시",""))
         value=str(matrix.iloc[row_idx][col_name]).strip()
@@ -409,8 +1587,7 @@ def daily_schedule_picker(ref_date=None, key="daily_schedule", *, teacher_filter
                                "요일":WEEKDAY_KR[picked_date.weekday()],"교시":period,"표시":value})
     if selections:
         st.success("선택: " + " · ".join(f"{x['교사명']} {x['교시']}교시" for x in selections[:8]))
-    if help_text:
-        st.caption(help_text)
+    if help_text: st.caption(help_text)
     return picked_date, matrix, selections
 
 
@@ -429,9 +1606,6 @@ def range_calendar_matrix_picker(start_value=None, end_value=None, key="range_ma
     st.session_state[f"{key}_end_periods"]=end_p
     return start_date,end_date,start_p,end_p
 
-
-def render_change_legend():
-    st.caption("🟢 보강 · 🔄 실제 교환 · 🧪 테스트 교환 · 🟡 시간강사 · 빈칸=공강")
 
 def get_all_teacher_names():
     ts = []
@@ -1396,17 +2570,34 @@ def recommend_substitutes(day, period, subject, class_name, absent_teacher, on_d
     cum, load = cumulative_sub_count(version=ver), weekly_load(version=ver)
     max_cum = max(cum.values()) if cum else 0
     rows=[]
+    occupied = {(str(r.교사명).strip(), safe_int(r.교시)) for r in e_tt.itertuples(index=False)} if e_tt is not None and not e_tt.empty else set()
+    duty_set = set()
+    duties_df = st.session_state.get("duties", pd.DataFrame())
+    if duties_df is not None and not duties_df.empty:
+        dmask = (duties_df["교사명"].astype(str).str.strip() == str(absent_teacher).strip()) & (duties_df["일자"].astype(str).map(normalize_date_str) == norm)
+        # 후보 교사별 복무 여부를 한 번에 인덱싱한다.
+        duty_set = {(str(r.교사명).strip(), safe_int(r.교시)) for r in duties_df[duties_df["일자"].astype(str).map(normalize_date_str) == norm].itertuples(index=False)}
+    teacher_groups = defaultdict(set); teacher_grades = defaultdict(set)
+    if e_tt is not None and not e_tt.empty:
+        for rr in e_tt.itertuples(index=False):
+            tn = str(rr.교사명).strip()
+            if not tn: continue
+            teacher_groups[tn].add(str(getattr(rr, "과목군", "")).strip() or subject_group(getattr(rr, "과목", "")))
+            teacher_grades[tn].add(grade_of(getattr(rr, "학급", "")))
+    teacher_subject = {}
+    if not teachers.empty and "교사명" in teachers.columns:
+        for rr in teachers.itertuples(index=False):
+            tn = str(getattr(rr, "교사명", "")).strip()
+            if tn: teacher_subject[tn] = str(getattr(rr, "담당과목", "")).strip()
     for t in (teachers["교사명"].astype(str).str.strip().tolist() if not teachers.empty and "교사명" in teachers.columns else []):
-        if t == absent_teacher or has_duty(t,norm) or not is_free(t,day,period,norm,e_tt): continue
-        my=e_tt[e_tt["교사명"]==t] if not e_tt.empty else pd.DataFrame()
-        groups=set(my["과목군"]) if not my.empty else set(); grades={grade_of(c) for c in my["학급"]} if not my.empty else set()
+        if t == absent_teacher or (t, safe_int(period)) in occupied or (t, safe_int(period)) in duty_set: continue
+        groups=teacher_groups.get(t,set()); grades=teacher_grades.get(t,set())
         if grp in groups and grade in grades: prio,label,score=1,"1순위 · 동일 과목 & 동일 학년",100
         elif grp in groups: prio,label,score=2,"2순위 · 동일 과목",70
         elif grade in grades: prio,label,score=3,"3순위 · 동일 학년",45
         else: prio,label,score=4,"4순위 · 전체 공강",20
         score += (max_cum-cum.get(t,0))*2 + max(0,22-load.get(t,0))*0.3
-        t_row=teachers[teachers["교사명"].astype(str).str.strip()==t]
-        rows.append({"보강교사":t,"유형":"정규교사","우선순위":label,"_prio":prio,"담당과목":t_row["담당과목"].iloc[0] if not t_row.empty and "담당과목" in t_row.columns else "","주당시수":load.get(t,0),"누적보강":cum.get(t,0),"추천점수":round(score,1)})
+        rows.append({"보강교사":t,"유형":"정규교사","우선순위":label,"_prio":prio,"담당과목":teacher_subject.get(t,""),"주당시수":load.get(t,0),"누적보강":cum.get(t,0),"추천점수":round(score,1)})
     if include_part_time:
         pt=st.session_state.get("part_time",pd.DataFrame())
         if not pt.empty:
@@ -1579,14 +2770,39 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
 
 
 def apply_cycle_swaps(moves, is_test=False):
-    if not moves: return False
+    if not moves:
+        return False
     if is_test:
-        for m in moves:
-            a_info = {"교사명": m["teacher"], "요일": m.get("day_from", WEEKDAY_KR[datetime.strptime(m["from_date"], "%Y-%m-%d").weekday()]), "교시": m["from_period"], "학급": m["class"], "과목": m["subject"]}
-            to_day = WEEKDAY_KR[datetime.strptime(m["to_date"], "%Y-%m-%d").weekday()]
-            if not do_linked_swap(a_info, m.get("next_teacher", m["teacher"]), m["from_date"], m["to_date"], to_day, m["to_period"], is_test=True, subject_b=m.get("target_subject", m["subject"])):
-                return False
-        return True
+        # 테스트 순환도 반드시 atomic하게 처리한다. 중간 단계에서 하나라도 실패하면
+        # 앞에서 추가된 test_swaps까지 원상복구해야 한다. 그렇지 않으면 사용자는
+        # "순환 테스트 실패"를 보았는데 일부 테스트 교환만 남는 문제가 발생한다.
+        before = st.session_state.get("test_swaps", pd.DataFrame()).copy(deep=True)
+        before_has_cycle = bool(st.session_state.get("test_has_cycle", False))
+        try:
+            for m in moves:
+                a_info = {
+                    "교사명": m["teacher"],
+                    "요일": m.get("day_from", WEEKDAY_KR[datetime.strptime(m["from_date"], "%Y-%m-%d").weekday()]),
+                    "교시": m["from_period"],
+                    "학급": m["class"],
+                    "과목": m["subject"],
+                }
+                to_day = WEEKDAY_KR[datetime.strptime(m["to_date"], "%Y-%m-%d").weekday()]
+                if not do_linked_swap(
+                    a_info, m.get("next_teacher", m["teacher"]),
+                    m["from_date"], m["to_date"], to_day, m["to_period"],
+                    is_test=True, subject_b=m.get("target_subject", m["subject"])
+                ):
+                    raise ValueError("순환 테스트의 일부 이동을 적용할 수 없습니다.")
+            return True
+        except Exception:
+            st.session_state.test_swaps = before
+            st.session_state["test_has_cycle"] = before_has_cycle
+            get_effective_timetable_for_date.clear()
+            effective_teacher_matrix.clear()
+            get_single_lesson_1to1_candidates.clear()
+            get_single_lesson_linked_cycles.clear()
+            return False
     # 순환 전체를 하나의 atomic 작업으로 기록/저장한다.
     before = st.session_state.swaps.copy(deep=True)
     for m in moves:
@@ -1909,7 +3125,7 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
     if not results:
         return pd.DataFrame(columns=[
             "원본일자", "원본요일", "원본교시", "원본학급", "원본과목",
-            "이동희망일", "이동요일", "상대교사", "상대수업",
+            "이동희망일", "이동요일", "상대교시", "상대교사", "상대수업",
             "동일학급", "동학년", "점수"
         ])
 
@@ -1930,9 +3146,8 @@ def get_single_lesson_1to1_candidates(
     """
     source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
     source_day = WEEKDAY_KR[source_date.weekday()]
-    # 선택한 수업보다 이전 날짜는 교환 후보에서 제외한다.
-    # 현재 주간을 유지하되, 선택일 이후의 평일만 후보로 검색한다.
-    # 예: 수요일 수업을 선택하면 월/화 수업이 후보로 다시 나타나지 않는다.
+    # 선택일 당일을 포함한 미래 평일을 검색한다.
+    # 같은 날에는 다른 교시(예: 1교시 ↔ 4교시)도 후보가 될 수 있다.
     monday = source_date - timedelta(days=source_date.weekday())
     friday = monday + timedelta(days=4)
     search_dates = [
@@ -1971,42 +3186,66 @@ def get_single_lesson_1to1_candidates(
 
     for target_date in search_dates:
         target_str = target_date.strftime("%Y-%m-%d")
-        # source_date 이전 날짜는 검색 대상이 아니다.
-        if target_str <= source_str:
+        # 선택한 당일은 포함한다.
+        # 당일에는 같은 교시뿐 아니라 다른 교시의 수업도 1:1 교환 후보가 될 수 있다.
+        # 선택일 이전 날짜만 제외하고, 선택일 이후 날짜는 기존 미래 검색 범위를 유지한다.
+        if target_str < source_str:
             continue
         target_day = WEEKDAY_KR[target_date.weekday()]
         target_tt = get_effective_timetable_for_date(target_str, ver, use_test=use_test)
-        if target_tt.empty or not is_free(teacher, target_day, orig_period, target_str, target_tt):
+        if target_tt.empty:
             continue
 
-        candidates = target_tt[
-            (target_tt["교시"] == orig_period)
-            & (target_tt["학급"] == orig_class)
-            & (target_tt["교사명"] != teacher)
-        ].drop_duplicates(subset=["교사명", "교시"])
+        # 당일: 1교시 → 4교시처럼 서로 다른 교시도 허용.
+        # 이후 날짜: 기존 동작을 유지해 원본과 같은 교시를 검색한다.
+        target_periods = (
+            list(range(1, PERIODS_PER_DAY.get(target_day, MAX_PERIOD) + 1))
+            if target_str == source_str else [orig_period]
+        )
 
-        for _, candidate in candidates.iterrows():
-            other_teacher = str(candidate["교사명"]).strip()
-            target_period = safe_int(candidate["교시"])
-            # 상대 수업도 현재 적용 시간표의 실제 수업이면 후보로 허용한다.
-            key = (target_str, other_teacher, target_period)
-            if key in seen or not is_free(other_teacher, source_day, orig_period, source_str, source_tt):
+        for target_period in target_periods:
+            # A 교사가 목표 슬롯에서 공강이어야 상대 수업을 받을 수 있다.
+            if not is_free(teacher, target_day, target_period, target_str, target_tt):
                 continue
-            seen.add(key)
-            score = 200
-            if subject_group(str(candidate["과목"])) == source_group:
-                score += 40
-            if target_str[:7] == source_str[:7]:
-                score += 10
-            results.append({
-                "원본일자": source_str, "원본요일": source_day, "원본교시": orig_period,
-                "원본학급": orig_class, "원본과목": orig_subject,
-                "이동희망일": target_str, "이동요일": target_day,
-                "상대교사": other_teacher,
-                "상대학급": str(candidate["학급"]), "상대과목": str(candidate["과목"]),
-                "상대수업": f"{candidate['학급']} {candidate['과목']}",
-                "동일학급": "🏆", "동학년": "", "점수": score
-            })
+
+            candidates = target_tt[
+                (target_tt["교시"] == target_period)
+                & (target_tt["학급"] == orig_class)
+                & (target_tt["교사명"] != teacher)
+            ].drop_duplicates(subset=["교사명", "교시"])
+
+            for _, candidate in candidates.iterrows():
+                other_teacher = str(candidate["교사명"]).strip()
+                target_period = safe_int(candidate["교시"])
+                # 상대 교사는 선택한 원본 슬롯으로 이동할 수 있어야 한다.
+                key = (target_str, other_teacher, target_period)
+                if key in seen or target_period <= 0:
+                    continue
+                if target_str == source_str and target_period == safe_int(orig_period):
+                    continue
+                if not is_free(teacher, target_day, target_period, target_str, target_tt):
+                    continue
+                if not is_free(other_teacher, source_day, orig_period, source_str, source_tt):
+                    continue
+                seen.add(key)
+                score = 200
+                if target_str == source_str:
+                    score += 15
+                    # 당일 교시 차이가 작은 후보를 우선한다.
+                    score += max(0, 8 - abs(target_period - orig_period))
+                if subject_group(str(candidate["과목"])) == source_group:
+                    score += 40
+                if target_str[:7] == source_str[:7]:
+                    score += 10
+                results.append({
+                    "원본일자": source_str, "원본요일": source_day, "원본교시": orig_period,
+                    "원본학급": orig_class, "원본과목": orig_subject,
+                    "이동희망일": target_str, "이동요일": target_day, "이동희망교시": target_period,
+                    "상대교사": other_teacher,
+                    "상대학급": str(candidate["학급"]), "상대과목": str(candidate["과목"]),
+                    "상대수업": f"{candidate['학급']} {candidate['과목']}",
+                    "동일학급": "🏆", "동학년": "", "점수": score
+                })
 
     return pd.DataFrame(results).sort_values(
         ["점수", "이동희망일", "상대교사"], ascending=[False, True, True]
@@ -2147,7 +3386,7 @@ def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = 
 
 @st.cache_data(show_spinner=False)
 def class_matrix(version=0, ref_date=None, use_test=False):
-    """선택한 주의 실제 적용 학급 매트릭스. 날짜별 교환·보강·시간강사를 반영한다."""
+    """선택한 주의 실제 적용 학급 매트릭스. 셀에는 교사명이 아니라 과목명을 표시한다."""
     ref=ref_date or _today_kst(); monday=ref-timedelta(days=ref.weekday())
     daily={}
     classes=set()
@@ -2175,7 +3414,7 @@ def class_matrix(version=0, ref_date=None, use_test=False):
             for p in range(1,PERIODS_PER_DAY.get(d,7)+1):
                 r=idx.get((c,p))
                 if r is not None:
-                    cell=f"{r.교사명} {r.과목}".strip(); typ=str(getattr(r,"변경유형","원본"))
+                    cell=str(getattr(r,"과목","")).strip(); typ=str(getattr(r,"변경유형","원본"))
                     if typ=="교환": cell += " 🔄"
                     elif typ=="테스트교환": cell += " 🧪"
                     elif typ=="보강": cell += " 🟢"
@@ -2273,7 +3512,7 @@ def _weekly_display_matrix(matrix: pd.DataFrame) -> pd.DataFrame:
         return matrix.copy(deep=True) if isinstance(matrix, pd.DataFrame) else pd.DataFrame()
     out = matrix.copy(deep=True)
     for col in out.columns:
-        if str(col) == "교사명" or str(col) == "학급":
+        if str(col) in ("교사명", "학급", "교시"):
             continue
         vals = []
         for raw in out[col].tolist():
@@ -2281,25 +3520,33 @@ def _weekly_display_matrix(matrix: pd.DataFrame) -> pd.DataFrame:
             if not cls and not subject:
                 vals.append("")
             else:
-                # Streamlit dataframe은 줄바꿈을 지원하므로 3줄로 고정한다.
-                vals.append("\n".join([x for x in (cls, subject, icon) if x]))
+                # 한 줄로 압축해 35개 슬롯이 가로로 한눈에 들어오게 한다.
+                text = " ".join([x for x in (cls, subject, icon) if x])
+                vals.append(text)
         out[col] = vals
     return out
 
 
-def _weekly_styled_matrix(matrix: pd.DataFrame):
-    """요일 그룹/변경 상태를 강조한 pandas Styler를 반환한다."""
+def _weekly_styled_matrix(matrix: pd.DataFrame, *, drop_teacher_name: bool = False):
+    """요일 그룹/변경 상태를 강조한 pandas Styler를 반환한다.
+
+    교사별 개별 주간표는 교사명이 카드 헤더에 이미 표시되므로 표시용
+    DataFrame에서만 교사명 열을 제거한다. 반드시 Styler 생성 전에 처리한다.
+    """
     display = _weekly_display_matrix(matrix)
     if display is None or display.empty:
         return display
+    if drop_teacher_name and "교사명" in display.columns:
+        display = display.drop(columns=["교사명"])
     styler = display.style
     # 셀 기본 가독성
     styler = styler.set_properties(**{
         "text-align": "center",
         "vertical-align": "middle",
-        "white-space": "pre-wrap",
-        "line-height": "1.15",
-        "font-size": "12px",
+        "white-space": "nowrap",
+        "line-height": "1.0",
+        "font-size": "10.5px",
+        "padding": "2px 1px",
     })
     if "교사명" in display.columns:
         styler = styler.set_properties(subset=["교사명"], **{
@@ -2411,13 +3658,15 @@ def _filter_current_swap_candidates(df, lesson, *, use_test=False):
     target_cache = {}
     for idx, r in df.iterrows():
         td = normalize_date_str(r.get("이동희망일", ""))
-        tp = safe_int(r.get("원본교시", source_period))
+        # 당일 1:1 교환은 목표 교시가 원본 교시와 다를 수 있다.
+        # 신규 후보에는 이동희망교시를 저장하고, 구형 캐시/데이터는 원본교시로 호환한다.
+        tp = safe_int(r.get("이동희망교시", r.get("원본교시", source_period)))
         tt = str(r.get("상대교사", "")).strip()
         tc = str(r.get("상대학급", "")).strip()
         ts = str(r.get("상대과목", "")).strip()
         # 선택 수업보다 과거인 날짜는 오래된 후보로 간주하여 제거한다.
         if (not td or not tt or tp <= 0 or not tc or not ts
-                or td == source_date or td < source_date):
+                or td < source_date):
             continue
         if td not in target_cache:
             target_cache[td] = get_effective_timetable_for_date(td, ver, use_test=bool(use_test))
@@ -2548,18 +3797,24 @@ def _weekly_action_dialog():
     # 미래 날짜 검색은 사용자가 필요할 때만 확장한다.
     extra_days = int(st.session_state.get("weekly_dialog_extra_days", 7))
     if action_mode in ("swap", "cycle"):
-        with st.expander("🔎 검색 범위 확장", expanded=False):
-            extra_days = st.slider(
-                "미래 추가 검색 일수", 0, 21, extra_days,
-                key="weekly_dialog_extra_days_input",
-                help="기본값은 미래 7일을 추가 검색합니다. 필요할 때 검색 범위를 조정할 수 있습니다.",
-            )
-            if extra_days != st.session_state.get("weekly_dialog_extra_days"):
-                st.session_state.weekly_dialog_extra_days = extra_days
-                # 범위가 바뀐 경우에만 후보 캐시를 무효화한다.
-                st.session_state.pop("weekly_swap_candidates_key", None)
-                st.session_state.pop("weekly_cycle_candidates_key", None)
-                _weekly_fragment_rerun()
+        # Expander의 열림/닫힘 애니메이션은 Dialog 안에서 BaseWeb 레이아웃을
+        # 재계산하면서 제목과 slider가 순간적으로 겹쳐 보이는 경우가 있다.
+        # 검색 범위는 보조 설정이지만 실제로 자주 쓰이므로 고정된 compact section으로
+        # 표시해 레이아웃 점프를 없앤다.
+        st.markdown('<div class="weekly-search-range">🔎 <strong>검색 범위</strong><span> · 기본 미래 7일 추가</span></div>', unsafe_allow_html=True)
+        extra_days = st.slider(
+            "미래 추가 검색 일수", 0, 21, extra_days,
+            key="weekly_dialog_extra_days_input",
+            help="미래 날짜를 추가로 검색할 범위입니다.",
+            label_visibility="collapsed",
+        )
+        st.caption(f"미래 {extra_days}일 추가 검색")
+        if extra_days != st.session_state.get("weekly_dialog_extra_days"):
+            st.session_state.weekly_dialog_extra_days = extra_days
+            # 범위가 바뀐 경우에만 후보 캐시를 무효화한다.
+            st.session_state.pop("weekly_swap_candidates_key", None)
+            st.session_state.pop("weekly_cycle_candidates_key", None)
+            _weekly_fragment_rerun()
 
     # ----------------------------------------------------------------
     # 1:1 교환: 사용자가 버튼을 누른 뒤에만 후보 검색
@@ -2592,7 +3847,7 @@ def _weekly_action_dialog():
             st.caption(f"가능한 1:1 교환 후보 {len(df_swap)}건 · 동일 학급을 우선 검색했습니다.")
             shortlist = df_swap.head(12).copy()
             labels = [
-                f"{row['이동희망일']} ({row['이동요일']}) · {safe_int(row['원본교시'])}교시 · "
+                f"{row['이동희망일']} ({row['이동요일']}) · {safe_int(row.get('이동희망교시', row['원본교시']))}교시 · "
                 f"{row['상대교사']} · {row['상대학급']} {row['상대과목']}"
                 for _, row in shortlist.iterrows()
             ]
@@ -2601,11 +3856,11 @@ def _weekly_action_dialog():
             picked = shortlist.iloc[labels.index(pick_label)]
             st.caption(
                 f"상대 수업: **{picked['상대교사']} · {picked['이동희망일']} · "
-                f"{safe_int(picked['원본교시'])}교시 · {picked['상대학급']} · {picked['상대과목']}**"
+                f"{safe_int(picked.get('이동희망교시', picked['원본교시']))}교시 · {picked['상대학급']} · {picked['상대과목']}**"
             )
             b_info = {
                 "교사명": str(picked["상대교사"]), "일자": str(picked["이동희망일"]),
-                "요일": str(picked["이동요일"]), "교시": safe_int(picked["원본교시"]),
+                "요일": str(picked["이동요일"]), "교시": safe_int(picked.get("이동희망교시", picked["원본교시"])),
                 "학급": str(picked["상대학급"]), "과목": str(picked["상대과목"]),
             }
             button_label = "🧪 1:1 맞교환 테스트" if use_test else "✅ 1:1 맞교환 실행"
@@ -2618,11 +3873,17 @@ def _weekly_action_dialog():
                     ok = False
                 if ok:
                     st.success("테스트 맞교환이 적용되었습니다." if use_test else "1:1 맞교환이 반영되었습니다.")
-                    # 전체 앱 rerun 대신 dialog fragment만 갱신한다. 팝업을 유지한 채 결과를 보여준다.
                     st.session_state.weekly_dialog_result = (
                         "테스트 맞교환이 적용되었습니다." if use_test else "1:1 맞교환이 반영되었습니다."
                     )
-                    _weekly_fragment_rerun()
+                    if use_test:
+                        # 테스트 데이터는 dialog fragment 밖의 '현재 테스트 중인 맞교환 목록'에도
+                        # 즉시 표시되어야 하므로 dialog만 재실행하면 안 된다.
+                        # 전체 rerun으로 테스트 탭 본문까지 다시 렌더링한다.
+                        st.rerun()
+                    else:
+                        # 실제 변경은 기존의 가벼운 dialog fragment 갱신을 유지한다.
+                        _weekly_fragment_rerun()
                 else:
                     st.error("현재 상태에서는 이 1:1 맞교환을 적용할 수 없습니다. 최신 시간표 상태를 다시 확인해 주세요.")
 
@@ -2672,7 +3933,9 @@ def _weekly_action_dialog():
                             st.session_state["test_has_cycle"] = True
                             st.session_state.weekly_dialog_result = f"테스트 {cyc['length']}인 연계 순환이 적용되었습니다. 실제 저장되지는 않습니다."
                             st.success(st.session_state.weekly_dialog_result)
-                            _weekly_fragment_rerun()
+                            # 연계 순환 테스트도 결과 목록이 dialog 밖의 테스트 탭 본문에
+                            # 즉시 나타나야 하므로 전체 rerun한다.
+                            st.rerun()
 
     # ----------------------------------------------------------------
     # 결강: 입력 UI만 표시하고, 후보 검색은 하지 않는다.
@@ -2770,11 +4033,17 @@ def _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, 
         return None
     if row_idx < 0 or row_idx >= len(matrix) or column_name in ("교사명", "학급"):
         return None
-    day = column_name[:1]
-    period = safe_int(column_name[1:])
+    period_grid = row_label == "교시" and column_name in DAYS
+    if period_grid:
+        day = column_name
+        period = safe_int(matrix.iloc[row_idx].get("교시", 0))
+        row_name = str(matrix.iloc[row_idx].get("교사명", "")).strip()
+    else:
+        day = column_name[:1]
+        period = safe_int(column_name[1:])
+        row_name = str(matrix.iloc[row_idx].get(row_label, "")).strip()
     if day not in DAYS or not (1 <= period <= MAX_PERIOD):
         return None
-    row_name = str(matrix.iloc[row_idx].get(row_label, "")).strip()
     if not row_name or not str(matrix.iloc[row_idx].get(column_name, "")).strip():
         return None
     monday = ref_date - timedelta(days=ref_date.weekday())
@@ -2784,7 +4053,7 @@ def _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, 
     e = get_effective_timetable_for_date(ds, ver, use_test=use_test)
     if e.empty:
         return None
-    if row_label == "교사명":
+    if row_label == "교사명" or period_grid:
         m = e[(e["교사명"].astype(str).str.strip() == row_name) & (e["교시"].apply(safe_int) == period)]
     else:
         m = e[(e["학급"].astype(str).str.strip() == row_name) & (e["교시"].apply(safe_int) == period)]
@@ -2811,11 +4080,11 @@ def render_weekly_selection_panel(ref_date, *, use_test=False, title="선택 수
         st.caption("주간표의 수업 셀을 클릭하면 작은 팝업에서 결강·맞교환·보강 작업을 시작할 수 있습니다.")
 
 
-def render_standard_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", key="weekly_matrix", title=None, use_test=False):
-    """모든 탭이 동일한 주간 매트릭스 렌더러 설정을 사용하도록 하는 표준 래퍼."""
+def render_standard_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", key="weekly_matrix", title=None, use_test=False, height=900, open_dialog=True):
+    """공통 주간 매트릭스 렌더러. open_dialog=False면 조회 전용으로 셀 클릭을 소비한다."""
     return render_weekly_matrix(
-        matrix, ref_date, row_label=row_label, height=650, key=key,
-        title=title, show_week_dates=True, use_test=use_test, open_dialog=True
+        matrix, ref_date, row_label=row_label, height=height, key=key,
+        title=title, show_week_dates=True, use_test=use_test, open_dialog=open_dialog
     )
 
 
@@ -2827,7 +4096,7 @@ def _weekly_selection_signature(selected_cells):
         return tuple()
 
 
-def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", height=700,
+def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교사명", height=900,
                          key="weekly_matrix", title=None, show_week_dates=True, use_test=False, open_dialog=True):
     """주간 5일×7교시 인터랙티브 렌더러.
 
@@ -2843,36 +4112,42 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         return None
     monday = ref_date - timedelta(days=ref_date.weekday())
     if title:
-        st.markdown(f"#### {title}")
+        st.markdown(f"<div style='font-size:.86rem;font-weight:600;color:#6b7280;margin:0 0 .12rem .1rem'>{title}</div>", unsafe_allow_html=True)
     if show_week_dates:
         dates = [monday + timedelta(days=i) for i in range(5)]
-        st.caption(" · ".join(f"{DAYS[i]} {dates[i]:%Y.%m.%d}" for i in range(5)))
-    if _is_current_week(ref_date):
-        st.caption("🕒 현재 주: 이미 지난 평일의 수업은 자동으로 숨기고, 오늘부터 남은 시간표를 표시합니다.")
-    st.caption("💡 수업 셀을 한 번 클릭하면 페이지 이동 없이 작은 작업 팝업이 열립니다. URL은 변경하지 않습니다.")
+        st.markdown("<div class='compact-nav'>" + "　".join(f"{DAYS[i]} {dates[i]:%m.%d}" for i in range(5)) + "</div>", unsafe_allow_html=True)
 
     # 현재 주라면 이미 지나간 평일의 수업 셀은 숨긴다.
     # 단, 기준일을 과거/미래 주로 선택한 경우에는 역사 조회를 위해 그대로 보여준다.
     visible_matrix = _hide_past_week_slots(matrix, ref_date, hide_past=True)
-    display = _weekly_styled_matrix(visible_matrix)
+    # 변경 교사 개별 주간표는 교시(1~7) × 월~금 형태로 렌더링한다.
+    # 교사명은 카드 헤더로 이미 표시하므로 표시용 DataFrame에서만 숨긴다.
+    teacher_period_grid = row_label == "교시" and all(d in visible_matrix.columns for d in DAYS)
+    display = _weekly_styled_matrix(visible_matrix, drop_teacher_name=teacher_period_grid)
     column_config = {}
-    # 1500px급 브라우저에서 좌우 여백까지 고려해 월~금 전체가 들어오도록 폭을 고정한다.
-    # 내부 표는 약 1455px(행 이름 90px + 교시 39px × 최대 35칸)를 목표로 한다.
-    # 35칸보다 적은 실제 요일 교시를 가진 학교에서도 같은 규칙을 유지한다.
-    compact_period_width = 39
-    row_name_width = 90
-    if row_label in display.columns:
-        column_config[row_label] = st.column_config.TextColumn(row_label, width=row_name_width)
-    monday = ref_date - timedelta(days=ref_date.weekday())
-    week_dates = [monday + timedelta(days=i) for i in range(5)]
-    for day_idx, day in enumerate(DAYS):
-        day_date = week_dates[day_idx]
-        for p in range(1, MAX_PERIOD + 1):
-            col = f"{day}{p}"
-            if col in display.columns:
-                # 첫 교시에 요일+날짜를 표시하고, 나머지는 요일+교시로 표시해 헤더를 압축한다.
-                label = f"{day} {day_date.day}" if p == 1 else f"{day}{p}"
-                column_config[col] = st.column_config.TextColumn(label, width=compact_period_width)
+    # 일반 주간표는 35개 슬롯을 압축하고, 변경 교사 개별표는
+    # 이미지처럼 교시 1~7 × 월~금 5열로 넓게 표시한다.
+    if teacher_period_grid:
+        column_config["교시"] = st.column_config.NumberColumn("교시", width=54, format="%d")
+        monday = ref_date - timedelta(days=ref_date.weekday())
+        week_dates = [monday + timedelta(days=i) for i in range(5)]
+        for day_idx, day in enumerate(DAYS):
+            if day in display.columns:
+                column_config[day] = st.column_config.TextColumn(f"{day}", width=230)
+    else:
+        compact_period_width = 38
+        row_name_width = 90
+        if row_label in display.columns:
+            column_config[row_label] = st.column_config.TextColumn(row_label, width=row_name_width)
+        monday = ref_date - timedelta(days=ref_date.weekday())
+        week_dates = [monday + timedelta(days=i) for i in range(5)]
+        for day_idx, day in enumerate(DAYS):
+            day_date = week_dates[day_idx]
+            for p in range(1, MAX_PERIOD + 1):
+                col = f"{day}{p}"
+                if col in display.columns:
+                    label = f"{day} {day_date.day}" if p == 1 else f"{day}{p}"
+                    column_config[col] = st.column_config.TextColumn(label, width=compact_period_width)
 
     event = None
     selected_cells = []
@@ -2880,18 +4155,18 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
     # 팝업 닫기 후 기존 dataframe의 selection이 재전달되어 팝업이 즉시 재오픈되는
     # Streamlit 특유의 상태 잔존 문제를 방지한다.
     matrix_epoch = int(st.session_state.get("weekly_matrix_epoch", 0) or 0)
-    widget_key = f"{key}__sel{matrix_epoch}"
+    widget_key = f"{key}__{ref_date:%Y%m%d}__{row_label}__{'test' if use_test else 'live'}__sel{matrix_epoch}"
     try:
         event = st.dataframe(
             display,
             hide_index=True,
-            use_container_width=False,
+            use_container_width=True,
             height=height,
+            row_height=27 if not teacher_period_grid else 36,
             key=widget_key,
             on_select="rerun",
             selection_mode="single-cell",
             column_config=column_config,
-            width=1450,
         )
         try:
             selected_cells = list(event.selection.cells)
@@ -2916,16 +4191,21 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         st.dataframe(
             display,
             hide_index=True,
-            use_container_width=False,
+            use_container_width=True,
             height=height,
             key=f"{key}_legacy__sel{matrix_epoch}",
             column_config=column_config,
-            width=1450,
         )
         st.warning("현재 Streamlit 버전에서는 주간표 셀 클릭 기능을 지원하지 않습니다. Streamlit을 최신 버전으로 업데이트하면 셀 클릭 팝업을 사용할 수 있습니다.")
         return None
 
     lesson = _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, use_test=use_test)
+    if lesson and not open_dialog:
+        # 조회 전용 매트릭스에서는 셀 선택 자체는 허용하되 작업 상태를 만들지 않는다.
+        # 다른 탭으로 이동했을 때 직전 조회표의 selection이 작업 팝업을 재호출하는
+        # 것을 막기 위해 기존 주간 작업 상태도 함께 비운다.
+        _clear_weekly_selection()
+        return None
     if lesson:
         # 선택 상태는 URL이 아니라 session_state에만 저장한다.
         st.session_state.weekly_selected_lesson = lesson
@@ -2940,12 +4220,21 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         # 이전 수업의 선택 후보가 새 수업에 그대로 남는 것을 방지한다.
         st.session_state["weekly_dialog_instance"] = int(st.session_state.get("weekly_dialog_instance", 0) or 0) + 1
         st.session_state.weekly_dialog_open = bool(open_dialog)
-        # 중요: dialog는 이 함수에서 직접 렌더링하지 않는다.
-    # st.tabs()는 모든 탭의 본문을 같은 실행에서 렌더링하므로, 여러 주간표가
-    # 각각 _weekly_action_dialog()를 호출하면 @st.dialog의 내부 위젯/다이얼로그
-    # ID가 중복되어 StreamlitDuplicateElement가 발생할 수 있다.
-    # 선택 상태만 session_state에 기록하고, 스크립트 맨 마지막에서 단 한 번
-    # 중앙 렌더링한다.
+        # 중요: 새 셀 선택이 발생한 현재 실행에서만 dialog를 직접 연다.
+        # 전역 하단에서 session_state만 보고 dialog를 다시 호출하면,
+        # X 또는 바깥 빈 공간으로 닫은 뒤에도 다음 rerun에서 같은 dialog가
+        # 다시 열리는 문제가 생긴다. native st.dialog는 이 호출 자체가
+        # '열기' 트리거이므로, 닫힌 뒤에는 새 셀 선택이 없는 한 다시 호출하지 않는다.
+        if open_dialog:
+            _weekly_action_dialog()
+    elif selection_changed:
+        # 새 selection 이벤트가 발생했는데 실제 수업으로 해석되지 않으면
+        # (빈 셀 클릭 / 선택 해제 / 빈 공간 클릭으로 selection이 비어 온 경우)
+        # 이전 수업을 남겨 두지 않고 X(닫기)를 누른 것과 동일하게 처리한다.
+        # 기존의 `and selected_cells` 조건은 빈 selection([]) 이벤트를 놓쳐
+        # 직전 수업 dialog가 다음 rerun/탭에서 재등장할 수 있었다.
+        _clear_weekly_selection()
+    # 주간표 렌더러는 선택 상태만 기록하고 Dialog는 앱 마지막에서 단 한 번 중앙 렌더링한다.
     return lesson
 
 
@@ -2953,7 +4242,7 @@ def get_teacher_week_view(teacher: str, ref_date: date, use_test=False):
     monday=ref_date-timedelta(days=ref_date.weekday()); week_dates=[monday+timedelta(days=i) for i in range(5)]
     ver=st.session_state.get("_data_version",0); grid=[]
     for p in range(1,MAX_PERIOD+1):
-        row={"교시":p}
+        row={"교사명": teacher, "교시":p}
         for i,d in enumerate(DAYS):
             ds=week_dates[i].strftime("%Y-%m-%d"); e=get_effective_timetable_for_date(ds,ver,use_test=use_test)
             m=e[(e["교사명"]==teacher)&(e["교시"].apply(safe_int)==p)] if not e.empty else pd.DataFrame()
@@ -3575,6 +4864,12 @@ def build_weekly_schedule_excel_bytes(ref_date: date, *, use_test=False, title="
         for pno in periods[d]:
             cc=start+pno-1; pc=ws.cell(4,cc); pc.value=pno; pc.font=head_font; pc.alignment=Alignment(horizontal="center",vertical="center"); pc.fill=fill_day[i]
     teachers=sorted(st.session_state.timetable["교사명"].dropna().astype(str).str.strip().unique()) if not st.session_state.timetable.empty else []
+    # 날짜별 effective timetable을 한 번만 만들고 (교사, 교시) 인덱스를 재사용한다.
+    daily_indexes = {}
+    for i, d in enumerate(days):
+        ds=(monday + timedelta(days=i)).strftime("%Y-%m-%d")
+        e=get_effective_timetable_for_date(ds,ver,use_test=use_test)
+        daily_indexes[d] = {(str(r.교사명).strip(), safe_int(r.교시)): r for r in e.itertuples(index=False)} if not e.empty else {}
     row=5
     for n,t in enumerate(teachers,1):
         ws.merge_cells(start_row=row,start_column=1,end_row=row+1,end_column=1); ws.merge_cells(start_row=row,start_column=2,end_row=row+1,end_column=2)
@@ -3584,13 +4879,12 @@ def build_weekly_schedule_excel_bytes(ref_date: date, *, use_test=False, title="
                 c=ws.cell(rr,cc); c.font=body_font; c.alignment=Alignment(horizontal="center",vertical="center",wrap_text=True); c.border=Border(left=thin,right=thin,top=thin,bottom=thin)
         ws.cell(row,1).border=Border(left=med,right=thin,top=thin,bottom=thin); ws.cell(row,2).border=Border(left=thin,right=med,top=thin,bottom=thin)
         for i,d in enumerate(days):
-            ds=(monday + timedelta(days=i)).strftime("%Y-%m-%d"); e=get_effective_timetable_for_date(ds,ver,use_test=use_test)
-            if e.empty: continue
+            idx = daily_indexes[d]
             for pno in periods[d]:
                 cc=day_ranges[d][0]+pno-1
-                m=e[(e["교사명"].astype(str).str.strip()==t)&(e["교시"].apply(safe_int)==pno)]
-                if m.empty: continue
-                r=m.iloc[0]; subj=str(r.get("과목","")).strip(); cls=str(r.get("학급","")).strip(); typ=str(r.get("변경유형","원본")).strip()
+                r=idx.get((t,pno))
+                if r is None: continue
+                subj=str(getattr(r,"과목","")).strip(); cls=str(getattr(r,"학급","")).strip(); typ=str(getattr(r,"변경유형","원본")).strip()
                 ws.cell(row,cc).value=subj
                 ws.cell(row+1,cc).value=cls
                 if typ=="교환": fill=PatternFill("solid",fgColor="F4CCCC"); mark="🔄"
@@ -3609,6 +4903,62 @@ def build_weekly_schedule_excel_bytes(ref_date: date, *, use_test=False, title="
     ws.page_setup.orientation="landscape"; ws.page_setup.paperSize=ws.PAPERSIZE_A4; ws.page_setup.fitToWidth=1; ws.page_setup.fitToHeight=0; ws.sheet_properties.pageSetUpPr.fitToPage=True
     ws.page_margins=PageMargins(left=0.25,right=0.25,top=0.4,bottom=0.4,header=0.2,footer=0.2)
     ws.print_title_rows="1:4"; ws.print_area=f"A1:{get_column_letter(last_col)}{row-1}"
+    return _workbook_bytes(wb)
+
+
+
+def build_weekly_class_schedule_excel_bytes(ref_date: date, *, use_test=False, title="전체 학급 시간표") -> bytes:
+    """교사 주간표와 동일한 양식으로 학급 기준 주간표를 만든다.
+    각 학급은 과목(첫 줄)·담당교사(둘째 줄)로 표시해 엑셀에서도 화면과 동일한 맥락을 유지한다.
+    """
+    monday = ref_date - timedelta(days=ref_date.weekday())
+    ver = st.session_state.get("_data_version", 0)
+    wb = Workbook(); ws = wb.active; ws.title = "전체 학급 시간표"
+    title_font=Font(name="돋움",size=20,bold=True); small_font=Font(name="돋움",size=8); head_font=Font(name="돋움",size=9,bold=True); body_font=Font(name="돋움",size=8)
+    thin=Side(style="hair",color="B7B7B7"); med=Side(style="medium",color="808080"); fill_head=PatternFill("solid",fgColor="D9EAF7")
+    fill_day=[PatternFill("solid",fgColor=x) for x in ("DDEBF7","E2F0D9","FFF2CC","E4DFEC","FCE4D6")]
+    periods={d:list(range(1,PERIODS_PER_DAY.get(d,7)+1)) for d in DAYS}; col=3; day_ranges={}
+    for i,d in enumerate(DAYS):
+        start=col; end=col+len(periods[d])-1; day_ranges[d]=(start,end); col=end+1
+    last_col=col-1
+    ws.merge_cells(start_row=1,start_column=1,end_row=1,end_column=last_col); ws["A1"]=title; ws["A1"].font=title_font; ws["A1"].alignment=Alignment(horizontal="center",vertical="center")
+    ws.merge_cells(start_row=2,start_column=1,end_row=2,end_column=2); ws["A2"]=f"{SCHOOL_YEAR} 학년도"; ws["A2"].font=small_font
+    ws.merge_cells(start_row=2,start_column=last_col-4,end_row=2,end_column=last_col); ws.cell(2,last_col-4).value=SCHOOL_NAME; ws.cell(2,last_col-4).font=small_font; ws.cell(2,last_col-4).alignment=Alignment(horizontal="right",vertical="center")
+    ws["A3"]="번호"; ws["B3"]="학급"; ws.merge_cells("A3:A4"); ws.merge_cells("B3:B4")
+    for c in (1,2): ws.cell(3,c).font=head_font; ws.cell(3,c).alignment=Alignment(horizontal="center",vertical="center",wrap_text=True); ws.cell(3,c).fill=fill_head
+    for i,d in enumerate(DAYS):
+        start,end=day_ranges[d]; ws.merge_cells(start_row=3,start_column=start,end_row=3,end_column=end); cell=ws.cell(3,start); cell.value=f"{d}({(monday+timedelta(days=i)):%m/%d})"; cell.font=head_font; cell.alignment=Alignment(horizontal="center",vertical="center"); cell.fill=fill_day[i]
+        for pno in periods[d]:
+            pc=ws.cell(4,start+pno-1); pc.value=pno; pc.font=head_font; pc.alignment=Alignment(horizontal="center",vertical="center"); pc.fill=fill_day[i]
+    daily_indexes={}
+    classes=set()
+    for i,d in enumerate(DAYS):
+        ds=(monday+timedelta(days=i)).strftime("%Y-%m-%d"); e=get_effective_timetable_for_date(ds,ver,use_test=use_test); daily_indexes[d]={(str(r.학급).strip(),safe_int(r.교시)):r for r in e.itertuples(index=False) if str(getattr(r,"학급","")).strip()} if not e.empty else {}
+        classes.update(k[0] for k in daily_indexes[d])
+    row=5
+    for n,cls in enumerate(sorted(classes),1):
+        ws.merge_cells(start_row=row,start_column=1,end_row=row+1,end_column=1); ws.merge_cells(start_row=row,start_column=2,end_row=row+1,end_column=2); ws.cell(row,1).value=n; ws.cell(row,2).value=cls
+        for rr in (row,row+1):
+            for cc in range(1,last_col+1):
+                c=ws.cell(rr,cc); c.font=body_font; c.alignment=Alignment(horizontal="center",vertical="center",wrap_text=True); c.border=Border(left=thin,right=thin,top=thin,bottom=thin)
+        for i,d in enumerate(DAYS):
+            for pno in periods[d]:
+                r=daily_indexes[d].get((cls,pno)); cc=day_ranges[d][0]+pno-1
+                if r is None: continue
+                subj=str(getattr(r,"과목","")).strip(); teacher=str(getattr(r,"교사명","")).strip(); typ=str(getattr(r,"변경유형","원본")).strip(); ws.cell(row,cc).value=subj; ws.cell(row+1,cc).value=teacher
+                fill=fill_day[i]; mark=""
+                if typ=="교환": fill=PatternFill("solid",fgColor="F4CCCC"); mark=" 🔄"
+                elif typ=="보강": fill=PatternFill("solid",fgColor="D9EAD3"); mark=" 🟢"
+                elif typ=="테스트교환": fill=PatternFill("solid",fgColor="EADCF8"); mark=" 🧪"
+                elif typ=="시간강사": fill=PatternFill("solid",fgColor="FCE5CD"); mark=" 🟡"
+                ws.cell(row,cc).value=f"{subj}{mark}".strip(); ws.cell(row,cc).fill=fill; ws.cell(row+1,cc).fill=fill
+        row+=2
+    ws.row_dimensions[1].height=22.5; ws.row_dimensions[2].height=14.25; ws.row_dimensions[3].height=18; ws.row_dimensions[4].height=16
+    for rr in range(5,row): ws.row_dimensions[rr].height=18 if rr%2==1 else 16
+    ws.column_dimensions["A"].width=5; ws.column_dimensions["B"].width=12
+    for cc in range(3,last_col+1): ws.column_dimensions[get_column_letter(cc)].width=11
+    ws.freeze_panes="C5"; ws.sheet_view.showGridLines=False; ws.page_setup.orientation="landscape"; ws.page_setup.paperSize=ws.PAPERSIZE_A4; ws.page_setup.fitToWidth=1; ws.page_setup.fitToHeight=0; ws.sheet_properties.pageSetUpPr.fitToPage=True
+    ws.page_margins=PageMargins(left=0.25,right=0.25,top=0.4,bottom=0.4,header=0.2,footer=0.2); ws.print_title_rows="1:4"; ws.print_area=f"A1:{get_column_letter(last_col)}{row-1}"
     return _workbook_bytes(wb)
 
 
@@ -3635,7 +4985,7 @@ def show_login_page():
     IMAGE_URL = "https://i.imgur.com/Gl0YDO3.jpeg"
     st.markdown(
         f"""
-        <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;">
+        <div style="background:rgba(255,255,255,.035); padding:20px; border:1px solid rgba(255,255,255,.08); border-radius: 18px; text-align: center; margin-bottom: 20px;">
             <img src="{IMAGE_URL}" width="150" style="object-fit: contain;">
         </div>
         """, 
@@ -3643,15 +4993,17 @@ def show_login_page():
     )
     # ==============================
 
-    st.title(f"📘 {SCHOOL_NAME}")
-    st.subheader("시간표 · 결보강 관리 시스템")
-    st.caption(f"{SCHOOL_YEAR}학년도")
+    st.markdown(f"<div class='ai-hero-kicker'>{SCHOOL_YEAR} · SCHOOL OPERATIONS</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='ai-hero-title'>{SCHOOL_NAME}</div>", unsafe_allow_html=True)
+    st.markdown("<div class='ai-hero-sub'>시간표와 결보강 업무를 하나의 흐름으로 연결하는<br>학교 업무 운영 시스템</div>", unsafe_allow_html=True)
+    st.markdown("<div class='ai-prompt-glow'>", unsafe_allow_html=True)
 
     if st.session_state.login_locked:
         st.error(f"🚫 로그인 시도가 {MAX_LOGIN_ATTEMPTS}회를 초과하여 차단되었습니다.")
         st.stop()
 
     id_input = st.text_input("아이디", placeholder="아이디를 입력하세요", key="login_id")
+    st.markdown("</div>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
         if st.button("로그인", type="primary", use_container_width=True):
@@ -3710,6 +5062,17 @@ def show_login_page():
                 save_id_request(name, email, desired, memo)
                 st.success("요청이 정상적으로 접수되었습니다.")
 
+def _week_anchor(ref_date=None):
+    ref = ref_date or _today_kst()
+    if not isinstance(ref, date):
+        try:
+            ref = datetime.strptime(normalize_date_str(ref), "%Y-%m-%d").date()
+        except Exception:
+            ref = _today_kst()
+    return ref - timedelta(days=ref.weekday())
+
+
+
 # ==========================================================================================
 # 앱 시작
 # ==========================================================================================
@@ -3726,92 +5089,147 @@ if not st.session_state.logged_in:
 
 init_state()
 
+if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_OPTIONS:
+    st.session_state.ui_font = UI_FONT_DEFAULT
+
+# 현재 선택된 폰트를 CSS 변수로 주입한다. 폰트 선택은 앱 전체에 즉시 적용된다.
+st.markdown(
+    f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}</style>""",
+    unsafe_allow_html=True,
+)
+
 # ==========================================================================================
-# 사이드바
+# 상단 가로 업무 Toolbar
 # ==========================================================================================
-with st.sidebar:
-    st.markdown(f"**아이디** : `{current_user()}`")
-    st.markdown(f"**이름** : `{current_name()}`")
-    st.markdown(f"**권한** : `{current_role()}`")
-    if st.button("로그아웃", use_container_width=True):
-        for k in list(st.session_state.keys()):
-            del st.session_state[k]
-        st.rerun()
+@st.dialog("도구", width="small")
+def render_tools_dialog():
+    """상단 도구 창.
+
+    st.popover는 fragment 재실행/레이아웃 재계산 때 앵커 기준 위치가 누적 이동하는
+    현상이 있어 사용하지 않는다. Dialog는 브라우저 viewport 기준으로 고정 배치되므로
+    반복해서 열고 닫아도 왼쪽으로 밀리거나 폭이 누적해서 변하지 않는다.
+    """
+    if current_role() == ROLE_GUEST:
+        st.caption("게스트 모드에서는 사용할 수 있는 도구가 없습니다.")
+        return
+
+    st.markdown('<div class="tool-section-title">화면</div>', unsafe_allow_html=True)
+    selected_font = st.selectbox(
+        "글꼴",
+        list(UI_FONT_OPTIONS.keys()),
+        index=list(UI_FONT_OPTIONS.keys()).index(st.session_state.get("ui_font", UI_FONT_DEFAULT)),
+        key="ui_font_selector",
+        help="이 브라우저에서 사용할 수 있는 글꼴을 우선 적용합니다. 학교 PC에 해당 글꼴이 설치되어 있지 않으면 다음 대체 글꼴이 사용됩니다.",
+    )
+    st.session_state.ui_font = selected_font
+    st.markdown(
+        f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}</style>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("글꼴은 이 기기에 설치된 폰트를 우선 사용합니다.")
 
     st.divider()
 
-    if current_role() != ROLE_GUEST:
-        st.header("데이터")
-        if can_full_data() or is_teacher():
-            if st.button("🔄 원본 시간표 다시 불러오기", use_container_width=True):
-                load_timetable_from_gsheet.clear()
-                ti, tt = load_timetable_from_gsheet()
-                st.session_state.teachers = ti
-                st.session_state.timetable = tt
-                _invalidate_all_caches()
-                st.rerun()
-            if st.button("🔄 작업 내역 다시 불러오기", use_container_width=True):
-                load_work_data_from_gsheet.clear()
-                absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
-                st.session_state.absences = ensure_input_user(absences)
-                st.session_state.subs = ensure_input_user(subs)
-                st.session_state.swaps = ensure_input_user(swaps)
-                st.session_state.part_time = ensure_part_time_columns(part_time)
-                st.session_state.duties = ensure_duty_columns(duties)
-                _invalidate_all_caches()
-                st.rerun()
-            if st.button("💾 현재 작업 저장", use_container_width=True, type="primary"):
-                if save_work_data_to_gsheet():
-                    st.success("저장 완료")
-
+    if can_full_data() or is_teacher():
+        if st.button("🔄 시간표 새로고침", use_container_width=True, key="top_reload_timetable"):
+            load_timetable_from_gsheet.clear()
+            ti, tt = load_timetable_from_gsheet()
+            st.session_state.teachers, st.session_state.timetable = ti, tt
+            _invalidate_all_caches()
+            st.rerun()
+        if st.button("🔄 작업내역 새로고침", use_container_width=True, key="top_reload_work"):
+            load_work_data_from_gsheet.clear()
+            absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
+            st.session_state.absences = ensure_input_user(absences)
+            st.session_state.subs = ensure_input_user(subs)
+            st.session_state.swaps = ensure_input_user(swaps)
+            st.session_state.part_time = ensure_part_time_columns(part_time)
+            st.session_state.duties = ensure_duty_columns(duties)
+            _invalidate_all_caches()
+            st.rerun()
+        if st.button("💾 현재 작업 저장", use_container_width=True, type="primary", key="top_save_work"):
+            save_work_data_to_gsheet()
         st.divider()
-        c1, c2 = st.columns(2)
-        if c1.button("↩ Undo", use_container_width=True):
+        a, b = st.columns(2)
+        if a.button("↩ Undo", use_container_width=True, key="top_undo"):
             if undo():
                 save_work_data_to_gsheet()
                 st.rerun()
-        if c2.button("↪ Redo", use_container_width=True):
+        if b.button("↪ Redo", use_container_width=True, key="top_redo"):
             if redo():
                 save_work_data_to_gsheet()
                 st.rerun()
 
-        st.divider()
-        st.metric("등록 교사", len(st.session_state.teachers))
-        st.metric("누적 보강", len(st.session_state.subs))
+    st.divider()
+    st.markdown('<div class="tool-section-title">출력</div>', unsafe_allow_html=True)
+    if st.button("결보강 계획서", use_container_width=True, key="top_personal_plan_open"):
+        st.session_state["top_output_mode"] = "personal_plan"
+    if is_edu_or_master() and st.button("전체 일일 내역서", use_container_width=True, key="top_daily_report_open"):
+        st.session_state["top_output_mode"] = "daily_report"
 
-        if is_edu_or_master():
-            try:
-                curr_budget = get_current_budget()
-                st.metric("보강비 잔액", f"{curr_budget:,.0f}원")
-            except Exception:
-                pass
-
-        st.divider()
-        st.subheader("📄 내역서 / 계획서 출력")
-
-        plan_date = calendar_picker("계획서 기준일", _today_kst(), key="plan_date")
-        if st.button("📋 결보강 계획서 (본인용)", use_container_width=True, type="primary"):
+    output_mode = st.session_state.get("top_output_mode")
+    if output_mode == "personal_plan":
+        plan_date = st.date_input("기준일", value=_today_kst(), key="top_plan_date", label_visibility="collapsed")
+        if st.button("파일 만들기", type="primary", use_container_width=True, key="top_personal_generate"):
             html = build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
-            st.download_button(
-                "HTML 다운로드 (인쇄 → PDF로 저장 추천)",
-                html.encode("utf-8"),
-                f"결보강계획서_{current_name()}_{plan_date}.html",
-                "text/html",
-                key="dl_personal"
-            )
-            st.info("다운로드한 HTML을 브라우저에서 열고 Ctrl+P → PDF로 저장하시면 양식과 거의 동일한 PDF가 생성됩니다.")
+            st.download_button("HTML 다운로드", html.encode("utf-8"), f"결보강계획서_{current_name()}_{plan_date}.html", "text/html", key="top_dl_personal")
+    elif output_mode == "daily_report" and is_edu_or_master():
+        rd = st.date_input("기준일", value=_today_kst(), key="top_report_date", label_visibility="collapsed")
+        if st.button("파일 만들기", type="primary", use_container_width=True, key="top_daily_generate"):
+            day = rd.strftime("%Y-%m-%d")
+            html = build_report_html(day)
+            xls = to_excel_bytes({
+                "결강": st.session_state.absences[st.session_state.absences["일자"] == day] if not st.session_state.absences.empty else pd.DataFrame(),
+                "보강": st.session_state.subs[st.session_state.subs["일자"] == day] if not st.session_state.subs.empty else pd.DataFrame(),
+                "맞교환": st.session_state.swaps,
+            })
+            st.download_button("HTML 다운로드", html.encode("utf-8"), f"내역서_{rd}.html", "text/html", key="top_dl_report_html")
+            st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx", key="top_dl_report_xlsx")
 
-        if is_edu_or_master():
-            rd = calendar_picker("전체 내역서 일자", _today_kst(), key="sidebar_rd")
-            if st.button("📊 전체 일일 내역서", use_container_width=True):
-                html = build_report_html(rd.strftime("%Y-%m-%d"))
-                st.download_button("HTML 다운로드 (전체)", html.encode("utf-8"), f"내역서_{rd}.html", "text/html")
-                xls = to_excel_bytes({
-                    "결강": st.session_state.absences[st.session_state.absences["일자"] == rd.strftime("%Y-%m-%d")] if not st.session_state.absences.empty else pd.DataFrame(),
-                    "보강": st.session_state.subs[st.session_state.subs["일자"] == rd.strftime("%Y-%m-%d")] if not st.session_state.subs.empty else pd.DataFrame(),
-                    "맞교환": st.session_state.swaps
-                })
-                st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx")
+
+@st.fragment
+def render_top_toolbar(visible_tabs):
+    """ID/이름/권한과 업무 메뉴를 상단 한 줄에 배치한다.
+
+    도구는 popover가 아니라 별도 dialog로 연다. 따라서 fragment 재실행이 발생해도
+    도구 창의 위치/폭이 앵커를 따라 누적 이동하지 않는다.
+    """
+    c_id, c_nav, c_tools, c_user = st.columns([1.35, 5.85, .85, .8], vertical_alignment="center")
+    with c_id:
+        st.markdown(f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_user()} · {current_role()}</div>', unsafe_allow_html=True)
+    with c_nav:
+        if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs:
+            st.session_state.active_tab = visible_tabs[0]
+        previous_active = st.session_state.active_tab
+        nav_options = [NAV_LABELS.get(t, t) for t in visible_tabs]
+        label_to_tab = dict(zip(nav_options, visible_tabs))
+        previous_label = NAV_LABELS.get(previous_active, previous_active)
+        active_label = st.radio(
+            "업무 메뉴", nav_options, index=nav_options.index(previous_label),
+            horizontal=True, key="top_active_tab", label_visibility="collapsed"
+        )
+        active = label_to_tab.get(active_label, visible_tabs[0])
+        st.session_state.active_tab = active
+        if active != previous_active:
+            # 탭 전환은 '새 업무 화면'으로 취급한다. 직전 화면에서 선택했던
+            # 수업/팝업 상태를 그대로 두면, 새 탭을 연 직후 이전 수업 dialog가
+            # 다시 나타날 수 있다. 특히 빈 공간을 눌러 선택을 해제한 뒤 탭을
+            # 바꾸는 경우 dataframe 위젯의 내부 selection이 rerun에서 재전달될
+            # 수 있으므로, 선택값 + dialog + 후보 캐시 + widget epoch를 함께 초기화한다.
+            _clear_weekly_selection()
+            st.session_state.pop("weekly_dialog_use_test", None)
+            st.session_state.pop("weekly_dialog_title", None)
+            st.session_state.pop("weekly_dialog_instance", None)
+            st.rerun()
+    with c_tools:
+        if st.button("도구", use_container_width=True, key="top_tools_open"):
+            render_tools_dialog()
+    with c_user:
+        if st.button("로그아웃", use_container_width=True, key="top_logout"):
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            st.rerun()
+
 
 if current_role() == ROLE_GUEST:
     st.title("게스트 모드")
@@ -3836,7 +5254,6 @@ if st.session_state.timetable.empty:
 # ==========================================================================================
 # 메인 화면
 # ==========================================================================================
-st.title(f"시간표 · 결강/보강 관리  |  {current_name()} ({current_user()}) · {current_role()}")
 
 allowed_tabs = get_user_allowed_tabs()
 visible_tabs = [t for t in ALL_TABS if t in allowed_tabs]
@@ -3850,22 +5267,43 @@ if not visible_tabs:
     st.warning("접근 가능한 탭이 없습니다.")
     st.stop()
 
-tabs = st.tabs(visible_tabs)
-tab_map = {name: tabs[i] for i, name in enumerate(visible_tabs)}
+# 한 번에 하나의 업무 화면만 렌더링해 비활성 화면의 계산을 막는다.
+# 메뉴/사용자 정보는 상단 가로 toolbar로 통합한다.
+st.markdown('<div class="app-top-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
+render_top_toolbar(visible_tabs)
+active_tab = st.session_state.active_tab
+tab_map = {active_tab: st.container()}
 
-# 주간표 팝업은 모든 탭의 주간표가 현재 실행에서 먼저 선택 상태를 갱신한 뒤
-# 스크립트 마지막에 단 한 번 렌더링한다. (아래 메인 탭 렌더링 블록 끝에서 호출)
-# 이렇게 해야 클릭한 "현재" 셀이 한 실행 안에서 바로 팝업에 반영되며,
-# 이전 실행의 선택이 한 박자 늦게 표시되는 문제가 생기지 않는다.
+PAGE_DESCRIPTIONS = {
+    "시간표 조회": "오늘과 주간 시간표를 한 곳에서 빠르게 확인합니다.",
+    "시간강사 관리": "시간강사 배정과 가용 시간을 관리합니다.",
+    "결강·보강": "결강을 기록하고 보강 교사를 배정합니다.",
+    "시간표 맞교환 & 변경 추천": "수업 교환과 가능한 대안을 확인합니다.",
+    "통계": "결보강 및 시간표 변경 현황을 요약합니다.",
+    "시간표 변경 테스트용": "실제 시간표에 반영하기 전 변경안을 검토합니다.",
+    "변경된 교사 주간표": "이번 주 변경된 교사의 실제 주간 시간표를 확인합니다.",
+    "📋 복무 관리 & 판단": "복무와 출장에 따른 조정 가능 수업을 확인합니다.",
+    "🛠️ 다중 출장·전체 조정 추천": "여러 교사의 부재 상황을 함께 조정합니다.",
+    "🔑 아이디·권한 관리": "사용자 계정과 역할을 관리합니다.",
+    "📑 회원별 탭 권한 관리": "사용자별 업무 메뉴 접근 권한을 관리합니다.",
+}
+st.markdown(
+    f'<div class="apple-page-head"><div><h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
+    f'<p>{PAGE_DESCRIPTIONS.get(active_tab, "학교 시간표와 결보강 업무를 관리합니다.")}</p></div>'
+    f'<div class="apple-section-label">{current_role()} · {current_name() or current_user()}</div></div>',
+    unsafe_allow_html=True
+)
+
+# 주간표 팝업은 현재 활성 화면의 주간표가 선택 상태를 기록한 뒤
+# 스크립트 마지막에서 단 한 번 렌더링한다. 비활성 메뉴는 렌더링하지 않으므로
+# 다른 메뉴의 dataframe selection이 현재 선택을 덮어쓰는 문제도 줄어든다.
 
 # ------------------------------------------------------------------ 시간표 조회
 if "시간표 조회" in tab_map:
     with tab_map["시간표 조회"]:
-        st.subheader("📅 시간표 조회 — 달력 → 시간표 매트릭스")
-        render_change_legend()
-        view = st.radio("보기 방식", ["선택 날짜 매트릭스", "교사별 주간 매트릭스", "학급별 주간 매트릭스", "교사 1인 주간표"], horizontal=True, key="view_mode")
+        view = st.radio("보기 방식", ["선택 날짜", "교사별 주간", "학급별 주간", "교사 1인"], horizontal=True, key="view_mode", label_visibility="collapsed")
         ver = st.session_state.get("_data_version", 0)
-        if view == "선택 날짜 매트릭스":
+        if view == "선택 날짜":
             picked, matrix, selections = daily_schedule_picker(_today_kst(), key="view_daily", height=560,
                 help_text="날짜를 달력에서 선택한 후 교사×교시 셀을 클릭하세요.")
             if selections:
@@ -3878,23 +5316,24 @@ if "시간표 조회" in tab_map:
                         r=m.iloc[0]
                         details.append({"교사":r["교사명"],"교시":sel["교시"],"학급":r["학급"],"과목":r["과목"],"변경유형":r.get("변경유형","원본"),"변경상세":r.get("변경상세","")})
                 st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
-        elif view == "교사별 주간 매트릭스":
+        elif view == "교사별 주간":
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_week_ref")
-            render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False)
+            render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
-        elif view == "학급별 주간 매트릭스":
+        elif view == "학급별 주간":
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_class_ref")
-            render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False)
-            xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
-            st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_class')
+            render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False, open_dialog=False)
+            xlsx = build_weekly_class_schedule_excel_bytes(ref, use_test=False)
+            st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체학급_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_class')
         else:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_ref")
-            grid,dates=get_teacher_week_view(t,ref)
-            st.caption(f"{dates[0]} ~ {dates[4]}")
-            st.dataframe(grid,use_container_width=True,hide_index=True)
+            teacher_week = effective_teacher_matrix(ref, ver, use_test=False)
+            if not teacher_week.empty and t:
+                teacher_week = teacher_week[teacher_week["교사명"].astype(str).str.strip() == str(t).strip()].reset_index(drop=True)
+            render_standard_weekly_matrix(teacher_week, ref, row_label="교사명", key="view_single_teacher_week_matrix", title=f"{t} 주간 시간표", use_test=False, open_dialog=False)
 
 # ------------------------------------------------------------------ 시간강사 관리
 if "시간강사 관리" in tab_map:
@@ -4028,7 +5467,7 @@ if "결강·보강" in tab_map:
                             rr[f"{pp}교시"]=(f"{r.get('학급','')} {r.get('과목','')} ❗".strip() if r is not None else "")
                         sm_rows.append(rr)
                     sub_matrix=pd.DataFrame(sm_rows,columns=["교사명"]+[f"{p}교시" for p in range(1,MAX_PERIOD+1)])
-                    sub_event=st.dataframe(sub_matrix,hide_index=True,use_container_width=True,height=300,key="sub_abs_matrix",on_select="rerun",selection_mode="single-cell")
+                    sub_event=st.dataframe(sub_matrix,hide_index=True,use_container_width=True,height=300,key=f"sub_abs_matrix_{sub_date}",on_select="rerun",selection_mode="single-cell")
                     sub_cells=getattr(getattr(sub_event,"selection",None),"cells",[]) or []
                     cid=None; rows=pd.DataFrame(); head=None
                     if sub_cells:
@@ -4088,12 +5527,6 @@ if "결강·보강" in tab_map:
 # ------------------------------------------------------------------ 시간표 맞교환
 if "시간표 맞교환 & 변경 추천" in tab_map:
     with tab_map["시간표 맞교환 & 변경 추천"]:
-        st.markdown("### 🔄 스마트 시간표 변경 & 맞교환")
-        st.caption(
-            "이제 별도의 출발점 지정이나 후보표를 먼저 열 필요가 없습니다. "
-            "주간 시간표에서 수업 셀을 클릭하면 바로 작업 팝업이 열립니다."
-        )
-
         week_anchor = calendar_picker(
             "교환 검색 기준 주", _today_kst(),
             key="exchange_week_anchor",
@@ -4143,8 +5576,8 @@ if "통계" in tab_map:
 # ------------------------------------------------------------------ 시간표 변경 테스트용
 if "시간표 변경 테스트용" in tab_map:
     with tab_map["시간표 변경 테스트용"]:
-        st.subheader("🧪 시간표 변경 테스트용 (저장 안 됨 · 샌드박스)")
-        st.info("연계공강(순환) 시 **수업계 선생님에게 연락해주세요**")
+        st.markdown('<div class="sandbox-title">🧪 시간표 변경 테스트</div>', unsafe_allow_html=True)
+        st.markdown('<div class="apple-note">저장되지 않는 테스트 공간 · 연계공강(순환) 발생 시 <strong>수업계에 확인해주세요.</strong></div>', unsafe_allow_html=True)
 
         if st.button("🔄 테스트 상태 초기화", type="secondary"):
             st.session_state.test_swaps = pd.DataFrame()
@@ -4202,18 +5635,68 @@ if "시간표 변경 테스트용" in tab_map:
 # ------------------------------------------------------------------ 변경된 교사 주간표
 if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
-        st.subheader("📅 변경된 교사 주간 시간표")
-        ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
-        changed = get_changed_teachers_for_week(ref)
+        # 상단 영역은 달력과 변경 교사 목록을 좌우로 나눈다.
+        # 달력은 필요한 만큼만 사용하고, 남는 가로 공간에는 변경 교사를 배치해
+        # 날짜 선택과 대상 교사 확인을 한 화면에서 끝낼 수 있도록 한다.
+        top_calendar, top_teachers = st.columns([0.42, 0.58], vertical_alignment="top")
+        with top_calendar:
+            ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
+        with top_teachers:
+            changed = get_changed_teachers_for_week(ref)
+            st.markdown(
+                f"<div style='font-size:.82rem;font-weight:650;color:#374151;margin:.05rem 0 .45rem'>"
+                f"변경 교사 <span style='color:#6b7280;font-weight:500'>{len(changed)}명</span></div>",
+                unsafe_allow_html=True,
+            )
+            if changed:
+                # 이름은 3열로 배치해 긴 한 줄 목록보다 빠르게 훑을 수 있게 한다.
+                teacher_cols = st.columns(3)
+                for i, teacher_name in enumerate(changed):
+                    with teacher_cols[i % 3]:
+                        st.markdown(
+                            f"<div style='padding:.28rem .45rem;margin:0 0 .28rem;"
+                            f"font-size:.78rem'>{teacher_name}</div>",
+                            unsafe_allow_html=True,
+                        )
+            else:
+                st.caption("이번 주차 변경 교사 없음")
+
         if not changed:
-            st.success("이번 주차 변경 교사 없음")
+            st.info("이번 주차 변경 교사 없음")
         else:
-            st.info(f"변경 교사 {len(changed)}명: {', '.join(changed)}")
-            for t in changed:
-                with st.expander(f"👤 {t}", expanded=False):
-                    st.caption("🔄 교환 이력 / 🟢 보강 처리 이력이 각 수업 칸에 표시됩니다.")
-                    grid, _ = get_teacher_week_view(t, ref)
-                    st.dataframe(grid, use_container_width=True, hide_index=True)
+            # 변경 교사마다 별도의 매트릭스를 만들지 않고, 한 개의 주간표에
+            # 교사별 1행씩 배치한다. 기존 방식은 교사 수만큼 표가 반복되어
+            # 화면이 길어지고, 같은 헤더가 계속 반복되어 가독성이 떨어졌다.
+            changed_week = effective_teacher_matrix(ref, st.session_state.get("_data_version", 0), use_test=False)
+            if changed_week.empty:
+                st.info("변경 교사의 주간 시간표를 표시할 데이터가 없습니다.")
+            else:
+                changed_names = {str(t).strip() for t in changed}
+                changed_week = changed_week[
+                    changed_week["교사명"].astype(str).str.strip().isin(changed_names)
+                ].copy()
+                changed_week["__order"] = changed_week["교사명"].astype(str).str.strip().map(
+                    {str(t).strip(): i for i, t in enumerate(changed)}
+                )
+                changed_week = (
+                    changed_week.sort_values("__order", kind="stable")
+                    .drop(columns="__order")
+                    .reset_index(drop=True)
+                )
+                st.caption("교사별 개별 주간표 · 🔄 교환 · 🧪 테스트교환 · 🟢 보강 · 🟡 시간강사")
+                # 변경 교사는 서로 섞지 않고, 이미지처럼 교사별 카드 안에
+                # 1~7교시를 세로로 두고 월~금 5열을 가로로 배치한다.
+                # 이렇게 하면 한 화면에서 읽기 쉽고 교사별 구분도 명확하다.
+                for idx, teacher_name in enumerate(changed):
+                    teacher_grid, _ = get_teacher_week_view(str(teacher_name), ref, use_test=False)
+                    if teacher_grid.empty:
+                        continue
+                    with st.expander(f"👤 {teacher_name}", expanded=True):
+                        render_standard_weekly_matrix(
+                            teacher_grid, ref, row_label="교시",
+                            key=f"changed_teacher_week_{idx}",
+                            title=None, use_test=False, height=286
+                        )
 
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
@@ -4677,11 +6160,8 @@ if "📑 회원별 탭 권한 관리" in tab_map:
                     st.success("모든 탭 차단됨")
                     st.rerun()
 
-# ------------------------------------------------------------------ 주간표 공통 팝업 중앙 렌더러
-# 모든 탭의 주간표가 먼저 렌더링되어 이번 실행의 최신 셀 선택을 session_state에 기록한 뒤
-# 여기서 native dialog를 정확히 한 번만 호출한다. 따라서 클릭 직전의 이전 선택이 아니라
-# 방금 클릭한 셀이 팝업에 표시된다. 또한 주간표 렌더러 안에서 dialog가 중복 생성되지 않는다.
-if st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
-    _weekly_action_dialog()
+# ------------------------------------------------------------------ 주간표 공통 팝업
+# 주간표 셀을 새로 선택한 순간 render_weekly_matrix() 안에서만 native dialog를 연다.
+# 따라서 X 또는 dialog 바깥 빈 공간으로 닫으면 다음 전체 rerun에서 이 호출이 다시
+# 실행되지 않는다. session_state에 남은 선택값 때문에 팝업이 부활하는 문제를 방지한다.
 
-st.caption(f"서라벌여중 시간표 관리 시스템 20260916 v2.0.0 · {current_name()} ({current_user()}) · {current_role()}")
