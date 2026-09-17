@@ -5,6 +5,7 @@
 - 결보강 계획서: 보강수업 칸에 '보강 배정된 교사'가 나오도록 수정
 - 연계 순환 알고리즘 대폭 가속
 - 모든 기존 기능 유지
+- Apple 업무형 디자인 기조 버전
 """
 
 import io
@@ -3117,7 +3118,12 @@ def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = 
 
 @st.cache_data(show_spinner=False)
 def class_matrix(version=0, ref_date=None, use_test=False):
-    """선택한 주의 실제 적용 학급 매트릭스. 날짜별 교환·보강·시간강사를 반영한다."""
+    """선택한 주의 실제 적용 학급 매트릭스.
+
+    학급별 주간표는 교사명이 아니라 해당 학급/교시에서 실제로 수업되는
+    "현재 적용 과목명"을 표시한다. 따라서 맞교환·연계교환·테스트교환·보강
+    등으로 시간표가 바뀐 경우에도 Effective Schedule의 과목명을 그대로 사용한다.
+    """
     ref=ref_date or _today_kst(); monday=ref-timedelta(days=ref.weekday())
     daily={}
     classes=set()
@@ -3145,12 +3151,18 @@ def class_matrix(version=0, ref_date=None, use_test=False):
             for p in range(1,PERIODS_PER_DAY.get(d,7)+1):
                 r=idx.get((c,p))
                 if r is not None:
-                    cell=f"{r.교사명} {r.과목}".strip(); typ=str(getattr(r,"변경유형","원본"))
-                    if typ=="교환": cell += " 🔄"
-                    elif typ=="테스트교환": cell += " 🧪"
-                    elif typ=="보강": cell += " 🟢"
-                    elif typ=="시간강사": cell += " 🟡"
-                    row[f"{d}{p}"]=cell
+                    # 학급별 표에서는 교사명이 아니라 '현재 실제 수업 과목'을 표시한다.
+                    # 반드시 effective timetable의 과목을 읽으므로 교환/보강 후 바뀐
+                    # 수업도 원래 과목이 아니라 현재 적용되는 과목명으로 나타난다.
+                    cell = str(getattr(r, "과목", "")).strip()
+                    typ = str(getattr(r, "변경유형", "원본")).strip()
+                    marker = {
+                        "교환": "🔄",
+                        "테스트교환": "🧪",
+                        "보강": "🟢",
+                        "시간강사": "🟡",
+                    }.get(typ, "")
+                    row[f"{d}{p}"] = f"{cell} {marker}".strip()
                 else:
                     row[f"{d}{p}"]=""
         rows.append(row)
@@ -3247,6 +3259,12 @@ def _weekly_display_matrix(matrix: pd.DataFrame) -> pd.DataFrame:
             continue
         vals = []
         for raw in out[col].tolist():
+            # 학급별 매트릭스는 셀 원본이 이미 '과목명 + 변경 아이콘'이다.
+            # 이를 다시 '학급 + 과목'으로 분해하면 과목명이 잘못 잘릴 수 있으므로
+            # 학급 행에서는 현재 과목명을 그대로 유지한다.
+            if "학급" in out.columns and "교사명" not in out.columns:
+                vals.append("" if raw is None else str(raw).strip())
+                continue
             cls, subject, marker, icon = _weekly_cell_parts(raw)
             if not cls and not subject:
                 vals.append("")
@@ -3537,6 +3555,7 @@ def _weekly_action_dialog():
             "미래 추가 검색 일수", 0, 21, extra_days,
             key="weekly_dialog_extra_days_input",
             help="미래 날짜를 추가로 검색할 범위입니다.",
+            label_visibility="collapsed",
         )
         st.caption(f"미래 {extra_days}일 추가 검색")
         if extra_days != st.session_state.get("weekly_dialog_extra_days"):
