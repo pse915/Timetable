@@ -34,158 +34,89 @@ st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", l
 
 st.markdown("""
 <style>
-/* =====================================================================================
-   AI SERVICE / APPLE DARK DESIGN SYSTEM
-   Streamlit의 기능·위젯 구조는 유지하고, 시각 언어만 하나의 제품처럼 통일한다.
-   ===================================================================================== */
+/* Apple Light UI — 1920×1080 Chrome 기준: 흰 배경, 높은 대비, 얇은 경계 */
 :root {
-    --ai-bg:#000000;
-    --ai-surface:#0d0d0f;
-    --ai-surface-2:#141416;
-    --ai-border:rgba(255,255,255,.10);
-    --ai-border-soft:rgba(255,255,255,.07);
-    --ai-text:#f5f5f7;
-    --ai-muted:#86868b;
-    --ai-muted-2:#636366;
+    --ai-bg:#ffffff;
+    --ai-surface:#ffffff;
+    --ai-surface-2:#f5f5f7;
+    --ai-border:#d2d2d7;
+    --ai-border-soft:#e5e5ea;
+    --ai-text:#1d1d1f;
+    --ai-muted:#6e6e73;
+    --ai-muted-2:#86868b;
     --ai-white:#ffffff;
 }
-
 html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
-    background:var(--ai-bg) !important;
-    color:var(--ai-text) !important;
+    background:var(--ai-bg) !important; color:var(--ai-text) !important;
 }
-[data-testid="stHeader"] { background:rgba(0,0,0,.72) !important; backdrop-filter:blur(18px); }
+[data-testid="stHeader"] { background:rgba(255,255,255,.82) !important; backdrop-filter:blur(18px); }
 [data-testid="stToolbar"] { background:transparent !important; }
 [data-testid="stDecoration"] { display:none !important; }
 .block-container { max-width:100%; padding-top:.55rem; padding-bottom:1rem; padding-left:1rem; padding-right:1rem; }
-
-/* top safe area + product navigation */
 .app-top-safe-space { height:30px; width:100%; flex:0 0 30px; pointer-events:none; }
-.app-topbar {
-    position:relative; z-index:2; width:100%; min-height:44px; display:flex; align-items:center;
-    gap:.65rem; padding:.18rem .3rem .42rem; margin:-.08rem 0 .5rem;
-    border-bottom:1px solid var(--ai-border-soft);
-}
+.app-topbar { position:relative; z-index:2; width:100%; min-height:44px; display:flex; align-items:center; gap:.65rem; padding:.18rem .3rem .42rem; margin:-.08rem 0 .5rem; border-bottom:1px solid var(--ai-border-soft); }
 .app-identity { white-space:nowrap; color:var(--ai-muted); font-size:.74rem; line-height:1.15; letter-spacing:-.015em; }
 .app-identity strong { color:var(--ai-text); font-weight:650; }
-.app-topbar .stButton > button, .app-topbar [data-testid="stPopover"] > button {
-    min-height:34px !important; padding:.1rem .65rem !important; border-radius:10px !important;
-    font-size:.77rem !important; background:rgba(255,255,255,.055) !important;
-    color:var(--ai-text) !important; border:1px solid var(--ai-border) !important;
-}
-
-/* typography */
+.app-topbar .stButton > button, .app-topbar [data-testid="stPopover"] > button { min-height:34px !important; padding:.1rem .65rem !important; border-radius:10px !important; font-size:.77rem !important; background:#fff !important; color:var(--ai-text) !important; border:1px solid var(--ai-border) !important; }
 h1,h2,h3,h4,h5,h6,p,label,span,div { letter-spacing:-.012em; }
 h1 { font-weight:700 !important; letter-spacing:-.045em !important; }
 h2,h3 { font-weight:650 !important; letter-spacing:-.035em !important; }
 [data-testid="stCaptionContainer"], .stCaption { color:var(--ai-muted) !important; }
 .stMarkdown, .stText { color:var(--ai-text); }
-
-/* buttons / controls */
-.stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
-    border-radius:12px !important; border:1px solid var(--ai-border) !important;
-    background:linear-gradient(180deg, rgba(255,255,255,.085), rgba(255,255,255,.045)) !important;
-    color:var(--ai-text) !important; box-shadow:0 1px 0 rgba(255,255,255,.04) inset !important;
-    transition:transform .35s ease, background .35s ease, border-color .35s ease, box-shadow .35s ease !important;
-}
-.stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover {
-    background:rgba(255,255,255,.11) !important; border-color:rgba(255,255,255,.18) !important;
-    transform:translateY(-1px); box-shadow:0 8px 28px rgba(0,0,0,.35) !important;
-}
-.stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
-    color:#050505 !important; background:linear-gradient(180deg,#fff,#dcdcdc) !important;
-    border-color:rgba(255,255,255,.65) !important; font-weight:650 !important;
-}
-
-/* inputs */
-[data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"] > div,
-[data-testid="stDateInput"] > div > div {
-    background:rgba(255,255,255,.045) !important; color:var(--ai-text) !important;
-    border-color:var(--ai-border) !important; border-radius:12px !important;
-}
-input, textarea { color:var(--ai-text) !important; }
-input::placeholder, textarea::placeholder { color:var(--ai-muted-2) !important; }
-[data-baseweb="select"] * { color:var(--ai-text) !important; }
-
-/* cards / containers */
-[data-testid="stVerticalBlockBorderWrapper"], [data-testid="stExpander"] {
-    background:rgba(255,255,255,.025) !important; border:1px solid var(--ai-border-soft) !important;
-    border-radius:18px !important;
-}
-[data-testid="stExpander"] summary { color:var(--ai-text) !important; }
-hr, [data-testid="stDivider"] { border-color:var(--ai-border-soft) !important; }
-
-/* dataframe: dense, premium, readable */
-[data-testid="stDataFrame"] {
-    border:1px solid var(--ai-border) !important; border-radius:14px; overflow:hidden;
-    background:#080809 !important; box-shadow:0 12px 40px rgba(0,0,0,.22);
-}
-[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataFrame"] [role="columnheader"] {
-    border-right:1px solid rgba(255,255,255,.065) !important;
-    border-bottom:1px solid rgba(255,255,255,.065) !important;
-    color:#f5f5f7 !important; background:#080809 !important;
-}
-[data-testid="stDataFrame"] [role="columnheader"] { font-weight:650 !important; background:#111113 !important; }
-
-/* tabs / radio / segmented controls */
+.stButton > button, .stDownloadButton > button, .stFormSubmitButton > button { border-radius:12px !important; border:1px solid #d2d2d7 !important; background:#fff !important; color:#1d1d1f !important; box-shadow:0 1px 2px rgba(0,0,0,.04) !important; transition:transform .3s ease, background .3s ease, border-color .3s ease, box-shadow .3s ease !important; }
+.stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover { background:#f5f5f7 !important; border-color:#b8b8be !important; transform:translateY(-1px); box-shadow:0 5px 18px rgba(0,0,0,.08) !important; }
+.stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] { color:#fff !important; background:#1d1d1f !important; border-color:#1d1d1f !important; font-weight:650 !important; }
+[data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"] > div, [data-testid="stDateInput"] > div > div { background:#fff !important; color:#1d1d1f !important; border-color:#c7c7cc !important; border-radius:12px !important; }
+input, textarea { color:#1d1d1f !important; background:#fff !important; }
+input::placeholder, textarea::placeholder { color:#8e8e93 !important; }
+[data-baseweb="select"] * { color:#1d1d1f !important; }
+[data-testid="stVerticalBlockBorderWrapper"], [data-testid="stExpander"] { background:#fff !important; border:1px solid #d2d2d7 !important; border-radius:14px !important; box-shadow:0 1px 2px rgba(0,0,0,.025); }
+[data-testid="stExpander"] summary { color:#1d1d1f !important; }
+hr, [data-testid="stDivider"] { border-color:#e5e5ea !important; }
+[data-testid="stDataFrame"] { border:1px solid #c7c7cc !important; border-radius:12px; overflow:hidden; background:#fff !important; box-shadow:0 4px 18px rgba(0,0,0,.055); }
+[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataFrame"] [role="columnheader"] { border-right:1px solid #e5e5ea !important; border-bottom:1px solid #e5e5ea !important; color:#1d1d1f !important; background:#fff !important; }
+[data-testid="stDataFrame"] [role="columnheader"] { font-weight:650 !important; background:#f5f5f7 !important; color:#3a3a3c !important; }
 [data-baseweb="tab-list"] { background:transparent !important; gap:.25rem; }
-[data-baseweb="tab"] { color:var(--ai-muted) !important; }
-[data-baseweb="tab"][aria-selected="true"] { color:var(--ai-text) !important; }
-[data-testid="stRadio"] label, [data-testid="stCheckbox"] label { color:var(--ai-text) !important; }
-
-/* native dialog: do not override its positioning */
-[data-testid="stDialog"] { color:var(--ai-text) !important; }
-[data-testid="stDialog"] button, [data-testid="stDialog"] input, [data-testid="stDialog"] [role="button"] {
-    transition:none !important; animation:none !important;
-}
-[data-testid="stDialog"] > div > div {
-    max-height:calc(100vh - 4.5rem) !important; overflow-y:auto !important;
-    background:#0d0d0f !important; border:1px solid var(--ai-border) !important;
-    border-radius:20px !important; color:var(--ai-text) !important;
-}
-
-/* small product labels */
-.tool-section-title { color:var(--ai-muted) !important; font-size:.72rem; font-weight:600; letter-spacing:.01em; margin:.15rem 0 .35rem .05rem; }
-.apple-note { margin:.05rem 0 .45rem; color:var(--ai-muted) !important; font-size:.76rem; line-height:1.35; }
-.apple-note strong { color:#b5b5b9 !important; font-weight:600; }
-.sandbox-title { margin:.1rem 0 .1rem; color:var(--ai-text) !important; font-size:1rem; font-weight:600; letter-spacing:-.015em; }
-.compact-nav { color:var(--ai-muted) !important; font-size:.78rem; margin:0 0 .25rem .15rem; }
+[data-baseweb="tab"] { color:#6e6e73 !important; }
+[data-baseweb="tab"][aria-selected="true"] { color:#1d1d1f !important; }
+[data-testid="stRadio"] label, [data-testid="stCheckbox"] label { color:#1d1d1f !important; }
+[data-testid="stDialog"] { color:#1d1d1f !important; }
+[data-testid="stDialog"] button, [data-testid="stDialog"] input, [data-testid="stDialog"] [role="button"] { transition:none !important; animation:none !important; }
+[data-testid="stDialog"] > div > div { max-height:calc(100vh - 4.5rem) !important; overflow-y:auto !important; background:#fff !important; border:1px solid #d2d2d7 !important; border-radius:20px !important; color:#1d1d1f !important; }
+.tool-section-title { color:#6e6e73 !important; font-size:.72rem; font-weight:600; margin:.15rem 0 .35rem .05rem; }
+.apple-note { margin:.05rem 0 .45rem; color:#6e6e73 !important; font-size:.76rem; line-height:1.35; }
+.apple-note strong { color:#3a3a3c !important; font-weight:600; }
+.sandbox-title { margin:.1rem 0 .1rem; color:#1d1d1f !important; font-size:1rem; font-weight:600; }
+.compact-nav { color:#6e6e73 !important; font-size:.78rem; margin:0 0 .25rem .15rem; }
 .matrix-shell { margin-top:.15rem; }
-
-/* changed-teacher compact chips */
-.changed-teacher-chip {
-    padding:.32rem .5rem; margin:0 0 .28rem; border:1px solid var(--ai-border-soft);
-    border-radius:10px; background:rgba(255,255,255,.035); font-size:.78rem;
-    color:#d8d8dc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-}
-
-/* login = AI service landing */
-.login-box {
-    max-width:520px; margin:10vh auto 0; padding:2.25rem; border:1px solid var(--ai-border);
-    border-radius:28px; background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.018));
-    box-shadow:0 30px 100px rgba(0,0,0,.45); backdrop-filter:blur(18px);
-}
-.ai-hero-kicker { color:#a1a1a6; font-size:.76rem; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
-.ai-hero-title {
-    margin:.55rem 0 .65rem; font-size:clamp(2.7rem,7vw,5.8rem); line-height:.96;
-    font-weight:700; letter-spacing:-.065em;
-    background:linear-gradient(180deg,#fff 15%,#bdbdc2 100%); -webkit-background-clip:text; background-clip:text; color:transparent;
-}
-.ai-hero-sub { color:#86868b; font-size:1rem; line-height:1.55; max-width:680px; margin:0 auto 1.25rem; }
+.changed-teacher-chip { padding:.32rem .5rem; margin:0 0 .28rem; border:1px solid #e5e5ea; border-radius:10px; background:#f8f8fa; font-size:.78rem; color:#3a3a3c; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.changed-teacher-week-card { margin:.35rem 0 .7rem; }
+.ai-hero-kicker { color:#6e6e73; font-size:.76rem; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }
+.ai-hero-title { margin:.55rem 0 .65rem; font-size:clamp(2.7rem,7vw,5.8rem); line-height:.96; font-weight:700; letter-spacing:-.065em; background:linear-gradient(180deg,#1d1d1f 15%,#6e6e73 100%); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.ai-hero-sub { color:#6e6e73; font-size:1rem; line-height:1.55; max-width:680px; margin:0 auto 1.25rem; }
 .ai-prompt-glow { position:relative; margin:1.25rem auto 0; max-width:720px; }
-.ai-prompt-glow:after {
-    content:""; position:absolute; left:8%; right:8%; bottom:-8px; height:18px;
-    background:radial-gradient(ellipse,rgba(255,255,255,.18),transparent 68%); filter:blur(10px); pointer-events:none;
+.ai-prompt-glow:after { content:""; position:absolute; left:8%; right:8%; bottom:-8px; height:18px; background:radial-gradient(ellipse,rgba(0,0,0,.10),transparent 68%); filter:blur(10px); pointer-events:none; }
+@media (max-width:1200px) { .block-container { padding-left:.7rem; padding-right:.7rem; } }
+@media (max-width:900px) { .app-topbar { gap:.35rem; } .app-identity { display:none; } .block-container { padding-left:.55rem; padding-right:.55rem; } }
+@media (prefers-color-scheme: dark) {
+    :root { --ai-bg:#0b0b0c; --ai-surface:#111113; --ai-surface-2:#18181b; --ai-border:#38383d; --ai-border-soft:#28282c; --ai-text:#f5f5f7; --ai-muted:#98989d; --ai-muted-2:#6e6e73; }
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] { background:#0b0b0c !important; color:#f5f5f7 !important; }
+    [data-testid="stHeader"] { background:rgba(11,11,12,.82) !important; }
+    .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button, .app-topbar .stButton > button { background:#151517 !important; color:#f5f5f7 !important; border-color:#38383d !important; }
+    .stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover { background:#202023 !important; }
+    .stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] { background:#f5f5f7 !important; color:#111113 !important; border-color:#f5f5f7 !important; }
+    [data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"] > div, [data-testid="stDateInput"] > div > div, input, textarea { background:#151517 !important; color:#f5f5f7 !important; border-color:#38383d !important; }
+    [data-baseweb="select"] * { color:#f5f5f7 !important; }
+    [data-testid="stVerticalBlockBorderWrapper"], [data-testid="stExpander"] { background:#111113 !important; border-color:#38383d !important; }
+    [data-testid="stExpander"] summary, [data-baseweb="tab"][aria-selected="true"] { color:#f5f5f7 !important; }
+    [data-testid="stDataFrame"] { background:#111113 !important; border-color:#48484d !important; }
+    [data-testid="stDataFrame"] [role="gridcell"] { background:#111113 !important; color:#f5f5f7 !important; border-color:#28282c !important; }
+    [data-testid="stDataFrame"] [role="columnheader"] { background:#1b1b1e !important; color:#f5f5f7 !important; border-color:#38383d !important; }
+    [data-testid="stDialog"] > div > div { background:#111113 !important; color:#f5f5f7 !important; border-color:#38383d !important; }
+    .changed-teacher-chip { background:#171719; border-color:#303035; color:#e5e5ea; }
+    .ai-hero-title { background:linear-gradient(180deg,#fff 15%,#bdbdc2 100%); -webkit-background-clip:text; background-clip:text; color:transparent; }
 }
-
-@media (max-width: 900px) {
-    .app-topbar { gap:.35rem; }
-    .app-identity { display:none; }
-    .block-container { padding-left:.55rem; padding-right:.55rem; }
-}
-@media (prefers-reduced-motion: reduce) {
-    * { scroll-behavior:auto !important; transition:none !important; animation:none !important; }
-}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior:auto !important; transition:none !important; animation:none !important; } }
 </style>
 """, unsafe_allow_html=True)
 
@@ -2464,7 +2395,7 @@ def _weekly_display_matrix(matrix: pd.DataFrame) -> pd.DataFrame:
         return matrix.copy(deep=True) if isinstance(matrix, pd.DataFrame) else pd.DataFrame()
     out = matrix.copy(deep=True)
     for col in out.columns:
-        if str(col) == "교사명" or str(col) == "학급":
+        if str(col) in ("교사명", "학급", "교시"):
             continue
         vals = []
         for raw in out[col].tolist():
@@ -2965,11 +2896,17 @@ def _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, 
         return None
     if row_idx < 0 or row_idx >= len(matrix) or column_name in ("교사명", "학급"):
         return None
-    day = column_name[:1]
-    period = safe_int(column_name[1:])
+    period_grid = row_label == "교시" and column_name in DAYS
+    if period_grid:
+        day = column_name
+        period = safe_int(matrix.iloc[row_idx].get("교시", 0))
+        row_name = str(matrix.iloc[row_idx].get("교사명", "")).strip()
+    else:
+        day = column_name[:1]
+        period = safe_int(column_name[1:])
+        row_name = str(matrix.iloc[row_idx].get(row_label, "")).strip()
     if day not in DAYS or not (1 <= period <= MAX_PERIOD):
         return None
-    row_name = str(matrix.iloc[row_idx].get(row_label, "")).strip()
     if not row_name or not str(matrix.iloc[row_idx].get(column_name, "")).strip():
         return None
     monday = ref_date - timedelta(days=ref_date.weekday())
@@ -2979,7 +2916,7 @@ def _resolve_matrix_cell_selection(matrix, ref_date, row_label, selected_cells, 
     e = get_effective_timetable_for_date(ds, ver, use_test=use_test)
     if e.empty:
         return None
-    if row_label == "교사명":
+    if row_label == "교사명" or period_grid:
         m = e[(e["교사명"].astype(str).str.strip() == row_name) & (e["교시"].apply(safe_int) == period)]
     else:
         m = e[(e["학급"].astype(str).str.strip() == row_name) & (e["교시"].apply(safe_int) == period)]
@@ -3047,23 +2984,35 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
     # 단, 기준일을 과거/미래 주로 선택한 경우에는 역사 조회를 위해 그대로 보여준다.
     visible_matrix = _hide_past_week_slots(matrix, ref_date, hide_past=True)
     display = _weekly_styled_matrix(visible_matrix)
+    # 변경 교사 개별 주간표는 교시(1~7) × 월~금 형태로 렌더링한다.
+    # 교사명은 카드 헤더로 이미 표시하므로 표 안에서는 숨겨 가로 공간을 확보한다.
+    teacher_period_grid = row_label == "교시" and all(d in visible_matrix.columns for d in DAYS)
+    if teacher_period_grid and "교사명" in display.columns:
+        display = display.drop(columns=["교사명"])
     column_config = {}
-    # 35개 슬롯이 좌우 스크롤 없이 최대한 한 화면에 들어오도록 압축한다.
-    # 텍스트는 한 줄로 표시하고, 요일 경계선과 상태 아이콘으로 정보를 구분한다.
-    compact_period_width = 31
-    row_name_width = 82
-    if row_label in display.columns:
-        column_config[row_label] = st.column_config.TextColumn(row_label, width=row_name_width)
-    monday = ref_date - timedelta(days=ref_date.weekday())
-    week_dates = [monday + timedelta(days=i) for i in range(5)]
-    for day_idx, day in enumerate(DAYS):
-        day_date = week_dates[day_idx]
-        for p in range(1, MAX_PERIOD + 1):
-            col = f"{day}{p}"
-            if col in display.columns:
-                # 첫 교시에 요일+날짜를 표시하고, 나머지는 요일+교시로 표시해 헤더를 압축한다.
-                label = f"{day} {day_date.day}" if p == 1 else f"{day}{p}"
-                column_config[col] = st.column_config.TextColumn(label, width=compact_period_width)
+    # 일반 주간표는 35개 슬롯을 압축하고, 변경 교사 개별표는
+    # 이미지처럼 교시 1~7 × 월~금 5열로 넓게 표시한다.
+    if teacher_period_grid:
+        column_config["교시"] = st.column_config.NumberColumn("교시", width=54, format="%d")
+        monday = ref_date - timedelta(days=ref_date.weekday())
+        week_dates = [monday + timedelta(days=i) for i in range(5)]
+        for day_idx, day in enumerate(DAYS):
+            if day in display.columns:
+                column_config[day] = st.column_config.TextColumn(f"{day}", width=220)
+    else:
+        compact_period_width = 38
+        row_name_width = 90
+        if row_label in display.columns:
+            column_config[row_label] = st.column_config.TextColumn(row_label, width=row_name_width)
+        monday = ref_date - timedelta(days=ref_date.weekday())
+        week_dates = [monday + timedelta(days=i) for i in range(5)]
+        for day_idx, day in enumerate(DAYS):
+            day_date = week_dates[day_idx]
+            for p in range(1, MAX_PERIOD + 1):
+                col = f"{day}{p}"
+                if col in display.columns:
+                    label = f"{day} {day_date.day}" if p == 1 else f"{day}{p}"
+                    column_config[col] = st.column_config.TextColumn(label, width=compact_period_width)
 
     event = None
     selected_cells = []
@@ -3078,7 +3027,7 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
             hide_index=True,
             use_container_width=True,
             height=height,
-            row_height=21,
+            row_height=25 if not teacher_period_grid else 34,
             key=widget_key,
             on_select="rerun",
             selection_mode="single-cell",
@@ -3147,7 +3096,7 @@ def get_teacher_week_view(teacher: str, ref_date: date, use_test=False):
     monday=ref_date-timedelta(days=ref_date.weekday()); week_dates=[monday+timedelta(days=i) for i in range(5)]
     ver=st.session_state.get("_data_version",0); grid=[]
     for p in range(1,MAX_PERIOD+1):
-        row={"교시":p}
+        row={"교사명": teacher, "교시":p}
         for i,d in enumerate(DAYS):
             ds=week_dates[i].strftime("%Y-%m-%d"); e=get_effective_timetable_for_date(ds,ver,use_test=use_test)
             m=e[(e["교사명"]==teacher)&(e["교시"].apply(safe_int)==p)] if not e.empty else pd.DataFrame()
@@ -4537,21 +4486,20 @@ if "변경된 교사 주간표" in tab_map:
                     .drop(columns="__order")
                     .reset_index(drop=True)
                 )
-                st.caption("교사마다 한 줄의 주간표로 표시 · 🔄 교환 · 🟢 보강 · 🟡 시간강사 변경 이력")
-                # 변경 교사는 서로 섞지 않고 기존처럼 교사별 개별 주간표를 유지한다.
-                # 다만 각 교사의 표는 '교시별 여러 행'이 아니라 1행만 사용해
-                # 월~금 35개 슬롯을 한눈에 비교할 수 있도록 한다.
+                st.caption("교사별 개별 주간표 · 🔄 교환 · 🧪 테스트교환 · 🟢 보강 · 🟡 시간강사")
+                # 변경 교사는 서로 섞지 않고, 이미지처럼 교사별 카드 안에
+                # 1~7교시를 세로로 두고 월~금 5열을 가로로 배치한다.
+                # 이렇게 하면 한 화면에서 읽기 쉽고 교사별 구분도 명확하다.
                 for idx, teacher_name in enumerate(changed):
-                    one_teacher = changed_week[
-                        changed_week["교사명"].astype(str).str.strip() == str(teacher_name).strip()
-                    ].copy()
-                    if one_teacher.empty:
+                    teacher_grid, _ = get_teacher_week_view(str(teacher_name), ref, use_test=False)
+                    if teacher_grid.empty:
                         continue
-                    render_standard_weekly_matrix(
-                        one_teacher, ref, row_label="교사명",
-                        key=f"changed_teacher_week_{idx}",
-                        title=str(teacher_name), use_test=False, height=82
-                    )
+                    with st.expander(f"👤 {teacher_name}", expanded=True):
+                        render_standard_weekly_matrix(
+                            teacher_grid, ref, row_label="교시",
+                            key=f"changed_teacher_week_{idx}",
+                            title=None, use_test=False, height=286
+                        )
 
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
