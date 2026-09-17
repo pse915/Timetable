@@ -190,49 +190,82 @@ input, textarea { color:var(--apple-ink) !important; background:#fff !important;
 input::placeholder, textarea::placeholder { color:#8e8e93 !important; }
 [data-baseweb="select"] * { color:var(--apple-ink) !important; }
 
-/* Tabs / navigation */
-[data-baseweb="tab-list"] {
-    background:var(--apple-surface-soft) !important;
-    border:1px solid var(--apple-line-soft);
-    border-radius:999px;
-    padding:.18rem;
-    gap:.12rem;
+/* Navigation — Apple-style segmented control */
+[data-testid="stRadio"] {
+    margin:0 !important;
 }
-[data-baseweb="tab"] {
-    color:var(--apple-muted) !important;
+[data-testid="stRadio"] > div {
+    width:100% !important;
+}
+[data-testid="stRadio"] [role="radiogroup"] {
+    display:flex !important;
+    align-items:center !important;
+    gap:3px !important;
+    width:100% !important;
+    padding:3px !important;
+    background:#f5f5f7 !important;
+    border:1px solid #e5e5ea !important;
     border-radius:999px !important;
-    padding:.45rem .75rem !important;
-    font-size:.82rem !important;
+    overflow-x:auto !important;
+    scrollbar-width:none;
 }
-[data-baseweb="tab"][aria-selected="true"] {
-    color:var(--apple-ink) !important;
-    background:#fff !important;
-    box-shadow:0 1px 3px rgba(0,0,0,.08);
+[data-testid="stRadio"] [role="radiogroup"]::-webkit-scrollbar { display:none; }
+[data-testid="stRadio"] [role="radio"] {
+    flex:0 0 auto !important;
+    min-height:32px !important;
+    padding:0 13px !important;
+    border-radius:999px !important;
+    color:#6e6e73 !important;
+    font-size:13px !important;
+    font-weight:400 !important;
+    letter-spacing:-.2px !important;
+    transition:background .18s ease, color .18s ease, transform .18s ease !important;
 }
+[data-testid="stRadio"] [role="radio"]:hover { background:#ebebf0 !important; color:#1d1d1f !important; }
+[data-testid="stRadio"] [role="radio"][aria-checked="true"] {
+    background:#ffffff !important;
+    color:#1d1d1f !important;
+    font-weight:600 !important;
+    box-shadow:0 1px 3px rgba(0,0,0,.10) !important;
+}
+[data-testid="stRadio"] [role="radio"] > div:first-child { display:none !important; }
 
-/* Cards / expanders */
+/* Apple section rhythm */
+.apple-page-head {
+    display:flex; align-items:flex-end; justify-content:space-between; gap:24px;
+    padding:22px 4px 16px; margin:0 0 8px;
+    border-bottom:1px solid #f0f0f0;
+}
+.apple-page-head h1 { margin:0 !important; font-family:"SF Pro Display",system-ui,-apple-system,sans-serif !important;
+    font-size:34px !important; line-height:1.1 !important; font-weight:600 !important; letter-spacing:-.55px !important; }
+.apple-page-head p { margin:7px 0 0 !important; color:#7a7a7a !important; font-size:14px !important; line-height:1.43 !important; }
+.apple-section { margin:14px 0 22px; }
+.apple-section-label { color:#7a7a7a; font-size:12px; font-weight:600; letter-spacing:-.12px; margin:0 0 8px 2px; }
+
+/* Cards / expanders — no heavy elevation */
 [data-testid="stVerticalBlockBorderWrapper"],
 [data-testid="stExpander"] {
     background:#fff !important;
-    border:1px solid var(--apple-line) !important;
-    border-radius:var(--apple-radius-lg) !important;
-    box-shadow:0 1px 2px rgba(0,0,0,.018) !important;
+    border:1px solid #e0e0e0 !important;
+    border-radius:18px !important;
+    box-shadow:none !important;
 }
 [data-testid="stExpander"] summary {
-    color:var(--apple-ink) !important;
+    color:#1d1d1f !important;
     font-weight:600 !important;
-    min-height:42px;
+    min-height:46px;
 }
+[data-testid="stExpander"] summary:hover { background:#fafafc !important; }
 hr, [data-testid="stDivider"] { border-color:var(--apple-line-soft) !important; }
 
 /* DataFrame / matrix */
 .matrix-shell { margin-top:.2rem; }
 [data-testid="stDataFrame"] {
-    border:1px solid #c7c7cc !important;
+    border:1px solid #d2d2d7 !important;
     border-radius:14px !important;
     overflow:hidden !important;
     background:#fff !important;
-    box-shadow:0 1px 4px rgba(0,0,0,.035) !important;
+    box-shadow:none !important;
 }
 [data-testid="stDataFrame"] [role="gridcell"],
 [data-testid="stDataFrame"] [role="columnheader"] {
@@ -352,6 +385,10 @@ hr, [data-testid="stDivider"] { border-color:var(--apple-line-soft) !important; 
     [data-testid="stExpander"] summary { color:#f5f5f7 !important; }
     [data-baseweb="tab-list"] { background:#1c1c1e !important; border-color:#28282c !important; }
     [data-baseweb="tab"][aria-selected="true"] { background:#2c2c2e !important; color:#fff !important; }
+    [data-testid="stRadio"] [role="radiogroup"] { background:#1c1c1e !important; border-color:#38383d !important; }
+    [data-testid="stRadio"] [role="radio"] { color:#98989d !important; }
+    [data-testid="stRadio"] [role="radio"]:hover { background:#2c2c2e !important; color:#f5f5f7 !important; }
+    [data-testid="stRadio"] [role="radio"][aria-checked="true"] { background:#2c2c2e !important; color:#fff !important; box-shadow:0 1px 3px rgba(0,0,0,.35) !important; }
     [data-testid="stDataFrame"] { background:#0d0d0f !important; border-color:#48484d !important; }
     [data-testid="stDataFrame"] [role="gridcell"] { background:#0d0d0f !important; color:#f5f5f7 !important; border-color:#28282c !important; }
     [data-testid="stDataFrame"] [role="columnheader"] { background:#1c1c1e !important; color:#f5f5f7 !important; border-color:#38383d !important; }
@@ -442,6 +479,20 @@ ALL_TABS = [
     "🔑 아이디·권한 관리",
     "📑 회원별 탭 권한 관리"
 ]
+
+NAV_LABELS = {
+    "시간표 조회": "시간표",
+    "시간강사 관리": "시간강사",
+    "결강·보강": "결강·보강",
+    "시간표 맞교환 & 변경 추천": "맞교환",
+    "통계": "통계",
+    "시간표 변경 테스트용": "테스트",
+    "변경된 교사 주간표": "변경 교사",
+    "📋 복무 관리 & 판단": "복무",
+    "🛠️ 다중 출장·전체 조정 추천": "다중 조정",
+    "🔑 아이디·권한 관리": "아이디",
+    "📑 회원별 탭 권한 관리": "탭 권한",
+}
 
 DEFAULT_TABS = {
     ROLE_MASTER: ALL_TABS,
@@ -4273,14 +4324,21 @@ def render_top_toolbar(visible_tabs):
     도구는 popover가 아니라 별도 dialog로 연다. 따라서 fragment 재실행이 발생해도
     도구 창의 위치/폭이 앵커를 따라 누적 이동하지 않는다.
     """
-    c_id, c_nav, c_tools, c_user = st.columns([1.55, 3.4, 1.0, .85], vertical_alignment="center")
+    c_id, c_nav, c_tools, c_user = st.columns([1.35, 5.85, .85, .8], vertical_alignment="center")
     with c_id:
         st.markdown(f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_user()} · {current_role()}</div>', unsafe_allow_html=True)
     with c_nav:
         if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs:
             st.session_state.active_tab = visible_tabs[0]
         previous_active = st.session_state.active_tab
-        active = st.selectbox("업무 메뉴", visible_tabs, index=visible_tabs.index(previous_active), key="top_active_tab", label_visibility="collapsed")
+        nav_options = [NAV_LABELS.get(t, t) for t in visible_tabs]
+        label_to_tab = dict(zip(nav_options, visible_tabs))
+        previous_label = NAV_LABELS.get(previous_active, previous_active)
+        active_label = st.radio(
+            "업무 메뉴", nav_options, index=nav_options.index(previous_label),
+            horizontal=True, key="top_active_tab", label_visibility="collapsed"
+        )
+        active = label_to_tab.get(active_label, visible_tabs[0])
         st.session_state.active_tab = active
         if active != previous_active:
             # 탭 전환은 '새 업무 화면'으로 취급한다. 직전 화면에서 선택했던
@@ -4345,6 +4403,26 @@ st.markdown('<div class="app-top-safe-space" aria-hidden="true"></div>', unsafe_
 render_top_toolbar(visible_tabs)
 active_tab = st.session_state.active_tab
 tab_map = {active_tab: st.container()}
+
+PAGE_DESCRIPTIONS = {
+    "시간표 조회": "오늘과 주간 시간표를 한 곳에서 빠르게 확인합니다.",
+    "시간강사 관리": "시간강사 배정과 가용 시간을 관리합니다.",
+    "결강·보강": "결강을 기록하고 보강 교사를 배정합니다.",
+    "시간표 맞교환 & 변경 추천": "수업 교환과 가능한 대안을 확인합니다.",
+    "통계": "결보강 및 시간표 변경 현황을 요약합니다.",
+    "시간표 변경 테스트용": "실제 시간표에 반영하기 전 변경안을 검토합니다.",
+    "변경된 교사 주간표": "이번 주 변경된 교사의 실제 주간 시간표를 확인합니다.",
+    "📋 복무 관리 & 판단": "복무와 출장에 따른 조정 가능 수업을 확인합니다.",
+    "🛠️ 다중 출장·전체 조정 추천": "여러 교사의 부재 상황을 함께 조정합니다.",
+    "🔑 아이디·권한 관리": "사용자 계정과 역할을 관리합니다.",
+    "📑 회원별 탭 권한 관리": "사용자별 업무 메뉴 접근 권한을 관리합니다.",
+}
+st.markdown(
+    f'<div class="apple-page-head"><div><h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
+    f'<p>{PAGE_DESCRIPTIONS.get(active_tab, "학교 시간표와 결보강 업무를 관리합니다.")}</p></div>'
+    f'<div class="apple-section-label">{current_role()} · {current_name() or current_user()}</div></div>',
+    unsafe_allow_html=True
+)
 
 # 주간표 팝업은 현재 활성 화면의 주간표가 선택 상태를 기록한 뒤
 # 스크립트 마지막에서 단 한 번 렌더링한다. 비활성 메뉴는 렌더링하지 않으므로
@@ -4687,8 +4765,6 @@ if "시간표 변경 테스트용" in tab_map:
 # ------------------------------------------------------------------ 변경된 교사 주간표
 if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
-        st.subheader("📅 변경된 교사 주간 시간표")
-
         # 상단 영역은 달력과 변경 교사 목록을 좌우로 나눈다.
         # 달력은 필요한 만큼만 사용하고, 남는 가로 공간에는 변경 교사를 배치해
         # 날짜 선택과 대상 교사 확인을 한 화면에서 끝낼 수 있도록 한다.
