@@ -4083,6 +4083,10 @@ def render_top_toolbar(visible_tabs):
         active = st.selectbox("업무 메뉴", visible_tabs, index=visible_tabs.index(previous_active), key="top_active_tab", label_visibility="collapsed")
         st.session_state.active_tab = active
         if active != previous_active:
+            # 탭을 전환할 때는 직전 탭의 주간표 선택/팝업 상태를 완전히 폐기한다.
+            # 그렇지 않으면 새 탭을 렌더링하기 전에 마지막 수업 선택이 남아
+            # 앱 마지막의 공통 Dialog 조건을 만족하면서 이전 팝업이 다시 열린다.
+            _clear_weekly_selection()
             st.rerun()
     with c_tools:
         if st.button("도구", use_container_width=True, key="top_tools_open"):
