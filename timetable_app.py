@@ -3083,7 +3083,13 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         # 이전 수업의 선택 후보가 새 수업에 그대로 남는 것을 방지한다.
         st.session_state["weekly_dialog_instance"] = int(st.session_state.get("weekly_dialog_instance", 0) or 0) + 1
         st.session_state.weekly_dialog_open = bool(open_dialog)
-        # 중요: dialog는 이 함수에서 직접 렌더링하지 않는다.
+        # 중요: 새 셀 선택이 발생한 현재 실행에서만 dialog를 직접 연다.
+        # 전역 하단에서 session_state만 보고 dialog를 다시 호출하면,
+        # X 또는 바깥 빈 공간으로 닫은 뒤에도 다음 rerun에서 같은 dialog가
+        # 다시 열리는 문제가 생긴다. native st.dialog는 이 호출 자체가
+        # '열기' 트리거이므로, 닫힌 뒤에는 새 셀 선택이 없는 한 다시 호출하지 않는다.
+        if open_dialog:
+            _weekly_action_dialog()
     elif selection_changed:
         # 새 selection 이벤트가 발생했는데 실제 수업으로 해석되지 않으면
         # (빈 셀 클릭 / 선택 해제 / 빈 공간 클릭으로 selection이 비어 온 경우)
@@ -4966,10 +4972,8 @@ if "📑 회원별 탭 권한 관리" in tab_map:
                     st.success("모든 탭 차단됨")
                     st.rerun()
 
-# ------------------------------------------------------------------ 주간표 공통 팝업 중앙 렌더러
-# 모든 탭의 주간표가 먼저 렌더링되어 이번 실행의 최신 셀 선택을 session_state에 기록한 뒤
-# 여기서 native dialog를 정확히 한 번만 호출한다. 따라서 클릭 직전의 이전 선택이 아니라
-# 방금 클릭한 셀이 팝업에 표시된다. 또한 주간표 렌더러 안에서 dialog가 중복 생성되지 않는다.
-if st.session_state.get("weekly_dialog_open") and st.session_state.get("weekly_selected_lesson"):
-    _weekly_action_dialog()
+# ------------------------------------------------------------------ 주간표 공통 팝업
+# 주간표 셀을 새로 선택한 순간 render_weekly_matrix() 안에서만 native dialog를 연다.
+# 따라서 X 또는 dialog 바깥 빈 공간으로 닫으면 다음 전체 rerun에서 이 호출이 다시
+# 실행되지 않는다. session_state에 남은 선택값 때문에 팝업이 부활하는 문제를 방지한다.
 
