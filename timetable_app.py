@@ -3084,14 +3084,13 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         st.session_state["weekly_dialog_instance"] = int(st.session_state.get("weekly_dialog_instance", 0) or 0) + 1
         st.session_state.weekly_dialog_open = bool(open_dialog)
         # 중요: dialog는 이 함수에서 직접 렌더링하지 않는다.
-    elif selection_changed and selected_cells:
-        # 빈 셀을 클릭한 경우에도 dataframe의 selection 이벤트는 발생한다.
-        # 이전 수업을 session_state에 그대로 두면 새 클릭이 빈칸이어도
-        # 직전 수업의 팝업/상세가 다시 표시되는 문제가 생긴다.
-        st.session_state.pop("weekly_selected_lesson", None)
-        st.session_state.pop("weekly_dialog_result", None)
-        st.session_state.weekly_dialog_open = False
-        st.session_state.weekly_dialog_action_mode = "swap"
+    elif selection_changed:
+        # 새 selection 이벤트가 발생했는데 실제 수업으로 해석되지 않으면
+        # (빈 셀 클릭 / 선택 해제 / 빈 공간 클릭으로 selection이 비어 온 경우)
+        # 이전 수업을 남겨 두지 않고 X(닫기)를 누른 것과 동일하게 처리한다.
+        # 기존의 `and selected_cells` 조건은 빈 selection([]) 이벤트를 놓쳐
+        # 직전 수업 dialog가 다음 rerun/탭에서 재등장할 수 있었다.
+        _clear_weekly_selection()
     # 주간표 렌더러는 선택 상태만 기록하고 Dialog는 앱 마지막에서 단 한 번 중앙 렌더링한다.
     return lesson
 
