@@ -69,8 +69,9 @@ html, body,
 }
 
 body, button, input, textarea, select, [data-testid="stDataFrame"] {
-    font-family:"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont,
-                 "Inter", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif !important;
+    font-family:var(--app-font, "SF Pro Text", "SF Pro Display", -apple-system,
+                 BlinkMacSystemFont, "Inter", "Apple SD Gothic Neo", "Noto Sans KR",
+                 sans-serif) !important;
     -webkit-font-smoothing:antialiased;
     text-rendering:optimizeLegibility;
 }
@@ -236,7 +237,7 @@ input::placeholder, textarea::placeholder { color:#8e8e93 !important; }
     padding:22px 4px 16px; margin:0 0 8px;
     border-bottom:1px solid #f0f0f0;
 }
-.apple-page-head h1 { margin:0 !important; font-family:"SF Pro Display",system-ui,-apple-system,sans-serif !important;
+.apple-page-head h1 { margin:0 !important; font-family:var(--app-font, "SF Pro Display", system-ui, -apple-system, sans-serif) !important;
     font-size:34px !important; line-height:1.1 !important; font-weight:600 !important; letter-spacing:-.55px !important; }
 .apple-page-head p { margin:7px 0 0 !important; color:#7a7a7a !important; font-size:14px !important; line-height:1.43 !important; }
 .apple-section { margin:14px 0 22px; }
@@ -621,12 +622,282 @@ hr, [data-testid="stDivider"] { border-color:var(--apple-line-soft) !important; 
     .apple-section-label { margin-top:8px; }
 }
 
+/* -----------------------------------------------------------------------------
+   Apple Dark UI refinement
+   - 브라우저/OS가 다크 모드일 때 전체 업무 UI를 같은 색상 토큰으로 전환
+   - 순수 검정보다 눈부심을 줄인 #1c1c1e 계열 surface 사용
+   - 매트릭스의 셀 경계/헤더/상태 표시를 별도로 보정
+   ----------------------------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --apple-bg:#000000;
+        --apple-surface:#1c1c1e;
+        --apple-surface-soft:#2c2c2e;
+        --apple-surface-pearl:#232326;
+        --apple-ink:#f5f5f7;
+        --apple-ink-2:#e5e5ea;
+        --apple-muted:#a1a1a6;
+        --apple-muted-2:#8e8e93;
+        --apple-line:#48484a;
+        --apple-line-soft:#38383a;
+        --apple-blue:#2997ff;
+        --apple-blue-hover:#47a6ff;
+        --apple-focus:rgba(41,151,255,.32);
+    }
+
+    html, body,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stApp"],
+    [data-testid="stMain"],
+    [data-testid="stMainBlockContainer"] {
+        background:var(--apple-bg) !important;
+        color:var(--apple-ink) !important;
+    }
+
+    [data-testid="stHeader"] {
+        background:rgba(0,0,0,.86) !important;
+        border-bottom:1px solid #2c2c2e !important;
+    }
+
+    [data-testid="stHeader"] *,
+    [data-testid="stMain"] *,
+    [data-testid="stAppViewContainer"] * {
+        scrollbar-color:#48484a transparent;
+    }
+
+    /* Streamlit 기본 텍스트 계층 */
+    h1,h2,h3,h4,h5,h6,
+    p, label, span, div, li, td, th {
+        color:inherit;
+    }
+    [data-testid="stCaptionContainer"],
+    .stCaption,
+    .apple-page-head p,
+    .apple-section-label,
+    .apple-note,
+    .compact-nav,
+    .tool-section-title {
+        color:var(--apple-muted) !important;
+    }
+
+    .apple-page-head {
+        border-bottom-color:#2c2c2e !important;
+    }
+    .apple-page-head h1,
+    .sandbox-title,
+    .ai-hero-title {
+        color:var(--apple-ink) !important;
+    }
+    .apple-note strong,
+    .app-identity strong {
+        color:var(--apple-ink) !important;
+    }
+
+    /* 상단 업무 메뉴 */
+    .app-topbar {
+        border-bottom-color:#2c2c2e !important;
+    }
+    .app-identity {
+        color:var(--apple-muted) !important;
+    }
+    .app-topbar [data-testid="stRadio"] [role="radiogroup"] {
+        background:#1c1c1e !important;
+        border-color:#38383a !important;
+    }
+    .app-topbar [data-testid="stRadio"] [role="radio"] {
+        color:#a1a1a6 !important;
+    }
+    .app-topbar [data-testid="stRadio"] [role="radio"]:hover {
+        background:#2c2c2e !important;
+        color:#f5f5f7 !important;
+    }
+    .app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
+        background:#3a3a3c !important;
+        color:#fff !important;
+        border-color:#48484a !important;
+    }
+
+    /* 일반 버튼 */
+    .stButton > button,
+    .stDownloadButton > button,
+    .stFormSubmitButton > button {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+    }
+    .stButton > button:hover,
+    .stDownloadButton > button:hover,
+    .stFormSubmitButton > button:hover {
+        background:#2c2c2e !important;
+        border-color:#636366 !important;
+    }
+    .stButton > button[kind="primary"],
+    .stFormSubmitButton > button[kind="primary"] {
+        background:var(--apple-blue) !important;
+        color:#fff !important;
+        border-color:var(--apple-blue) !important;
+    }
+    .stButton > button[kind="primary"]:hover,
+    .stFormSubmitButton > button[kind="primary"]:hover {
+        background:var(--apple-blue-hover) !important;
+        border-color:var(--apple-blue-hover) !important;
+    }
+
+    /* 입력/선택 */
+    [data-baseweb="input"],
+    [data-baseweb="textarea"],
+    [data-baseweb="select"] > div,
+    [data-testid="stDateInput"] > div > div,
+    [data-testid="stNumberInput"] > div > div,
+    input, textarea {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+        caret-color:#2997ff !important;
+    }
+    input::placeholder,
+    textarea::placeholder {
+        color:#8e8e93 !important;
+    }
+    [data-baseweb="select"] *,
+    [data-baseweb="input"] *,
+    [data-baseweb="textarea"] * {
+        color:#f5f5f7 !important;
+    }
+    [data-baseweb="select"] > div:hover {
+        border-color:#636366 !important;
+    }
+    [data-baseweb="input"]:focus-within,
+    [data-baseweb="textarea"]:focus-within,
+    [data-baseweb="select"]:focus-within {
+        border-color:#2997ff !important;
+        box-shadow:0 0 0 3px rgba(41,151,255,.25) !important;
+    }
+
+    /* 팝업/메뉴/캘린더 등 BaseWeb overlay */
+    [data-baseweb="popover"],
+    [data-baseweb="menu"],
+    [role="listbox"],
+    [data-baseweb="calendar"],
+    [data-baseweb="modal"] {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+    }
+    [role="option"]:hover,
+    [role="menuitem"]:hover {
+        background:#2c2c2e !important;
+    }
+
+    /* 카드 / expander */
+    [data-testid="stVerticalBlockBorderWrapper"],
+    [data-testid="stExpander"] {
+        background:#1c1c1e !important;
+        border-color:#38383a !important;
+        color:#f5f5f7 !important;
+    }
+    [data-testid="stExpander"] summary {
+        color:#f5f5f7 !important;
+    }
+    [data-testid="stExpander"] summary:hover {
+        background:#232326 !important;
+    }
+    hr, [data-testid="stDivider"] {
+        border-color:#38383a !important;
+    }
+
+    /* 핵심 주간 매트릭스 */
+    [data-testid="stDataFrame"] {
+        background:#1c1c1e !important;
+        border-color:#48484a !important;
+    }
+    [data-testid="stDataFrame"] [role="columnheader"] {
+        background:#2c2c2e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+    }
+    [data-testid="stDataFrame"] [role="gridcell"] {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#38383a !important;
+    }
+    [data-testid="stDataFrame"] [role="gridcell"]:hover {
+        background:#252528 !important;
+    }
+
+    /* 변경 교사 chip / 상태성 UI */
+    .changed-teacher-chip {
+        background:#232326 !important;
+        color:#e5e5ea !important;
+        border-color:#38383a !important;
+    }
+
+    /* Dialog */
+    [data-testid="stDialog"] {
+        color:#f5f5f7 !important;
+    }
+    [data-testid="stDialog"] > div > div {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+        box-shadow:0 24px 70px rgba(0,0,0,.58) !important;
+    }
+    [data-testid="stDialog"] .stButton > button {
+        background:#2c2c2e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+    }
+    [data-testid="stDialog"] .stButton > button[kind="primary"] {
+        background:#2997ff !important;
+        color:#fff !important;
+        border-color:#2997ff !important;
+    }
+
+    /* 알림/메시지 컨테이너는 원래 의미를 유지하되 다크 surface로 */
+    [data-testid="stAlert"] {
+        background:#1c1c1e !important;
+        color:#f5f5f7 !important;
+        border-color:#48484a !important;
+    }
+
+    /* 링크/포커스 */
+    a {
+        color:#2997ff !important;
+    }
+    *:focus-visible {
+        outline-color:#2997ff !important;
+    }
+}
+
+/* 선택한 폰트가 모든 Streamlit/BaseWeb 내부 요소에도 전달되도록 */
+body, button, input, textarea, select,
+[data-testid="stAppViewContainer"] *,
+[data-testid="stDialog"] *,
+[data-baseweb] * {
+    font-family:var(--app-font, "SF Pro Text", "SF Pro Display", -apple-system,
+                 BlinkMacSystemFont, "Inter", "Apple SD Gothic Neo",
+                 "Noto Sans KR", sans-serif) !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
 APP_VERSION = "2.1.0"
+
+# ==========================================================================================
+# UI 폰트 설정
+# - 외부 웹폰트 다운로드에 의존하지 않고, 사용자의 OS에 설치된 폰트를 우선 사용한다.
+# - 한국어 fallback을 충분히 제공하여 학교 PC에서도 깨지지 않게 한다.
+# ==========================================================================================
+UI_FONT_OPTIONS = {
+    "시스템 기본 (Apple / Windows)": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif',
+    "Pretendard": '"Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif',
+    "Noto Sans KR": '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif',
+    "Inter": '"Inter", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif',
+}
+UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
+
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
 MAX_PERIOD = 7
@@ -4504,6 +4775,15 @@ if not st.session_state.logged_in:
 
 init_state()
 
+if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_OPTIONS:
+    st.session_state.ui_font = UI_FONT_DEFAULT
+
+# 현재 선택된 폰트를 CSS 변수로 주입한다. 폰트 선택은 앱 전체에 즉시 적용된다.
+st.markdown(
+    f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}</style>""",
+    unsafe_allow_html=True,
+)
+
 # ==========================================================================================
 # 상단 가로 업무 Toolbar
 # ==========================================================================================
@@ -4518,6 +4798,23 @@ def render_tools_dialog():
     if current_role() == ROLE_GUEST:
         st.caption("게스트 모드에서는 사용할 수 있는 도구가 없습니다.")
         return
+
+    st.markdown('<div class="tool-section-title">화면</div>', unsafe_allow_html=True)
+    selected_font = st.selectbox(
+        "글꼴",
+        list(UI_FONT_OPTIONS.keys()),
+        index=list(UI_FONT_OPTIONS.keys()).index(st.session_state.get("ui_font", UI_FONT_DEFAULT)),
+        key="ui_font_selector",
+        help="이 브라우저에서 사용할 수 있는 글꼴을 우선 적용합니다. 학교 PC에 해당 글꼴이 설치되어 있지 않으면 다음 대체 글꼴이 사용됩니다.",
+    )
+    st.session_state.ui_font = selected_font
+    st.markdown(
+        f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}</style>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("글꼴은 이 기기에 설치된 폰트를 우선 사용합니다.")
+
+    st.divider()
 
     if can_full_data() or is_teacher():
         if st.button("🔄 시간표 새로고침", use_container_width=True, key="top_reload_timetable"):
