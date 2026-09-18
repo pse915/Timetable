@@ -271,13 +271,56 @@ APP_VERSION = "5.0-Apple-ProductUX-Renewal"
 # - 외부 웹폰트 다운로드에 의존하지 않고, 사용자의 OS에 설치된 폰트를 우선 사용한다.
 # - 한국어 fallback을 충분히 제공하여 학교 PC에서도 깨지지 않게 한다.
 # ==========================================================================================
+GITHUB_FONT_BASE = "https://cdn.jsdelivr.net/gh/pse915/Timetable@main"
+GITHUB_FONT_RAW_BASE = "https://raw.githubusercontent.com/pse915/Timetable/main"
+GITHUB_FONT_FAMILY = "Pse Noto Sans KR"
+
 UI_FONT_OPTIONS = {
     "시스템 기본 (Apple / Windows)": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif',
     "Pretendard": '"Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif',
     "Noto Sans KR": '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif',
+    "Noto Sans KR · GitHub (Light + Bold)": f'"{GITHUB_FONT_FAMILY}", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
     "Inter": '"Inter", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif',
 }
 UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
+
+
+def render_font_runtime_css(selected_font: str):
+    """선택 폰트를 매 실행 전역에 적용한다.
+
+    GitHub TTF의 실제 Light(300)와 Bold(700)를 각각 등록하여 브라우저가 실제 파일을 사용하도록 한다.
+    jsDelivr을 우선 사용하고 GitHub raw URL을 fallback으로 둔다.
+    """
+    selected_font = selected_font if selected_font in UI_FONT_OPTIONS else UI_FONT_DEFAULT
+    if selected_font != "Noto Sans KR · GitHub (Light + Bold)":
+        st.markdown(
+            f"<style>:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}</style>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    light_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Light.ttf"
+    bold_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Bold.ttf"
+    light_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Light.ttf"
+    bold_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Bold.ttf"
+    st.markdown(
+        f"""
+<style id="github-noto-sans-kr-runtime-font">
+@font-face {{ font-family: '{GITHUB_FONT_FAMILY}'; font-style: normal; font-weight: 300; font-display: swap;
+  src: url('{light_url}') format('truetype'), url('{light_raw}') format('truetype'); }}
+@font-face {{ font-family: '{GITHUB_FONT_FAMILY}'; font-style: normal; font-weight: 700; font-display: swap;
+  src: url('{bold_url}') format('truetype'), url('{bold_raw}') format('truetype'); }}
+:root {{ --app-font: '{GITHUB_FONT_FAMILY}', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }}
+p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid=\"stWidgetLabel\"],[data-testid=\"stCaptionContainer\"],.stMarkdown,.stCaption,[role=\"radio\"],[role=\"tab\"],[data-baseweb=\"select\"],[data-baseweb=\"input\"] input,[data-baseweb=\"textarea\"] textarea {{ font-family: var(--app-font) !important; }}
+[data-testid=\"stDataFrame\"] [role=\"gridcell\"],[data-testid=\"stDataFrame\"] [role=\"columnheader\"] {{ font-family: var(--app-font) !important; }}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+# 저장된 선택값을 dialog가 닫혀 있어도 전체 화면에 적용
+render_font_runtime_css(st.session_state.get("ui_font", UI_FONT_DEFAULT))
 
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
@@ -5316,11 +5359,15 @@ def render_tools_dialog():
         help="이 브라우저에서 사용할 수 있는 글꼴을 우선 적용합니다. 학교 PC에 해당 글꼴이 설치되어 있지 않으면 다음 대체 글꼴이 사용됩니다.",
     )
     st.session_state.ui_font = selected_font
-    st.markdown(
-        f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}</style>""",
-        unsafe_allow_html=True,
-    )
-    st.caption("글꼴은 이 기기에 설치된 폰트를 우선 사용합니다.")
+    render_font_runtime_css(selected_font)
+    if selected_font == "Noto Sans KR · GitHub (Light + Bold)":
+        st.caption("GitHub의 NotoSansKR-Light.ttf(일반체)와 NotoSansKR-Bold.ttf(볼드체)를 사용합니다.")
+        st.markdown(
+            f"<div style=\"font-family:'{GITHUB_FONT_FAMILY}';font-weight:300;font-size:14px;line-height:1.7\">가나다라마바사 아자차카 · 일반체 <strong style=\"font-weight:700\">가나다라마바사 아자차카 · 볼드체</strong></div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.caption("글꼴은 이 기기에 설치된 폰트를 우선 사용합니다.")
 
     st.divider()
 
