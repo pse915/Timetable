@@ -2074,7 +2074,16 @@ def get_single_lesson_1to1_candidates(
     teacher: str, orig_date_str: str, orig_period: int,
     orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0, use_test: bool = False
 ) -> pd.DataFrame:
-    """선택 수업의 실제 1:1 맞교환 가능 수업을 검색 기간 전체에서 전수 탐색한다."""
+    """선택 수업의 1:1 맞교환 후보를 검색한다.
+
+    원칙
+    - 선택일 이후의 평일만 검색한다.
+    - 검색 범위의 모든 교시를 검사한다.
+    - 동일 학급 후보를 우선하되 다른 학급도 누락하지 않는다.
+    - A는 목표 슬롯이 공강이고 B는 A의 원본 슬롯이 공강이어야 한다.
+    - 테스트 모드에서는 이미 테스트 변경에 사용된 슬롯을 재사용하지 않는다.
+    - 반복적인 DataFrame 검색을 줄여 대규모 시간표에서도 빠르게 동작한다.
+    """
     source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
     source_str = source_date.strftime("%Y-%m-%d")
     source_day = WEEKDAY_KR[source_date.weekday()]
@@ -2082,6 +2091,14 @@ def get_single_lesson_1to1_candidates(
     source_class = str(orig_class).strip()
     source_subject = str(orig_subject).strip()
     teacher = str(teacher).strip()
+
+    empty_cols = [
+        "원본일자","원본요일","원본교시","원본학급","원본과목",
+        "이동희망일","이동요일","이동희망교시","상대교사","상대학급",
+        "상대과목","상대수업","동일학급","동학년","교환가능사유","점수"
+    ]
+    if not teacher or not source_str or source_period <= 0 or not source_class:
+        return pd.DataFrame(columns=empty_cols)
 
     monday = source_date - timedelta(days=source_date.weekday())
     friday = monday + timedelta(days=4)
@@ -2095,62 +2112,153 @@ def get_single_lesson_1to1_candidates(
     ver = version or st.session_state.get("_data_version", 0)
     source_tt = get_effective_timetable_for_date(source_str, ver, use_test=use_test)
     if source_tt is None or source_tt.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=empty_cols)
+
+    def norm_series(df, col):
+        return df[col].astype(str).str.strip() if col in df.columns else pd.Series("", index=df.index)
+
+    source_teacher_s = norm_series(source_tt, "교사명")
+    source_period_s = source_tt["교시"].apply(safe_int) if "교시" in source_tt.columns else pd.Series(0, index=source_tt.index)
+    source_class_s = norm_series(source_tt, "학급")
+    source_subject_s = norm_series(source_tt, "과목")
     source_match = source_tt[
-        (source_tt["교사명"].astype(str).str.strip() == teacher)
-        & (source_tt["교시"].apply(safe_int) == source_period)
-        & (source_tt["학급"].astype(str).str.strip() == source_class)
-        & (source_tt["과목"].astype(str).str.strip() == source_subject)
+        (source_teacher_s == teacher) &
+        (source_period_s == source_period) &
+        (source_class_s == source_class) &
+        (source_subject_s == source_subject)
     ]
     if source_match.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=empty_cols)
 
     source_group = subject_group(source_subject)
     source_grade = grade_of(source_class)
-    results, seen = [], set()
+    source_weekday = source_day
+    source_test_affected = get_test_affected_slots() if use_test else set()
+    source_actual_affected = get_actual_direct_swap_affected_slots()
 
+    # 한 번 계산한 공강 여부를 같은 날짜에서 재사용한다.
+    duty_cache = {}
+    busy_cache = {}
+
+    def busy_set(on_date, tt):
+        if on_date in busy_cache:
+            return busy_cache[on_date]
+        busy = set()
+        if tt is not None and not tt.empty:
+            for r in tt.itertuples(index=False):
+                t = str(getattr(r, "교사명", "")).strip()
+                p = safe_int(getattr(r, "교시", 0))
+                if t and p > 0:
+                    busy.add((t, p))
+        busy_cache[on_date] = busy
+        return busy
+
+    def duty_set(on_date):
+        if on_date in duty_cache:
+            return duty_cache[on_date]
+        ds = set()
+        duties = st.session_state.get("duties", pd.DataFrame())
+        if isinstance(duties, pd.DataFrame) and not duties.empty:
+            for r in duties.itertuples(index=False):
+                if normalize_date_str(getattr(r, "일자", "")) != on_date:
+                    continue
+                t = str(getattr(r, "교사명", "")).strip()
+                p = safe_int(getattr(r, "교시", 0))
+                if t:
+                    ds.add((t, 0 if p <= 0 else p))
+        duty_cache[on_date] = ds
+        return ds
+
+    def teacher_free(t, day, p, on_date, tt):
+        p = safe_int(p)
+        if p <= 0 or (str(t).strip(), p) in busy_set(on_date, tt):
+            return False
+        ds = duty_set(on_date)
+        return (str(t).strip(), 0) not in ds and (str(t).strip(), p) not in ds
+
+    # 원본 슬롯의 상대 교사 공강을 미리 계산할 수 있다.
+    source_busy = busy_set(source_str, source_tt)
+    source_duty = duty_set(source_str)
+
+    results, seen = [], set()
     for target_date in search_dates:
         target_str = target_date.strftime("%Y-%m-%d")
         target_day = WEEKDAY_KR[target_date.weekday()]
         target_tt = get_effective_timetable_for_date(target_str, ver, use_test=use_test)
         if target_tt is None or target_tt.empty:
             continue
+
+        target_busy = busy_set(target_str, target_tt)
+        target_duty = duty_set(target_str)
+        target_period_s = target_tt["교시"].apply(safe_int)
+        target_teacher_s = norm_series(target_tt, "교사명")
+        target_class_s = norm_series(target_tt, "학급")
+        target_subject_s = norm_series(target_tt, "과목")
+
         max_period = PERIODS_PER_DAY.get(target_day, MAX_PERIOD)
         for target_period in range(1, max_period + 1):
             if target_str == source_str and target_period == source_period:
                 continue
-            if not is_free(teacher, target_day, target_period, target_str, target_tt):
+
+            # A 교사가 목표 슬롯에서 실제로 비어 있어야 한다.
+            if (teacher, target_period) in target_busy or (teacher, 0) in target_duty or (teacher, target_period) in target_duty:
                 continue
-            candidates = target_tt[target_tt["교시"].apply(safe_int) == target_period]
-            candidates = candidates[candidates["교사명"].astype(str).str.strip() != teacher]
-            candidates = candidates.drop_duplicates(subset=["교사명", "학급", "과목"])
+
+            period_mask = target_period_s == target_period
+            candidates = target_tt.loc[period_mask, ["교사명","학급","과목"]].copy()
+            if candidates.empty:
+                continue
+            candidates["교사명"] = candidates["교사명"].astype(str).str.strip()
+            candidates["학급"] = candidates["학급"].astype(str).str.strip()
+            candidates["과목"] = candidates["과목"].astype(str).str.strip()
+            candidates = candidates[(candidates["교사명"] != "") & (candidates["교사명"] != teacher)]
+            candidates = candidates.drop_duplicates(subset=["교사명","학급","과목"])
+
             for _, candidate in candidates.iterrows():
                 other_teacher = str(candidate["교사명"]).strip()
                 other_class = str(candidate["학급"]).strip()
                 other_subject = str(candidate["과목"]).strip()
                 if not other_teacher or not other_class or not other_subject:
                     continue
-                if not is_free(other_teacher, source_day, source_period, source_str, source_tt):
+
+                # B가 A의 원본 슬롯으로 이동할 수 있어야 한다.
+                if (other_teacher, source_period) in source_busy:
                     continue
+                if (other_teacher, 0) in source_duty or (other_teacher, source_period) in source_duty:
+                    continue
+
+                # 실제/테스트 변경으로 이미 잠긴 슬롯은 다시 사용하지 않는다.
+                target_slot = (target_str, other_teacher, target_period)
+                source_other_slot = (source_str, other_teacher, source_period)
+                source_teacher_target = (target_str, teacher, target_period)
+                if use_test and ({target_slot, source_other_slot, source_teacher_target} & source_test_affected):
+                    continue
+                if {target_slot, source_other_slot, source_teacher_target} & source_actual_affected:
+                    continue
+
                 key = (target_str, target_period, other_teacher, other_class, other_subject)
                 if key in seen:
                     continue
                 seen.add(key)
+
                 same_class = other_class == source_class
                 same_grade = grade_of(other_class) == source_grade
                 same_group = subject_group(other_subject) == source_group
-                reasons = ["내 공강", "상대 교사 공강"]
+                reasons = []
                 if same_class:
-                    reasons.insert(0, "동일 학급")
+                    reasons.append("동일 학급")
                 elif same_grade:
-                    reasons.insert(0, "동일 학년")
+                    reasons.append("동일 학년")
+                reasons.extend(["내 공강", "상대 교사 공강"])
                 if same_group:
                     reasons.append("같은 과목군")
+
                 score = (300 if same_class else 120 if same_grade else 0) + (40 if same_group else 0)
                 if target_str == source_str:
                     score += 20 + max(0, 8 - abs(target_period - source_period))
+
                 results.append({
-                    "원본일자": source_str, "원본요일": source_day, "원본교시": source_period,
+                    "원본일자": source_str, "원본요일": source_weekday, "원본교시": source_period,
                     "원본학급": source_class, "원본과목": source_subject,
                     "이동희망일": target_str, "이동요일": target_day, "이동희망교시": target_period,
                     "상대교사": other_teacher, "상대학급": other_class, "상대과목": other_subject,
@@ -2159,8 +2267,9 @@ def get_single_lesson_1to1_candidates(
                     "동학년": "동일 학년" if same_grade and not same_class else "",
                     "교환가능사유": " · ".join(reasons), "점수": score,
                 })
+
     if not results:
-        return pd.DataFrame(columns=["원본일자","원본요일","원본교시","원본학급","원본과목","이동희망일","이동요일","이동희망교시","상대교사","상대학급","상대과목","상대수업","동일학급","동학년","교환가능사유","점수"])
+        return pd.DataFrame(columns=empty_cols)
     return pd.DataFrame(results).sort_values(
         ["동일학급","점수","이동희망일","이동희망교시","상대교사","상대학급"],
         ascending=[False,False,True,True,True,True], kind="stable"
@@ -4143,9 +4252,8 @@ def render_tools_dialog():
             st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx", key="top_dl_report_xlsx")
 
 
-@st.fragment
 def render_top_toolbar(visible_tabs):
-    """업무 중심 상단 셸. 핵심 업무 4개만 전면에 두고 관리 기능은 더보기로 묶는다."""
+    """업무 중심 상단 셸. Dialog와 충돌하지 않도록 일반 실행 컨텍스트에서 렌더링한다."""
     core = [t for t in ["시간표 조회", "결강·보강", "시간표 맞교환 & 변경 추천", "변경된 교사 주간표"] if t in visible_tabs]
     secondary = [t for t in visible_tabs if t not in core]
     c_id, c_nav, c_more, c_tools, c_user = st.columns([1.25, 5.35, 1.05, .72, .72], vertical_alignment="center")
