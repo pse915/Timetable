@@ -129,7 +129,7 @@ st.markdown(r"""
 [data-testid="stDateInput"] label,[data-testid="stSelectbox"] label,[data-testid="stRadio"] label,[data-testid="stTextInput"] label{font-size:11px!important;color:#6e7074!important;font-weight:500!important;margin-bottom:5px!important}
 [data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{border-radius:6px!important;border-color:#d8dadd!important;min-height:38px!important}
 .stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:38px!important;border-radius:6px!important;font-size:12px!important;padding:6px 14px!important}.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{background:#3e6ae1!important;border-color:#3e6ae1!important}
-[data-testid="stDataFrame"]{border:1px solid #d8dadd!important;border-radius:6px!important;box-shadow:none!important}.matrix-toolbar{margin-bottom:8px!important}.matrix-title{font-size:15px!important}.matrix-subtitle{font-size:11px!important;color:#7b7e83!important}.matrix-legend{gap:14px!important;font-size:11px!important;color:#7b7e83!important}
+[data-testid="stDataFrame"]{border:1px solid #d8dadd!important;border-radius:6px!important;box-shadow:none!important}.secondary-menu-row{margin:6px 0 14px!important;padding:8px;border:1px solid #d8dadd;border-radius:8px;background:#f7f7f7}.secondary-menu-row .stButton>button{min-height:34px!important;height:34px!important;font-size:12px!important;padding:0 10px!important}.matrix-toolbar{margin-bottom:8px!important}.matrix-title{font-size:15px!important}.matrix-subtitle{font-size:11px!important;color:#7b7e83!important}.matrix-legend{gap:14px!important;font-size:11px!important;color:#7b7e83!important}
 [data-testid="stDataFrame"] [role="columnheader"]{background:#f3f4f5!important;font-size:11px!important;color:#393c41!important;border-color:#e7e8ea!important}.swap-result-summary{border-radius:6px!important;background:#f3f4f5!important;border-color:#e7e8ea!important}.swap-group-head{margin:20px 0 6px!important;padding:0!important}.swap-group-count{border:0!important;border-radius:6px!important;background:#f3f4f5!important}
 [data-testid="stDialog"]>div>div{border-radius:8px!important;border:1px solid #d8dadd!important;box-shadow:0 14px 42px rgba(0,0,0,.12)!important}.apple-note,.work-note{border-radius:6px!important;background:#fafafa!important}.sandbox-title{font-size:28px!important;letter-spacing:-.04em!important}
 @media(max-width:1400px){.block-container{padding-left:22px!important;padding-right:22px!important}.app-topbar{gap:9px!important}}
@@ -4347,12 +4347,26 @@ def render_top_toolbar(visible_tabs):
             _clear_weekly_selection(); st.session_state.pop("weekly_dialog_use_test",None); st.session_state.pop("weekly_dialog_title",None); st.session_state.pop("weekly_dialog_instance",None); st.rerun()
     with c_more:
         if secondary:
-            sec_labels=["더보기"]+[NAV_LABELS.get(t,t) for t in secondary]
-            sec_map=dict(zip(sec_labels[1:],secondary))
-            current_sec=NAV_LABELS.get(previous,previous) if previous in secondary else "더보기"
-            picked=st.selectbox("기타 업무",sec_labels,index=sec_labels.index(current_sec),key="top_secondary_nav",label_visibility="collapsed")
-            if picked != "더보기" and sec_map.get(picked) != previous:
-                st.session_state.active_tab=sec_map[picked]; _clear_weekly_selection(); st.rerun()
+            # selectbox 위젯 상태와 active_tab 상태가 어긋나면 더보기에서 메뉴를
+            # 선택해도 이전 화면이 다시 렌더링될 수 있다. 메뉴 열기/닫기와
+            # 실제 탭 전환을 분리하고 각 항목을 button으로 처리한다.
+            menu_open = bool(st.session_state.get("secondary_menu_open", False))
+            if st.button("더보기" if not menu_open else "닫기", width="stretch", key="top_secondary_toggle"):
+                st.session_state.secondary_menu_open = not menu_open
+                st.rerun()
+
+    if secondary and st.session_state.get("secondary_menu_open", False):
+        st.markdown('<div class="secondary-menu-row">', unsafe_allow_html=True)
+        menu_cols = st.columns(min(5, len(secondary)))
+        for idx, tab_name in enumerate(secondary):
+            label = NAV_LABELS.get(tab_name, tab_name)
+            with menu_cols[idx % len(menu_cols)]:
+                if st.button(label, width="stretch", key=f"secondary_nav_{idx}", type="primary" if previous == tab_name else "secondary"):
+                    st.session_state.active_tab = tab_name
+                    st.session_state.secondary_menu_open = False
+                    _clear_weekly_selection()
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
     with c_tools:
         if st.button("···",width="stretch",key="top_tools_open",help="화면·출력·기타 도구"):
             render_tools_dialog()
