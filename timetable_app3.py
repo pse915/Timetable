@@ -5801,19 +5801,111 @@ if "시간표 변경 테스트용" in tab_map:
 if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
         ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
-        changed = get_changed_teachers_for_week(ref)
-        if not changed:
-            st.markdown('<div class="work-note"><strong>변경된 교사가 없습니다.</strong> 선택한 주간에는 현재 시간표 변경 이력이 없습니다.</div>', unsafe_allow_html=True)
+
+        # 기존에는 변경 교사를 한 명씩 선택해서 봐야 했지만,
+        # 이제는 전체 교사를 한 화면의 주간 매트릭스로 표시한다.
+        changed = set(get_changed_teachers_for_week(ref))
+        teacher_df = st.session_state.get("teachers", pd.DataFrame())
+        if teacher_df is not None and not teacher_df.empty and "교사명" in teacher_df.columns:
+            all_teachers = sorted({str(v).strip() for v in teacher_df["교사명"].dropna().tolist() if str(v).strip()})
         else:
-            st.markdown(f'<div class="work-section-title">이번 주 변경 교사 <span style="color:var(--ui-muted);font-weight:400">{len(changed)}명</span></div>', unsafe_allow_html=True)
-            selected_changed = st.selectbox("교사", changed, key="changed_teacher_selected", label_visibility="collapsed")
-            teacher_grid, _ = get_teacher_week_view(str(selected_changed), ref, use_test=False)
-            if teacher_grid.empty:
-                st.info("선택한 교사의 주간 시간표를 표시할 데이터가 없습니다.")
-            else:
-                st.markdown(f'<div class="matrix-toolbar"><div><div class="matrix-title">{selected_changed} · 변경된 주간 시간표</div><div class="matrix-subtitle">조회 전용 · 셀을 눌러도 작업 창이 열리지 않습니다.</div></div></div>', unsafe_allow_html=True)
-                st.markdown('<div class="matrix-legend"><span>↻ 교환</span><span>+ 보강</span><span>• 시간강사</span></div>', unsafe_allow_html=True)
-                render_standard_weekly_matrix(teacher_grid, ref, row_label="교시", key="changed_teacher_week_single", title=None, use_test=False, height=310, open_dialog=False)
+            all_teachers = sorted({str(v).strip() for v in st.session_state.timetable.get("교사명", pd.Series(dtype=str)).dropna().tolist() if str(v).strip()})
+
+        st.markdown(
+            f'<div class="work-section-title">전체 교사 주간표 '
+            f'<span style="color:var(--ui-muted);font-weight:400">전체 {len(all_teachers)}명 · 이번 주 변경 {len(changed)}명</span></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="work-note"><strong>전체 교사를 한 번에 표시합니다.</strong> '
+            '변경이 있는 교사는 이름 앞에 🔄 표시가 붙으며, 각 셀에는 교환·보강·시간강사 등 현재 적용 상태가 표시됩니다. '
+            '조회 전용 화면이라 셀을 눌러도 작업 창은 열리지 않습니다.</div>',
+            unsafe_allow_html=True,
+        )
+
+        if not all_teachers:
+            st.info("교사 목록이 없습니다. 시간표 시트의 교사명 데이터를 확인해 주세요.")
+        else:
+            monday = ref - timedelta(days=ref.weekday())
+            week_dates = [monday + timedelta(days=i) for i in range(5)]
+            ver = st.session_state.get("_data_version", 0)
+
+            # 하루 단위 effective timetable은 날짜별로 한 번씩만 조회한다.
+            # 교사 수 × 35회 호출을 피해서 전체 교사 표시 속도를 유지한다.
+            daily_effective = {}
+            for d in week_dates:
+                ds = d.strftime("%Y-%m-%d")
+                e = get_effective_timetable_for_date(ds, ver, use_test=False)
+                daily_effective[ds] = e if isinstance(e, pd.DataFrame) else pd.DataFrame()
+
+            rows = []
+            for teacher in all_teachers:
+                display_teacher = f"🔄 {teacher}" if teacher in changed else teacher
+                row = {"교사명": display_teacher}
+                for day_idx, d in enumerate(week_dates):
+                    ds = d.strftime("%Y-%m-%d")
+                    e = daily_effective[ds]
+                    if e.empty:
+                        for p in range(1, MAX_PERIOD + 1):
+                            row[f"{DAYS[day_idx]}{p}"] = ""
+                        continue
+
+                    sub = e[e["교사명"].astype(str).str.strip() == teacher].copy()
+                    if not sub.empty and "교시" in sub.columns:
+                        sub["_period"] = sub["교시"].apply(safe_int)
+                    else:
+                        sub = pd.DataFrame()
+
+                    for p in range(1, MAX_PERIOD + 1):
+                        m = sub[sub["_period"] == p] if not sub.empty else pd.DataFrame()
+                        cell = ""
+                        if not m.empty:
+                            r = m.iloc[0]
+                            cell = f"{str(r.get('학급','')).strip()} {str(r.get('과목','')).strip()}".strip()
+                            typ = str(r.get("변경유형", "원본") or "원본").strip()
+                            if typ == "교환":
+                                cell += f" 🔄 {str(r.get('변경출처','교환')).strip()}"
+                            elif typ == "테스트교환":
+                                cell += f" 🧪 {str(r.get('변경출처','테스트교환')).strip()}"
+                            elif typ == "보강":
+                                cell += f" 🟢 {str(r.get('변경출처','보강')).strip()}"
+                            elif typ == "시간강사":
+                                cell += f" 🟡 {str(r.get('원본교사','')).strip()}→시간강사"
+
+                            abs_df = st.session_state.get("absences", pd.DataFrame())
+                            if (
+                                isinstance(abs_df, pd.DataFrame)
+                                and not abs_df.empty
+                                and {"일자", "교사명", "교시"}.issubset(abs_df.columns)
+                            ):
+                                abs_match = (
+                                    (abs_df["일자"].astype(str).str.strip() == ds)
+                                    & (abs_df["교사명"].astype(str).str.strip() == teacher)
+                                    & (abs_df["교시"].apply(safe_int) == p)
+                                )
+                                if abs_match.any():
+                                    cell = f"[결강] {cell}"
+                        row[f"{DAYS[day_idx]}{p}"] = cell
+                rows.append(row)
+
+            all_teacher_grid = pd.DataFrame(rows)
+            st.markdown(
+                '<div class="matrix-toolbar"><div>'
+                '<div class="matrix-title">전체 교사 · 월~금 주간 시간표</div>'
+                '<div class="matrix-subtitle">변경된 교사는 🔄 표시 · 실제 적용된 교환/보강 상태를 반영</div>'
+                '</div></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div class="matrix-legend"><span>🔄 변경 교사/교환</span>'
+                '<span>🟢 보강</span><span>🟡 시간강사</span><span>🧪 테스트교환</span><span>[결강] 결강</span></div>',
+                unsafe_allow_html=True,
+            )
+            render_standard_weekly_matrix(
+                all_teacher_grid, ref, row_label="교사명", key="changed_teacher_week_all",
+                title=None, use_test=False, height=min(900, max(420, 120 + len(all_teachers) * 28)),
+                open_dialog=False,
+            )
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
     with tab_map["📋 복무 관리 & 판단"]:
