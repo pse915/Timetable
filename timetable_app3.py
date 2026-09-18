@@ -850,20 +850,58 @@ def df_to_worksheet(ws, df):
 # ==========================================================================================
 # 아이디 / 권한 / 예산 / 수업교체신청
 # ==========================================================================================
+def _empty_id_df():
+    return pd.DataFrame(columns=["아이디", "이름", "권한", "허용탭"])
+
+
+def _seed_master_id_df():
+    return pd.DataFrame([{
+        "아이디": MASTER_ID,
+        "이름": "관리자",
+        "권한": ROLE_MASTER,
+        "허용탭": ",".join(ALL_APP_TABS),
+    }])
+
+
 def load_id_sheet():
+    """아이디 시트를 읽되, Google Sheets 장애가 로그인 화면을 치명적으로 중단시키지 않게 한다.
+
+    - 워크시트를 열 수 없으면 빈 테이블을 반환하고 상세 원인을 session_state에 남긴다.
+    - 시트는 열리지만 비어 있으면 최초 1회 관리자 행 생성을 시도한다.
+    - 자동 생성 저장에 실패하더라도 앱 전체는 죽지 않고, 로그인 화면에서 원인을 보여준다.
+    """
     ws = get_worksheet(WORK_SHEET_ID, "아이디저장함")
+    if ws is None:
+        detail = st.session_state.get("_gsheet_last_error", "알 수 없는 Google Sheets 오류")
+        st.session_state["_id_sheet_error"] = (
+            "아이디저장함을 열 수 없습니다. Google Sheets 서비스 계정의 공유 권한과 "
+            f"시트 ID/네트워크를 확인하세요. ({detail})"
+        )
+        return _empty_id_df()
+
     df = df_from_worksheet(ws)
     if df.empty or "아이디" not in df.columns:
-        df = pd.DataFrame([{
-            "아이디": MASTER_ID, "이름": "관리자", "권한": ROLE_MASTER, "허용탭": ",".join(ALL_APP_TABS)
-        }])
-        df_to_worksheet(ws, df)
+        seed = _seed_master_id_df()
+        try:
+            df_to_worksheet(ws, seed)
+            df = seed
+            st.session_state.pop("_id_sheet_error", None)
+        except Exception as exc:
+            st.session_state["_id_sheet_error"] = (
+                "아이디저장함은 열렸지만 초기 관리자 계정을 저장하지 못했습니다. "
+                f"Google Sheets 편집 권한을 확인하세요. ({exc})"
+            )
+            # 저장 실패 시에도 현재 실행에서만 seed를 사용하지 않는다.
+            # 저장되지 않은 권한 정보를 임시 로그인에 사용하면 보안/일관성 문제가 생길 수 있다.
+            return _empty_id_df()
+
     for c in ["아이디", "이름", "권한", "허용탭"]:
         if c not in df.columns:
             df[c] = ""
     df["권한"] = df["권한"].replace("", ROLE_TEACHER)
     df["이름"] = df["이름"].fillna("").astype(str)
     df["허용탭"] = df["허용탭"].fillna("").astype(str)
+    st.session_state.pop("_id_sheet_error", None)
     return df
 
 def save_id_sheet(df):
@@ -5069,8 +5107,14 @@ def show_login_page():
                 st.error("아이디를 입력해주세요.")
             else:
                 ids = load_id_sheet()
-                match = ids[ids["아이디"].astype(str).str.strip() == uid]
-                if not match.empty:
+                if ids.empty:
+                    detail = st.session_state.get("_id_sheet_error") or st.session_state.get("_gsheet_last_error", "")
+                    st.error("아이디 정보를 불러오지 못했습니다. Google Sheets 연결/권한을 확인해주세요.")
+                    if detail:
+                        st.caption(detail)
+                else:
+                    match = ids[ids["아이디"].astype(str).str.strip() == uid]
+                if not ids.empty and not match.empty:
                     st.session_state.login_attempts = 0
                     row = match.iloc[0]
                     role = str(row["권한"]).strip() or ROLE_TEACHER
@@ -5116,8 +5160,12 @@ def show_login_page():
             if not (name and email and desired):
                 st.error("이름, 이메일, 아이디는 필수입니다.")
             else:
-                save_id_request(name, email, desired, memo)
-                st.success("요청이 정상적으로 접수되었습니다.")
+                try:
+                    save_id_request(name, email, desired, memo)
+                    st.success("요청이 정상적으로 접수되었습니다.")
+                except Exception as exc:
+                    st.error("아이디 추가 요청을 저장하지 못했습니다. Google Sheets 연결/권한을 확인해주세요.")
+                    st.caption(str(exc))
 
 def _week_anchor(ref_date=None):
     ref = ref_date or _today_kst()
