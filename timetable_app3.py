@@ -2032,6 +2032,17 @@ def cancel_substitute(cid, period):
 
 
 def do_swap(a, b, date_a, date_b, is_part_time_purpose=False, is_test=False):
+    # 1:1 맞교환은 실제 실행 단계에서도 동일 학급만 허용한다.
+    # UI/후보 검색을 우회해 다른 학급 데이터를 전달하더라도 교환되지 않도록 최종 방어선을 둔다.
+    class_a = str(a.get("학급", "")).strip()
+    class_b = str(b.get("학급", "")).strip()
+    if class_a and class_b and class_a != class_b:
+        if is_test:
+            st.error("1:1 맞교환 테스트는 동일 학급 수업끼리만 가능합니다.")
+        else:
+            st.warning("1:1 맞교환은 동일 학급 수업끼리만 가능합니다.")
+        return False
+
     ok, msg = validate_swap(a, b, date_a, date_b, is_test=is_test)
     if not ok:
         if not is_test: st.warning(msg)
@@ -2319,16 +2330,15 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
         if not b_lessons.empty:
             for _, b_row in b_lessons.iterrows():
                 if is_free(teacher_a, day_b, p_b, norm_b, e_b) and is_free(t_b, day_a, p_a, norm_a, e_a):
-                    other_class = b_row["학급"]
+                    other_class = str(b_row["학급"]).strip()
+                    # 다중 추천을 포함한 모든 1:1 맞교환은 동일 학급만 허용한다.
+                    same_class = (other_class == my_class)
+                    if not same_class:
+                        continue
                     other_grade = grade_of(other_class)
                     other_group = subject_group(b_row["과목"])
-                    score = 0
-                    same_class = (other_class == my_class)
                     same_grade = (other_grade == my_grade)
-                    if same_class:
-                        score += 200
-                    elif same_grade:
-                        score += 100
+                    score = 200
                     if other_group == my_group:
                         score += 40
                     if norm_b == norm_a:
@@ -2417,13 +2427,15 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                         continue
 
                     other_class = str(o["학급"]).strip()
+                    # 1:1 맞교환은 모든 화면에서 동일 학급만 후보로 허용한다.
+                    # 다른 학급/다른 학년 후보는 계산 단계에서부터 제외해 UI에 노출되지 않도록 한다.
+                    same_class = (other_class == my_class)
+                    if not same_class:
+                        continue
                     other_grade = grade_of(other_class)
-                    same_class  = (other_class == my_class)
                     same_grade  = (other_grade == my_grade)
 
-                    score = 0
-                    if same_class: score += 200
-                    elif same_grade: score += 100
+                    score = 200
                     if subject_group(str(o["과목"])) == my_group: score += 40
                     if td_str[:7] == d_str[:7]: score += 10
 
@@ -2466,7 +2478,7 @@ def get_single_lesson_1to1_candidates(
     원칙
     - 선택일 이후의 평일만 검색한다.
     - 검색 범위의 모든 교시를 검사한다.
-    - 동일 학급 후보를 우선하되 다른 학급도 누락하지 않는다.
+    - 1:1 맞교환은 **동일 학급 후보만** 허용한다. 다른 학급 후보는 계산 단계에서 제외한다.
     - A는 목표 슬롯이 공강이고 B는 A의 원본 슬롯이 공강이어야 한다.
     - 테스트 모드에서는 이미 테스트 변경에 사용된 슬롯을 재사용하지 않는다.
     - 반복적인 DataFrame 검색을 줄여 대규모 시간표에서도 빠르게 동작한다.
@@ -2628,19 +2640,18 @@ def get_single_lesson_1to1_candidates(
                     continue
                 seen.add(key)
 
+                # 모든 1:1 맞교환은 동일 학급만 허용한다.
                 same_class = other_class == source_class
+                if not same_class:
+                    continue
                 same_grade = grade_of(other_class) == source_grade
                 same_group = subject_group(other_subject) == source_group
-                reasons = []
-                if same_class:
-                    reasons.append("동일 학급")
-                elif same_grade:
-                    reasons.append("동일 학년")
+                reasons = ["동일 학급"]
                 reasons.extend(["내 공강", "상대 교사 공강"])
                 if same_group:
                     reasons.append("같은 과목군")
 
-                score = (300 if same_class else 120 if same_grade else 0) + (40 if same_group else 0)
+                score = 300 + (40 if same_group else 0)
                 if target_str == source_str:
                     score += 20 + max(0, 8 - abs(target_period - source_period))
 
@@ -3256,6 +3267,7 @@ def _weekly_action_dialog():
     # ----------------------------------------------------------------
     if action_mode == "swap":
         cache_key = (
+            "same-class-only-v2",
             str(lesson.get("교사명", "")), str(lesson.get("일자", "")), safe_int(lesson.get("교시", 0)),
             str(lesson.get("학급", "")), str(lesson.get("과목", "")), int(extra_days), int(ver), bool(use_test)
         )
@@ -3275,14 +3287,16 @@ def _weekly_action_dialog():
         # 캐시에 남은 후보도 표시 직전에 현재 Effective Schedule과 다시 대조한다.
         # 따라서 과거 날짜/과거 교사·과목 정보가 UI에 나타나지 않는다.
         df_swap = _filter_current_swap_candidates(df_swap, lesson, use_test=use_test)
+        # 과거 세션/캐시에 남아 있던 다른 학급 후보까지 최종 단계에서 차단한다.
+        if not df_swap.empty and "동일학급" in df_swap.columns:
+            df_swap = df_swap[df_swap["동일학급"].astype(str).str.strip() == "🏆"].copy()
 
         if df_swap.empty:
-            st.info("현재 조건에서 가능한 1:1 맞교환 위치가 없습니다.")
+            st.info("현재 같은 학급 조건에서 가능한 1:1 맞교환 위치가 없습니다.")
         else:
-            same_df = df_swap[df_swap["동일학급"].astype(str).str.strip() == "🏆"].copy()
-            other_df = df_swap[df_swap["동일학급"].astype(str).str.strip() != "🏆"].copy()
+            same_df = df_swap.copy()
             st.markdown(
-                f'<div class="swap-result-summary"><strong>{len(df_swap)}개</strong> 교환 가능 · <strong>{len(same_df)}개</strong> 동일 학급 · <strong>{len(other_df)}개</strong> 다른 학급</div>',
+                f'<div class="swap-result-summary"><strong>{len(same_df)}개</strong> 동일 학급 1:1 교환 가능</div>',
                 unsafe_allow_html=True,
             )
 
@@ -3318,9 +3332,8 @@ def _weekly_action_dialog():
                     },
                 )
 
-            # 검색 결과를 범주별로 분리해 비교 비용을 줄이고, 동일 학급 후보가 다른 학급에 묻히지 않게 한다.
-            _render_swap_group("동일 학급", same_df, "같은 학급의 다른 날짜·교시 수업과 교환 가능한 모든 후보입니다.")
-            _render_swap_group("다른 학급", other_df, "같은 학급 후보가 없거나 다른 학급도 허용할 때 선택할 수 있는 후보입니다.")
+            # 1:1 맞교환은 동일 학급만 표시한다. 다른 학급 그룹/안내 문구는 제공하지 않는다.
+            _render_swap_group("동일 학급", same_df, "같은 학급의 다른 날짜·교시 수업과 교환 가능한 후보입니다.")
             labels = [
                 f"{row['이동희망일']} ({row['이동요일']}) · {safe_int(row['이동희망교시'])}교시 · {row['상대교사']} · {row['상대학급']} {row['상대과목']}"
                 for _, row in df_swap.iterrows()
@@ -6386,13 +6399,14 @@ if "📋 복무 관리 & 판단" in tab_map:
                                 others = e_tt[(e_tt["교시"] == p) & (e_tt["교사명"] != t_name)] if not e_tt.empty else pd.DataFrame()
                                 for o in others.itertuples():
                                     if is_free(t_name, tday, p, tds, e_tt) and is_free(o.교사명, day_kr, p, d_str, e_today):
-                                        other_class = o.학급
+                                        other_class = str(o.학급).strip()
+                                        # 구형/고급 검색 화면도 동일 학급만 1:1 후보로 허용한다.
+                                        if other_class != str(my_class).strip():
+                                            continue
                                         other_grade = grade_of(other_class)
-                                        same_class = (other_class == my_class)
+                                        same_class = True
                                         same_grade = (other_grade == my_grade)
-                                        score = 0
-                                        if same_class: score += 200
-                                        elif same_grade: score += 100
+                                        score = 200
                                         if subject_group(o.과목) == my_group: score += 40
                                         if tds == d_str: score += 15
                                         candidates_1to1.append({
@@ -6427,7 +6441,7 @@ if "📋 복무 관리 & 판단" in tab_map:
                                 st.info("조건에 맞는 1:1 대상 없음")
                             else:
                                 for i, c in enumerate(data["one_to_one"]):
-                                    mark = "🏆 동일학급" if c["same_class"] else ("⚠ 같은학년" if c["same_grade"] else "⚠ 다른학년")
+                                    mark = "🏆 동일학급"
                                     st.write(f"{mark} | {c['date']} ({c['day']}) {c['period']}교시 - **{c['teacher']}** ({c['lesson']})")
                                     if st.button("이 수업과 1:1 맞교환 실행", key=f"o2o_{p}_{i}"):
                                         a_info = {"교사명": t_name, "일자": d_str, "요일": day_kr, "교시": p,
