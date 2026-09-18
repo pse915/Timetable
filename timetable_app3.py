@@ -4494,6 +4494,27 @@ SALARY_CAREER_TYPES = [
     "회사 (상법상 합명·합자·주식·유한회사) 근무",
 ]
 
+# 원본 Index.html / Code.gs의 경력별 환산율 기준을 그대로 반영한다.
+# UI에서는 이 값을 기본 환산율로 자동 적용하며, 계산 직전에는 사용자가 수정한
+# '환산율 (%)' 값을 그대로 사용한다. 즉, 원본 기준을 잃지 않으면서 필요 시
+# 개별 경력의 환산율을 수동 조정할 수 있다.
+SALARY_CAREER_RATE_BY_TYPE = {
+    "국·공립학교 교원 (기간제 포함, 자격 일치)": 100,
+    "사립학교 교원 (관할청 보고, 자격 일치)": 100,
+    "기간제교원 자격-학교급 불일치 (예:중등→초등)": 80,
+    "유·초·중등 강사 (전일제·종일제, 1일 8시간 ↑)": 100,
+    "유·초·중등 시간제 강사 (주 12시간 ↓ 또는 시수 불명)": 30,
+    "국가·지방공무원 (현역 군복무 포함)": 100,
+    "등록 학원 강사 / 신고 교습소 교습자": 50,
+    "회사 (상법상 합명·합자·주식·유한회사) 근무": 40,
+}
+
+SALARY_DEGREE_RATE_BY_TYPE = {
+    "동등 수준 추가 학사 학위 (2번째 대학교)": 80,
+    "석사학위 취득 수학기간": 100,
+    "박사학위 취득 수학기간": 100,
+}
+
 SALARY_GEMINI_PROMPT = """
 당신은 대한민국 교육공무원 및 기간제교원 호봉 획정 서류 분석 전문가입니다.
 첨부된 문서(경력증명서, 인사기록카드, 자격증 등)를 정확히 읽고, 아래 요청하는 형식의 JSON으로만 출력해 주세요.
@@ -4551,6 +4572,65 @@ def _salary_default_career_df():
     return pd.DataFrame(columns=["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"])
 
 
+def _salary_default_rate_for_career_type(career_type):
+    return SALARY_CAREER_RATE_BY_TYPE.get(str(career_type or "").strip(), 100)
+
+
+def _salary_default_rate_for_degree_type(degree_type):
+    return SALARY_DEGREE_RATE_BY_TYPE.get(str(degree_type or "").strip(), 80)
+
+
+def _salary_sync_rate_defaults(df, type_col, rate_col, rate_map, fallback_rate, previous_snapshot=None):
+    """경력/학위 종류가 바뀐 행에 원본 기준 환산율을 자동 반영한다.
+
+    사용자가 같은 종류의 환산율을 직접 수정한 경우에는 그대로 보존한다.
+    종류를 변경한 경우에는 새 종류의 기준 환산율을 다시 적용한다.
+    반환값은 (정규화된 df, 변경 여부)이다.
+    """
+    columns = list(df.columns)
+    out = df.copy().reset_index(drop=True)
+    previous_snapshot = previous_snapshot or []
+    changed = False
+
+    for i in range(len(out)):
+        current_type = str(out.at[i, type_col]).strip()
+        mapped_rate = rate_map.get(current_type, fallback_rate)
+        current_rate_raw = out.at[i, rate_col]
+        current_rate = safe_int(current_rate_raw, mapped_rate)
+
+        prev_type = ""
+        if i < len(previous_snapshot):
+            try:
+                prev_type = str(previous_snapshot[i][0] or "").strip()
+            except Exception:
+                prev_type = ""
+
+        # 새 행 또는 종류 변경 행은 기준 환산율을 자동 적용한다.
+        if current_type and (not prev_type or prev_type != current_type):
+            if current_rate != mapped_rate:
+                out.at[i, rate_col] = mapped_rate
+                changed = True
+        elif pd.isna(current_rate_raw) or str(current_rate_raw).strip() in ("", "nan", "None", "NaT"):
+            out.at[i, rate_col] = mapped_rate
+            changed = True
+        else:
+            # 매핑된 종류인데 0 등 비정상 값으로 들어온 신규 데이터는 기준값을 사용한다.
+            if current_rate < 0 or current_rate > 100:
+                out.at[i, rate_col] = mapped_rate
+                changed = True
+
+    return out[columns], changed
+
+
+def _salary_rate_snapshot(df, type_col, rate_col):
+    if df is None or df.empty:
+        return []
+    snapshot = []
+    for _, row in df.iterrows():
+        snapshot.append((str(row.get(type_col, "")).strip(), safe_int(row.get(rate_col), -1)))
+    return snapshot
+
+
 def _salary_init_state():
     defaults = {
         "salary_name": "",
@@ -4570,6 +4650,31 @@ def _salary_init_state():
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value.copy(deep=True) if isinstance(value, pd.DataFrame) else value
+
+    # 이전 세션에서 이미 만들어진 경력/학위 데이터가 있다면 한 번만 원본 기준
+    # 환산율로 마이그레이션한다. 이후 사용자가 수정한 값은 덮어쓰지 않는다.
+    if not st.session_state.get("_salary_rate_defaults_migrated", False):
+        degrees = _salary_normalize_table(
+            st.session_state.salary_degrees,
+            ["학위 구분", "학교/전공 세부명", "입학일", "졸업일", "환산율"],
+        )
+        for i in range(len(degrees)):
+            dtype = str(degrees.at[i, "학위 구분"] or "").strip()
+            if dtype:
+                degrees.at[i, "환산율"] = _salary_default_rate_for_degree_type(dtype)
+
+        careers = _salary_normalize_table(
+            st.session_state.salary_careers,
+            ["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"],
+        )
+        for i in range(len(careers)):
+            ctype = str(careers.at[i, "경력 종류"] or "").strip()
+            if ctype:
+                careers.at[i, "환산율 (%)"] = _salary_default_rate_for_career_type(ctype)
+
+        st.session_state.salary_degrees = degrees
+        st.session_state.salary_careers = careers
+        st.session_state["_salary_rate_defaults_migrated"] = True
 
 
 def _salary_safe_date(value):
@@ -4643,12 +4748,13 @@ def _salary_add_degree_row():
         st.session_state.salary_degrees,
         ["학위 구분", "학교/전공 세부명", "입학일", "졸업일", "환산율"],
     )
+    degree_type = SALARY_DEGREE_TYPES[0]
     df.loc[len(df)] = {
-        "학위 구분": SALARY_DEGREE_TYPES[0],
+        "학위 구분": degree_type,
         "학교/전공 세부명": "",
         "입학일": None,
         "졸업일": None,
-        "환산율": 80,
+        "환산율": _salary_default_rate_for_degree_type(degree_type),
     }
     st.session_state.salary_degrees = df
 
@@ -4659,13 +4765,14 @@ def _salary_add_career_row():
         st.session_state.salary_careers,
         ["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"],
     )
+    career_type = SALARY_CAREER_TYPES[0]
     df.loc[len(df)] = {
-        "경력 종류": SALARY_CAREER_TYPES[0],
+        "경력 종류": career_type,
         "세부 근무처/직위": "",
         "시작일": None,
         "종료일": None,
         "종료일 산입": True,
-        "환산율 (%)": 100,
+        "환산율 (%)": _salary_default_rate_for_career_type(career_type),
     }
     st.session_state.salary_careers = df
 
@@ -4774,12 +4881,13 @@ def _salary_apply_ai_result(data):
 
     degree_rows = []
     for deg in data.get("degrees") or []:
+        degree_type = str(deg.get("type", SALARY_DEGREE_TYPES[0])).strip()
         degree_rows.append({
-            "학위 구분": str(deg.get("type", SALARY_DEGREE_TYPES[0])),
+            "학위 구분": degree_type,
             "학교/전공 세부명": str(deg.get("detail", "")),
             "입학일": _salary_safe_date(deg.get("start")),
             "졸업일": _salary_safe_date(deg.get("end")),
-            "환산율": safe_int(deg.get("rate"), 80),
+            "환산율": _salary_default_rate_for_degree_type(degree_type),
         })
     st.session_state.salary_degrees = (
         pd.DataFrame(degree_rows, columns=["학위 구분", "학교/전공 세부명", "입학일", "졸업일", "환산율"])
@@ -4788,13 +4896,14 @@ def _salary_apply_ai_result(data):
 
     career_rows = []
     for car in data.get("careers") or []:
+        career_type = str(car.get("type", SALARY_CAREER_TYPES[0])).strip()
         career_rows.append({
-            "경력 종류": str(car.get("type", SALARY_CAREER_TYPES[0])),
+            "경력 종류": career_type,
             "세부 근무처/직위": str(car.get("detail", "")),
             "시작일": _salary_safe_date(car.get("start")),
             "종료일": _salary_safe_date(car.get("end")),
             "종료일 산입": bool(car.get("inc", True)),
-            "환산율 (%)": safe_int(car.get("rate"), 100),
+            "환산율 (%)": _salary_default_rate_for_career_type(career_type),
         })
     if career_rows:
         st.session_state.salary_careers = pd.DataFrame(
@@ -4802,13 +4911,14 @@ def _salary_apply_ai_result(data):
             columns=["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"],
         )
     else:
+        default_career_type = SALARY_CAREER_TYPES[0]
         st.session_state.salary_careers = pd.DataFrame([{
-            "경력 종류": SALARY_CAREER_TYPES[0],
+            "경력 종류": default_career_type,
             "세부 근무처/직위": "",
             "시작일": None,
             "종료일": None,
             "종료일 산입": True,
-            "환산율 (%)": 100,
+            "환산율 (%)": _salary_default_rate_for_career_type(default_career_type),
         }])
 
     st.session_state.salary_ai_message = (
@@ -5076,12 +5186,14 @@ def render_salary_tab():
                 st.rerun()
 
         degrees = _salary_normalize_table(st.session_state.salary_degrees, ["학위 구분", "학교/전공 세부명", "입학일", "졸업일", "환산율"])
-        st.session_state.salary_degrees = st.data_editor(
+        degree_epoch = int(st.session_state.get("salary_degree_editor_epoch", 0) or 0)
+        degree_snapshot = st.session_state.get("salary_degree_rate_snapshot", _salary_rate_snapshot(degrees, "학위 구분", "환산율"))
+        edited_degrees = st.data_editor(
             degrees,
             num_rows="dynamic",
             width="stretch",
             hide_index=True,
-            key="salary_degree_editor",
+            key=f"salary_degree_editor_{degree_epoch}",
             column_config={
                 "학위 구분": st.column_config.SelectboxColumn("학위 구분", options=SALARY_DEGREE_TYPES, required=True),
                 "학교/전공 세부명": st.column_config.TextColumn("학교/전공 세부명"),
@@ -5090,6 +5202,16 @@ def render_salary_tab():
                 "환산율": st.column_config.NumberColumn("환산율", min_value=0, max_value=100, step=1),
             },
         )
+        synced_degrees, degree_rate_changed = _salary_sync_rate_defaults(
+            edited_degrees, "학위 구분", "환산율", SALARY_DEGREE_RATE_BY_TYPE, 80, degree_snapshot
+        )
+        st.session_state.salary_degrees = synced_degrees
+        if degree_rate_changed:
+            st.session_state.salary_degree_rate_snapshot = _salary_rate_snapshot(synced_degrees, "학위 구분", "환산율")
+            st.session_state.salary_degree_editor_epoch = degree_epoch + 1
+            st.rerun()
+        else:
+            st.session_state.salary_degree_rate_snapshot = _salary_rate_snapshot(synced_degrees, "학위 구분", "환산율")
 
     with st.container(border=True):
         st.markdown("### ➕ 가산연수 해당 여부")
@@ -5117,12 +5239,14 @@ def render_salary_tab():
             st.session_state.salary_careers,
             ["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"],
         )
-        st.session_state.salary_careers = st.data_editor(
+        career_epoch = int(st.session_state.get("salary_career_editor_epoch", 0) or 0)
+        career_snapshot = st.session_state.get("salary_career_rate_snapshot", _salary_rate_snapshot(careers, "경력 종류", "환산율 (%)"))
+        edited_careers = st.data_editor(
             careers,
             num_rows="dynamic",
             width="stretch",
             hide_index=True,
-            key="salary_career_editor",
+            key=f"salary_career_editor_{career_epoch}",
             column_config={
                 "경력 종류": st.column_config.SelectboxColumn("경력 종류", options=SALARY_CAREER_TYPES, required=True),
                 "세부 근무처/직위": st.column_config.TextColumn("세부 근무처/직위"),
@@ -5132,6 +5256,19 @@ def render_salary_tab():
                 "환산율 (%)": st.column_config.NumberColumn("환산율 (%)", min_value=0, max_value=100, step=1),
             },
         )
+        synced_careers, career_rate_changed = _salary_sync_rate_defaults(
+            edited_careers, "경력 종류", "환산율 (%)", SALARY_CAREER_RATE_BY_TYPE, 100, career_snapshot
+        )
+        st.session_state.salary_careers = synced_careers
+        if career_rate_changed:
+            st.session_state.salary_career_rate_snapshot = _salary_rate_snapshot(synced_careers, "경력 종류", "환산율 (%)")
+            st.session_state.salary_career_editor_epoch = career_epoch + 1
+            st.rerun()
+        else:
+            st.session_state.salary_career_rate_snapshot = _salary_rate_snapshot(synced_careers, "경력 종류", "환산율 (%)")
+
+        st.caption("원본 Index.html / Code.gs 기준 환산율: 국·공립 100% · 사립 100% · 자격 불일치 기간제 80% · 전일제 강사 100% · 시간제 강사 30% · 국가·지방공무원 100% · 학원/교습소 50% · 회사 40%")
+        st.caption("경력 종류를 변경하면 해당 기준 환산율이 자동 적용되며, 마지막 '환산율 (%)' 값은 필요 시 직접 조정할 수 있습니다.")
 
     ccalc1, ccalc2 = st.columns([4, 1])
     with ccalc1:
