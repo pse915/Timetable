@@ -274,12 +274,14 @@ APP_VERSION = "5.0-Apple-ProductUX-Renewal"
 GITHUB_FONT_BASE = "https://cdn.jsdelivr.net/gh/pse915/Timetable@main"
 GITHUB_FONT_RAW_BASE = "https://raw.githubusercontent.com/pse915/Timetable/main"
 GITHUB_FONT_FAMILY = "Pse Noto Sans KR"
+HAKYO_FONT_FAMILY = "Hakgyoansim Wooju R"
 
 UI_FONT_OPTIONS = {
     "시스템 기본 (Apple / Windows)": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif',
     "Pretendard": '"Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif',
     "Noto Sans KR": '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif',
     "Noto Sans KR · GitHub (Light + Bold)": f'"{GITHUB_FONT_FAMILY}", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
+    "학교안심 우주체 · GitHub": f'"{HAKYO_FONT_FAMILY}", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif',
     "Inter": '"Inter", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif',
 }
 UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
@@ -288,33 +290,51 @@ UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
 def render_font_runtime_css(selected_font: str):
     """선택 폰트를 매 실행 전역에 적용한다.
 
-    GitHub TTF의 실제 Light(300)와 Bold(700)를 각각 등록하여 브라우저가 실제 파일을 사용하도록 한다.
+    GitHub TTF는 브라우저가 실제 파일을 사용하도록 @font-face로 등록한다.
     jsDelivr을 우선 사용하고 GitHub raw URL을 fallback으로 둔다.
     """
     selected_font = selected_font if selected_font in UI_FONT_OPTIONS else UI_FONT_DEFAULT
-    if selected_font != "Noto Sans KR · GitHub (Light + Bold)":
-        st.markdown(
-            f"<style>:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}</style>",
-            unsafe_allow_html=True,
-        )
-        return
 
-    light_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Light.ttf"
-    bold_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Bold.ttf"
-    light_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Light.ttf"
-    bold_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Bold.ttf"
-    st.markdown(
-        f"""
+    if selected_font == "Noto Sans KR · GitHub (Light + Bold)":
+        light_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Light.ttf"
+        bold_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Bold.ttf"
+        light_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Light.ttf"
+        bold_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Bold.ttf"
+        st.markdown(
+            f"""
 <style id="github-noto-sans-kr-runtime-font">
 @font-face {{ font-family: '{GITHUB_FONT_FAMILY}'; font-style: normal; font-weight: 300; font-display: swap;
   src: url('{light_url}') format('truetype'), url('{light_raw}') format('truetype'); }}
 @font-face {{ font-family: '{GITHUB_FONT_FAMILY}'; font-style: normal; font-weight: 700; font-display: swap;
   src: url('{bold_url}') format('truetype'), url('{bold_raw}') format('truetype'); }}
 :root {{ --app-font: '{GITHUB_FONT_FAMILY}', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }}
-p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid=\"stWidgetLabel\"],[data-testid=\"stCaptionContainer\"],.stMarkdown,.stCaption,[role=\"radio\"],[role=\"tab\"],[data-baseweb=\"select\"],[data-baseweb=\"input\"] input,[data-baseweb=\"textarea\"] textarea {{ font-family: var(--app-font) !important; }}
-[data-testid=\"stDataFrame\"] [role=\"gridcell\"],[data-testid=\"stDataFrame\"] [role=\"columnheader\"] {{ font-family: var(--app-font) !important; }}
+p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-baseweb="select"],[data-baseweb="input"] input,[data-baseweb="textarea"] textarea {{ font-family: var(--app-font) !important; }}
+[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"] {{ font-family: var(--app-font) !important; }}
 </style>
 """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    if selected_font == "학교안심 우주체 · GitHub":
+        hakyo_url = f"{GITHUB_FONT_BASE}/HakgyoansimWoojuR.ttf"
+        hakyo_raw = f"{GITHUB_FONT_RAW_BASE}/HakgyoansimWoojuR.ttf"
+        st.markdown(
+            f"""
+<style id="github-hakgyoansim-wooju-runtime-font">
+@font-face {{ font-family: '{HAKYO_FONT_FAMILY}'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('{hakyo_url}') format('truetype'), url('{hakyo_raw}') format('truetype'); }}
+:root {{ --app-font: '{HAKYO_FONT_FAMILY}', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif; }}
+p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-baseweb="select"],[data-baseweb="input"] input,[data-baseweb="textarea"] textarea {{ font-family: var(--app-font) !important; }}
+[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"] {{ font-family: var(--app-font) !important; }}
+</style>
+""",
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown(
+        f"<style>:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}</style>",
         unsafe_allow_html=True,
     )
 
@@ -5364,6 +5384,12 @@ def render_tools_dialog():
         st.caption("GitHub의 NotoSansKR-Light.ttf(일반체)와 NotoSansKR-Bold.ttf(볼드체)를 사용합니다.")
         st.markdown(
             f"<div style=\"font-family:'{GITHUB_FONT_FAMILY}';font-weight:300;font-size:14px;line-height:1.7\">가나다라마바사 아자차카 · 일반체 <strong style=\"font-weight:700\">가나다라마바사 아자차카 · 볼드체</strong></div>",
+            unsafe_allow_html=True,
+        )
+    elif selected_font == "학교안심 우주체 · GitHub":
+        st.caption("GitHub의 HakgyoansimWoojuR.ttf를 사용합니다.")
+        st.markdown(
+            f"<div style=\"font-family:'{HAKYO_FONT_FAMILY}';font-size:16px;line-height:1.8\">학교안심 우주체 미리보기 · 가나다라마바사 아자차카 12345</div>",
             unsafe_allow_html=True,
         )
     else:
