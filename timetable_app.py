@@ -121,7 +121,7 @@ a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
-APP_VERSION = "2.1.6-Apple-CSS-Clean"
+APP_VERSION = "4.2-Apple-LoadFailFast"
 
 # ==========================================================================================
 # UI 폰트 설정
@@ -901,7 +901,7 @@ def ensure_input_user(df, default=""):
         df["입력자"] = default
     return df
 
-@st.cache_data(ttl=300, show_spinner="시간표 로딩...")
+@st.cache_data(ttl=300, show_spinner=False)
 def load_timetable_from_gsheet():
     try:
         ti = df_from_worksheet(get_worksheet(TIMETABLE_SHEET_ID, "교사정보"))
@@ -920,7 +920,7 @@ def load_timetable_from_gsheet():
         st.error(f"시간표 로드 실패: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=60, show_spinner="작업 데이터 로딩...")
+@st.cache_data(ttl=60, show_spinner=False)
 def load_work_data_from_gsheet():
     try:
         absences = ensure_input_user(df_from_worksheet(get_worksheet(WORK_SHEET_ID, "결강")))
@@ -979,11 +979,28 @@ def save_work_data_to_gsheet(changed_sheets=None):
 
 
 def init_state():
-    if "teachers" in st.session_state:
-        return
+    # 실패한 첫 로드를 정상 상태로 저장하지 않는다. 기존 버전은 Google Sheets
+    # 일시 오류/네트워크 지연으로 tt가 빈 DataFrame이 되어도 "teachers" 키를 먼저
+    # 만들어 버려, 이후 실행마다 실제 재로딩 없이 "시간표를 불러오는 중..."에서
+    # 영구 정지하는 문제가 있었다.
+    existing_tt = st.session_state.get("timetable")
+    existing_ti = st.session_state.get("teachers")
+    if isinstance(existing_tt, pd.DataFrame) and not existing_tt.empty:
+        return True
+
     ti, tt = load_timetable_from_gsheet()
-    st.session_state.teachers = ti
+    if tt is None or tt.empty:
+        st.session_state.pop("teachers", None)
+        st.session_state.pop("timetable", None)
+        st.session_state["_load_error"] = (
+            "시간표 시트에서 유효한 데이터를 받지 못했습니다. "
+            "Google Sheets 인증/공유 권한, 시트 이름(시간표), 네트워크 상태를 확인하세요."
+        )
+        return False
+
+    st.session_state.teachers = ti if isinstance(ti, pd.DataFrame) else pd.DataFrame()
     st.session_state.timetable = tt
+    st.session_state.pop("_load_error", None)
 
     absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
 
@@ -1008,6 +1025,7 @@ def init_state():
     st.session_state.history_index = -1
     st.session_state.test_swaps = pd.DataFrame()
     push_history("초기 상태")
+    return True
 
 # ==========================================================================================
 # 핵심 로직
@@ -4152,7 +4170,16 @@ if not st.session_state.logged_in:
     show_login_page()
     st.stop()
 
-init_state()
+if not init_state():
+    st.error("⚠️ 시간표 초기화에 실패했습니다.")
+    st.warning(st.session_state.get("_load_error", "시간표 데이터를 불러오지 못했습니다."))
+    st.caption("무한 로딩으로 멈추지 않도록 앱 실행을 중단했습니다. 상단의 도구가 표시되지 않는 경우 Streamlit Cloud 로그에서 Google Sheets 오류를 확인하세요.")
+    if st.button("🔄 시간표 다시 연결", type="primary", key="fatal_reload_timetable"):
+        load_timetable_from_gsheet.clear()
+        load_work_data_from_gsheet.clear()
+        st.session_state.pop("_load_error", None)
+        st.rerun()
+    st.stop()
 
 if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_OPTIONS:
     st.session_state.ui_font = UI_FONT_DEFAULT
@@ -4306,7 +4333,7 @@ if current_role() == ROLE_GUEST:
     st.stop()
 
 if st.session_state.timetable.empty:
-    st.info("시간표를 불러오는 중...")
+    st.error("시간표 데이터가 비어 있습니다. 무한 로딩 대신 오류 원인을 표시합니다.")
     st.stop()
 
 # ==========================================================================================
