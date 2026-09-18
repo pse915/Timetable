@@ -215,6 +215,50 @@ st.markdown(r"""
  .work-page-head{display:block!important}
  .work-page-meta{display:inline-block;margin-top:10px}
 }
+
+/* ---------- 3-step quick actions beside ··· : rounded product-control style ---------- */
+[data-testid="st-key-top_quick_refresh"],
+[data-testid="st-key-top_quick_load"],
+[data-testid="st-key-top_quick_save"]{
+  margin:0!important;
+}
+[data-testid="st-key-top_quick_refresh"] button,
+[data-testid="st-key-top_quick_load"] button,
+[data-testid="st-key-top_quick_save"] button{
+  min-height:38px!important;
+  height:38px!important;
+  padding:5px 9px!important;
+  border-radius:11px!important;
+  border:1px solid #dedee3!important;
+  background:#fff!important;
+  color:#242426!important;
+  box-shadow:0 1px 2px rgba(0,0,0,.04), inset 0 1px 0 rgba(255,255,255,.65)!important;
+  font-size:11px!important;
+  font-weight:600!important;
+  letter-spacing:-.03em!important;
+  white-space:nowrap!important;
+}
+[data-testid="st-key-top_quick_refresh"] button:hover,
+[data-testid="st-key-top_quick_load"] button:hover{
+  background:#f6f6f8!important;
+  border-color:#cfcfd5!important;
+  transform:translateY(-1px);
+}
+[data-testid="st-key-top_quick_save"] button,
+[data-testid="st-key-top_quick_save"] button[kind="primary"]{
+  background:#1d1d1f!important;
+  border-color:#1d1d1f!important;
+  color:#fff!important;
+  box-shadow:0 2px 5px rgba(0,0,0,.12)!important;
+}
+[data-testid="st-key-top_quick_save"] button:hover{
+  background:#2d2d30!important;
+  border-color:#2d2d30!important;
+  transform:translateY(-1px);
+}
+@media(max-width:1100px){
+  .top-quick-step-hide{display:none!important}
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -5281,24 +5325,7 @@ def render_tools_dialog():
     st.divider()
 
     if can_full_data() or is_teacher():
-        if st.button("🔄 시간표 새로고침", width="stretch", key="top_reload_timetable"):
-            _clear_gsheet_runtime_cache()
-            ti, tt = load_timetable_from_gsheet()
-            st.session_state.teachers, st.session_state.timetable = ti, tt
-            _invalidate_all_caches()
-            st.rerun()
-        if st.button("🔄 작업내역 새로고침", width="stretch", key="top_reload_work"):
-            _clear_gsheet_runtime_cache()
-            absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
-            st.session_state.absences = ensure_input_user(absences)
-            st.session_state.subs = ensure_input_user(subs)
-            st.session_state.swaps = ensure_input_user(swaps)
-            st.session_state.part_time = ensure_part_time_columns(part_time)
-            st.session_state.duties = ensure_duty_columns(duties)
-            _invalidate_all_caches()
-            st.rerun()
-        if st.button("💾 현재 작업 저장", width="stretch", type="primary", key="top_save_work"):
-            save_work_data_to_gsheet()
+        st.caption("① 새로고침 → ② 불러오기 → ③ 현재 작업 저장")
         st.divider()
         a, b = st.columns(2)
         if a.button("↩ Undo", width="stretch", key="top_undo"):
@@ -5337,6 +5364,21 @@ def render_tools_dialog():
             st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx", key="top_dl_report_xlsx")
 
 
+def _load_all_runtime_data_from_gsheet():
+    """Google Sheets의 시간표와 업무 데이터를 함께 불러와 현재 세션을 갱신한다."""
+    _clear_gsheet_runtime_cache()
+    ti, tt = load_timetable_from_gsheet()
+    absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
+    st.session_state.teachers = ti
+    st.session_state.timetable = tt
+    st.session_state.absences = ensure_input_user(absences)
+    st.session_state.subs = ensure_input_user(subs)
+    st.session_state.swaps = ensure_input_user(swaps)
+    st.session_state.part_time = ensure_part_time_columns(part_time)
+    st.session_state.duties = ensure_duty_columns(duties)
+    _invalidate_all_caches()
+
+
 def render_top_toolbar(visible_tabs):
     """통합 앱 셸: 1차 카테고리(수업/교무행정) → 2차 업무 탭."""
     # 대분류는 로그인 사용자에게 항상 보인다.
@@ -5356,7 +5398,7 @@ def render_top_toolbar(visible_tabs):
         else:
             st.session_state.app_category = available_categories[0]
 
-    top_id, top_nav, top_tools, top_user = st.columns([1.45, 5.5, 0.7, 0.7], vertical_alignment="center")
+    top_id, top_nav, top_quick, top_tools, top_user = st.columns([1.35, 4.65, 3.05, 0.72, 0.72], vertical_alignment="center")
     with top_id:
         st.markdown(
             f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_role()}</div>',
@@ -5385,6 +5427,33 @@ def render_top_toolbar(visible_tabs):
                         st.session_state.pop("weekly_dialog_title", None)
                         st.session_state.pop("weekly_dialog_instance", None)
                         st.rerun()
+
+    with top_quick:
+        # LG 제품 UI의 라운드 카드/단계형 정보 구조를 참고한 3-step 빠른 작업
+        q1, q2, q3 = st.columns(3, gap="small")
+        with q1:
+            if st.button("① 새로고침", width="stretch", key="top_quick_refresh", help="앱 화면과 캐시를 새로고침합니다."):
+                _clear_gsheet_runtime_cache()
+                _invalidate_all_caches()
+                st.toast("화면을 새로고침했습니다.", icon="↻")
+                st.rerun()
+        with q2:
+            if st.button("② 불러오기", width="stretch", key="top_quick_load", help="Google Sheets의 최신 시간표와 업무 데이터를 불러옵니다."):
+                try:
+                    with st.spinner("최신 데이터를 불러오는 중..."):
+                        _load_all_runtime_data_from_gsheet()
+                    st.toast("최신 데이터를 불러왔습니다.", icon="↓")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"데이터를 불러오지 못했습니다: {exc}")
+        with q3:
+            if st.button("③ 작업 저장", width="stretch", type="primary", key="top_quick_save", help="현재 작업을 Google Sheets에 저장합니다."):
+                try:
+                    ok = save_work_data_to_gsheet()
+                    if ok is not False:
+                        st.toast("현재 작업을 저장했습니다.", icon="✓")
+                except Exception as exc:
+                    st.error(f"현재 작업 저장 중 오류가 발생했습니다: {exc}")
 
     with top_tools:
         if st.button("···", width="stretch", key="top_tools_open", help="화면·출력·기타 도구"):
