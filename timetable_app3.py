@@ -139,7 +139,7 @@ st.markdown(r"""
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
-APP_VERSION = "5.0-Tesla-ProductUX-Renewal"
+APP_VERSION = "5.0-Tesla-ProductUX-Renewal-StartupSafe"
 
 # ==========================================================================================
 # UI 폰트 설정
@@ -781,7 +781,12 @@ def load_id_sheet():
         df = pd.DataFrame([{
             "아이디": MASTER_ID, "이름": "관리자", "권한": ROLE_MASTER, "허용탭": ",".join(ALL_TABS)
         }])
-        df_to_worksheet(ws, df)
+        # 시트가 일시적으로 접근되지 않더라도 로그인 화면 자체는 살아 있어야 한다.
+        if ws is not None:
+            try:
+                df_to_worksheet(ws, df)
+            except Exception:
+                pass
     for c in ["아이디", "이름", "권한", "허용탭"]:
         if c not in df.columns:
             df[c] = ""
@@ -821,7 +826,11 @@ def load_budget_df():
             "변동금액": 2200000,
             "잔액": 2200000
         }])
-        df_to_worksheet(ws, init_df)
+        if ws is not None:
+            try:
+                df_to_worksheet(ws, init_df)
+            except Exception:
+                pass
         return init_df
     if "보강예산 현황" in df.columns and "잔액" not in df.columns:
         try:
@@ -906,7 +915,9 @@ def push_history(action_name="작업"):
         "swaps": st.session_state.get("swaps", pd.DataFrame()).copy(deep=True),
         "part_time": st.session_state.get("part_time", pd.DataFrame()).copy(deep=True),
         "duties": st.session_state.get("duties", pd.DataFrame()).copy(deep=True),
-        "budget_df": load_budget_df().copy(deep=True) if st.session_state.get("logged_in", False) else pd.DataFrame(),
+        # 예산 시트는 부가 데이터이므로 초기 구동을 막지 않는다.
+        # Google Sheets 장애/권한 문제에서는 빈 snapshot으로 시작하고 실제 예산 기능에서 재시도한다.
+        "budget_df": pd.DataFrame(),
     }
     def fingerprint(x):
         return tuple((k, tuple(v.fillna("").astype(str).tolist())) for k,v in sorted(x.items()) if isinstance(v,pd.DataFrame))
@@ -4184,7 +4195,36 @@ if not st.session_state.logged_in:
     show_login_page()
     st.stop()
 
-init_state()
+# 게스트는 아이디 추가 요청만 사용하므로 시간표/결보강 데이터를 불러오지 않는다.
+# 이렇게 하면 Google Sheets 장애가 있어도 게스트 진입 화면은 정상적으로 열린다.
+if current_role() != ROLE_GUEST:
+    try:
+        init_state()
+    except Exception as e:
+        st.error(f"초기 데이터 로딩에 실패했습니다: {e}")
+        last_error = st.session_state.get("_gsheet_last_error", "")
+        if last_error:
+            st.caption(f"Google Sheets 상태: {last_error}")
+        st.stop()
+
+if current_role() == ROLE_GUEST:
+    st.title("게스트 모드")
+    st.info("현재 게스트로 접속 중입니다. 아이디 추가 요청만 가능합니다.")
+    with st.form("guest_request"):
+        name = st.text_input("이름 *")
+        email = st.text_input("이메일 *")
+        desired = st.text_input("추가하고 싶은 아이디 *")
+        memo = st.text_area("메모")
+        if st.form_submit_button("요청 제출", type="primary"):
+            if name and email and desired:
+                try:
+                    save_id_request(name, email, desired, memo)
+                    st.success("요청이 접수되었습니다.")
+                except Exception as e:
+                    st.error(f"요청 저장에 실패했습니다: {e}")
+            else:
+                st.error("필수 항목을 입력해주세요.")
+    st.stop()
 
 if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_OPTIONS:
     st.session_state.ui_font = UI_FONT_DEFAULT
@@ -4320,22 +4360,6 @@ def render_top_toolbar(visible_tabs):
         if st.button("↪",width="stretch",key="top_logout",help="로그아웃"):
             for k in list(st.session_state.keys()): del st.session_state[k]
             st.rerun()
-
-if current_role() == ROLE_GUEST:
-    st.title("게스트 모드")
-    st.info("현재 게스트로 접속 중입니다. 아이디 추가 요청만 가능합니다.")
-    with st.form("guest_request"):
-        name = st.text_input("이름 *")
-        email = st.text_input("이메일 *")
-        desired = st.text_input("추가하고 싶은 아이디 *")
-        memo = st.text_area("메모")
-        if st.form_submit_button("요청 제출", type="primary"):
-            if name and email and desired:
-                save_id_request(name, email, desired, memo)
-                st.success("요청이 접수되었습니다.")
-            else:
-                st.error("필수 항목을 입력해주세요.")
-    st.stop()
 
 if st.session_state.timetable.empty:
     st.info("시간표를 불러오는 중...")
