@@ -73,6 +73,13 @@ p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLab
 [data-testid="stExpander"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-md)!important;box-shadow:none!important;overflow:hidden!important}
 [data-testid="stExpander"] summary{min-height:42px!important;padding:6px 12px!important;color:var(--ui-text)!important;font-size:13px!important;font-weight:600!important}
 [data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}
+/* ---------- login hero (이전 버전에서 정의가 누락되어 스타일이 전혀 먹지 않던 클래스들) ---------- */
+.login-shell{max-width:420px;margin:6vh auto 0}
+.login-mark{background:var(--ui-soft);border:1px solid var(--ui-line-soft);border-radius:var(--ui-radius-lg);padding:20px;text-align:center;margin:0 0 22px}
+.ai-hero-kicker{color:var(--ui-muted);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.ai-hero-title{margin:.5rem 0 .5rem;font-size:clamp(1.6rem,3vw,2.3rem);line-height:1.2;font-weight:600;letter-spacing:-.03em;color:var(--ui-text)}
+.ai-hero-sub{color:var(--ui-muted);font-size:14px;line-height:1.55;margin:0 0 1.3rem}
+.ai-prompt-glow{position:relative;margin:0 auto;max-width:420px}
 /* ---------- typography ---------- */
 h1,h2,h3,h4,h5,h6{color:var(--ui-text)!important}h2{font-size:22px!important;font-weight:600!important;letter-spacing:-.025em!important}h3{font-size:18px!important;font-weight:600!important;letter-spacing:-.02em!important}h4{font-size:15px!important;font-weight:600!important}
 [data-testid="stCaptionContainer"],.stCaption{color:var(--ui-muted)!important;font-size:12px!important;line-height:1.45!important}
@@ -119,12 +126,7 @@ a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
-APP_VERSION = "4.6-Apple-xAI-UX-Stable"
-
-# UI 디자인 모드: 업무 데이터/로직과 완전히 분리된 표현 계층이다.
-DESIGN_APPLE = "Apple 업무형"
-DESIGN_XAI = "xAI-inspired"
-DESIGN_OPTIONS = [DESIGN_APPLE, DESIGN_XAI]
+APP_VERSION = "4.5-Apple-DeepCleanup-GSheet"
 
 # ==========================================================================================
 # UI 폰트 설정
@@ -138,6 +140,46 @@ UI_FONT_OPTIONS = {
     "Inter": '"Inter", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif',
 }
 UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
+
+# ==========================================================================================
+# UI 디자인(테마) 설정
+# - 화면에서 쓰는 색·모양은 전부 CSS 변수(--ui-*)로만 참조하게 되어 있으므로,
+#   테마 전환은 이 변수들의 값만 바꿔 주입하면 된다. 선택자(버튼/카드/표 등)는
+#   손대지 않으므로 기존 기능·레이아웃은 완전히 그대로 유지된다.
+# - "Apple": 기존 기본 디자인(밝은 배경, 부드러운 pill 형태, 파란 강조색).
+# - "X.AI": xAI(Grok) 브랜드가 주는 느낌을 참고해 새로 만든 다크·고대비·직각 테마.
+#   실제 xAI 웹사이트를 그대로 복제한 것은 아니며, 학교 업무 화면에 맞게 절제해서
+#   재구성한 독자적인 다크 테마다.
+# ==========================================================================================
+UI_THEME_OPTIONS = {
+    "Apple": {
+        "--ui-bg": "#ffffff", "--ui-surface": "#ffffff", "--ui-soft": "#f5f5f7", "--ui-soft-2": "#fafafc",
+        "--ui-text": "#1d1d1f", "--ui-text-2": "#3a3a3c", "--ui-muted": "#6e6e73", "--ui-muted-2": "#86868b",
+        "--ui-line": "#d2d2d7", "--ui-line-soft": "#e5e5ea", "--ui-accent": "#0066cc", "--ui-accent-hover": "#0071e3",
+        "--ui-focus": "rgba(0,102,204,.20)", "--ui-success": "#1b7f3a", "--ui-danger": "#c62828",
+        "--ui-radius-sm": "8px", "--ui-radius-md": "12px", "--ui-radius-lg": "16px", "--ui-pill": "999px",
+    },
+    "X.AI": {
+        "--ui-bg": "#000000", "--ui-surface": "#0c0c0d", "--ui-soft": "#18181a", "--ui-soft-2": "#121213",
+        "--ui-text": "#f5f5f5", "--ui-text-2": "#d4d4d5", "--ui-muted": "#9a9a9d", "--ui-muted-2": "#6f6f73",
+        "--ui-line": "#2c2c2e", "--ui-line-soft": "#232325", "--ui-accent": "#ffffff", "--ui-accent-hover": "#e4e4e4",
+        "--ui-focus": "rgba(255,255,255,.22)", "--ui-success": "#37d67a", "--ui-danger": "#ff5c5c",
+        "--ui-radius-sm": "3px", "--ui-radius-md": "5px", "--ui-radius-lg": "7px", "--ui-pill": "6px",
+    },
+}
+UI_THEME_DEFAULT = "Apple"
+
+
+def _theme_style_block(theme_name: str, font_name: str) -> str:
+    """선택된 테마(색상·모양 변수)와 글꼴을 하나의 <style> 블록으로 합쳐 반환한다.
+
+    테마 이름이 알 수 없는 값이면(세션 손상 등) 조용히 기본 테마로 대체해
+    KeyError로 화면 전체가 죽는 일이 없게 한다.
+    """
+    tokens = UI_THEME_OPTIONS.get(theme_name, UI_THEME_OPTIONS[UI_THEME_DEFAULT])
+    font_stack = UI_FONT_OPTIONS.get(font_name, UI_FONT_OPTIONS[UI_FONT_DEFAULT])
+    vars_css = ";".join(f"{k}:{v}" for k, v in tokens.items())
+    return f"""<style>:root {{ {vars_css}; --app-font: {font_stack}; }}</style>"""
 
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
@@ -1809,89 +1851,6 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
     return True
 
 
-def apply_test_swaps_to_live():
-    """현재 테스트 결과를 실제 맞교환 이력으로 반영한다.
-
-    테스트 데이터는 Google Sheets에 저장되지 않는다. 반영 시에는 테스트 시점의
-    상태를 그대로 복사하지 않고 현재 실제 시간표 상태를 기준으로 다시 검증한 뒤
-    실제 `swaps`에 기록한다. 이미 반영한 TEST 변경ID는 중복 반영하지 않는다.
-    """
-    if not is_edu_or_master():
-        return False, "교육과정부 또는 마스터만 테스트 결과를 실제 반영할 수 있습니다."
-    test_df = st.session_state.get("test_swaps", pd.DataFrame())
-    if not isinstance(test_df, pd.DataFrame) or test_df.empty:
-        return False, "반영할 테스트 결과가 없습니다."
-
-    live_df = st.session_state.get("swaps", pd.DataFrame())
-    if not isinstance(live_df, pd.DataFrame):
-        live_df = pd.DataFrame()
-    existing_ids = set(live_df.get("변경ID", pd.Series(dtype=str)).astype(str)) if not live_df.empty else set()
-    pending = test_df[~test_df.get("변경ID", pd.Series(dtype=str)).astype(str).isin(existing_ids)].copy()
-    if pending.empty:
-        return False, "이미 실제 반영된 테스트 결과만 남아 있습니다."
-
-    # 현재 실제 상태에서 다시 검증한다. 테스트 후 다른 사용자가 변경했으면
-    # 전체 반영을 중단해 일부만 저장되는 상황을 막는다.
-    ver = st.session_state.get("_data_version", 0)
-    errors = []
-    for _, r in pending.iterrows():
-        a = {"교사명": str(r.get("교사A", "")).strip(), "요일": str(r.get("요일A", "")).strip(),
-             "교시": safe_int(r.get("교시A", 0)), "학급": str(r.get("학급A", "")).strip(),
-             "과목": str(r.get("과목A", "")).strip()}
-        b = {"교사명": str(r.get("교사B", "")).strip(), "요일": str(r.get("요일B", "")).strip(),
-             "교시": safe_int(r.get("교시B", 0)), "학급": str(r.get("학급B", "")).strip(),
-             "과목": str(r.get("과목B", "")).strip()}
-        da, db = normalize_date_str(r.get("원본일자", "")), normalize_date_str(r.get("목표일자", ""))
-        if not a["교사명"] or not b["교사명"] or not da or not db:
-            errors.append(f"{r.get('변경ID','')} · 필수 변경 정보가 없습니다.")
-            continue
-        typ = str(r.get("유형", "")).strip()
-        if typ == "1:1 맞교환":
-            ok, msg = validate_swap(a, b, da, db, is_test=False)
-            if not ok:
-                errors.append(f"{r.get('변경ID','')} · {msg}")
-        elif typ == "연계 공강 교환":
-            e = get_effective_timetable_for_date(db, ver, use_test=False)
-            if not is_free(b["교사명"], b["요일"], b["교시"], db, e):
-                # 연계교환은 목표 교사의 기존 수업을 다음 순환 단계에서 사용하므로
-                # 단독 반영은 안전하지 않다. 테스트 순환의 원자성을 보존하기 위해
-                # 순환형 연계는 아래 일괄 검증에서 처리한다.
-                pass
-        else:
-            errors.append(f"{r.get('변경ID','')} · 알 수 없는 변경 유형입니다: {typ}")
-
-    if errors:
-        return False, "현재 실제 시간표와 테스트 결과가 달라졌습니다. 반영 전에 다시 테스트하세요.\n" + "\n".join(errors[:8])
-
-    # 1:1은 현재 상태를 기준으로 순차 반영한다. 연계 순환은 테스트 목록 전체가
-    # 하나의 시나리오이므로 개별 연계행으로 분리하지 않고 순서대로 반영한다.
-    applied = []
-    try:
-        for _, r in pending.iterrows():
-            a = {"교사명": str(r.get("교사A", "")).strip(), "요일": str(r.get("요일A", "")).strip(),
-                 "교시": safe_int(r.get("교시A", 0)), "학급": str(r.get("학급A", "")).strip(), "과목": str(r.get("과목A", "")).strip()}
-            b = {"교사명": str(r.get("교사B", "")).strip(), "요일": str(r.get("요일B", "")).strip(),
-                 "교시": safe_int(r.get("교시B", 0)), "학급": str(r.get("학급B", "")).strip(), "과목": str(r.get("과목B", "")).strip()}
-            da, db = normalize_date_str(r.get("원본일자", "")), normalize_date_str(r.get("목표일자", ""))
-            typ = str(r.get("유형", "")).strip()
-            if typ == "1:1 맞교환":
-                if not do_swap(a, b, da, db, is_test=False):
-                    raise ValueError(f"{r.get('변경ID','')} 반영 실패")
-            elif typ == "연계 공강 교환":
-                if not do_linked_swap(a, b["교사명"], da, db, b["요일"], b["교시"], subject_b=b["과목"], is_test=False):
-                    raise ValueError(f"{r.get('변경ID','')} 연계 반영 실패")
-            else:
-                raise ValueError(f"지원하지 않는 변경 유형: {typ}")
-            applied.append(str(r.get("변경ID", "")))
-    except Exception as exc:
-        return False, f"반영 중 중단되었습니다: {exc}. 이미 반영된 항목은 실제 이력에 남을 수 있으므로 최신 시간표를 확인하세요."
-
-    st.session_state["test_last_applied_ids"] = applied
-    st.session_state.test_swaps = test_df[~test_df["변경ID"].astype(str).isin(applied)].reset_index(drop=True)
-    _invalidate_all_caches()
-    return True, f"테스트 결과 {len(applied)}건을 실제 시간표 변경 이력에 반영했습니다."
-
-
 def apply_cycle_swaps(moves, is_test=False):
     if not moves:
         return False
@@ -3386,7 +3345,7 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         return None
     monday = ref_date - timedelta(days=ref_date.weekday())
     if title:
-        st.markdown(f"<div style='font-size:.86rem;font-weight:600;color:#6b7280;margin:0 0 .12rem .1rem'>{title}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size:.86rem;font-weight:600;color:var(--ui-muted);margin:0 0 .12rem .1rem'>{title}</div>", unsafe_allow_html=True)
     if show_week_dates:
         dates = [monday + timedelta(days=i) for i in range(5)]
         st.markdown("<div class='compact-nav'>" + "　".join(f"{DAYS[i]} {dates[i]:%m.%d}" for i in range(5)) + "</div>", unsafe_allow_html=True)
@@ -4255,17 +4214,23 @@ def show_login_page():
     if "login_locked" not in st.session_state:
         st.session_state.login_locked = False
 
+    st.markdown("<div class='login-shell'>", unsafe_allow_html=True)
+
     # ===== 구글 드라이브 이미지 =====
     IMAGE_URL = "https://i.imgur.com/Gl0YDO3.jpeg"
     st.markdown(
         f"""
-        <div style="background:rgba(255,255,255,.035); padding:20px; border:1px solid rgba(255,255,255,.08); border-radius: 18px; text-align: center; margin-bottom: 20px;">
+        <div class="login-mark">
             <img src="{IMAGE_URL}" width="150" style="object-fit: contain;">
         </div>
-        """, 
+        """,
         unsafe_allow_html=True
     )
     # ==============================
+    # 이전 버전은 이 카드에 반투명 흰색(rgba(255,255,255,.035))을 썼는데, 페이지 배경 자체가
+    # 흰색이라 카드 배경/테두리가 거의 보이지 않는 상태였다(다크 히어로 배경을 가정한 값이
+    # 흰 배경에 그대로 남아있던 실제 버그). login-mark 클래스는 테마 토큰(var(--ui-soft) 등)을
+    # 쓰므로 Apple/X.AI 테마 전환에도 항상 올바르게 보인다.
 
     st.markdown(f"<div class='ai-hero-kicker'>{SCHOOL_YEAR} · SCHOOL OPERATIONS</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='ai-hero-title'>{SCHOOL_NAME}</div>", unsafe_allow_html=True)
@@ -4321,6 +4286,8 @@ def show_login_page():
     if st.session_state.login_attempts > 0:
         st.warning(f"현재 로그인 실패 횟수: {st.session_state.login_attempts} / {MAX_LOGIN_ATTEMPTS}")
 
+    st.markdown("</div>", unsafe_allow_html=True)  # /.login-shell
+
     st.divider()
     st.markdown("#### 📝 아이디 추가 요청 (게스트용)")
     with st.form("id_request_form"):
@@ -4371,59 +4338,13 @@ if not init_state():
         st.rerun()
     st.stop()
 
-if "ui_design" not in st.session_state or st.session_state.ui_design not in DESIGN_OPTIONS:
-    st.session_state.ui_design = DESIGN_APPLE
 if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_OPTIONS:
     st.session_state.ui_font = UI_FONT_DEFAULT
+if "ui_theme" not in st.session_state or st.session_state.ui_theme not in UI_THEME_OPTIONS:
+    st.session_state.ui_theme = UI_THEME_DEFAULT
 
-# 현재 선택된 폰트를 CSS 변수로 주입한다. 폰트 선택은 앱 전체에 즉시 적용된다.
-st.markdown(
-    f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}</style>""",
-    unsafe_allow_html=True,
-)
-
-# xAI-inspired 모드는 기존 Apple CSS를 삭제/변경하지 않고 마지막에 표현 토큰만 덮어쓴다.
-# 따라서 업무 로직, session_state 데이터, Google Sheets 저장 구조에는 영향을 주지 않는다.
-def _inject_design_css():
-    mode = st.session_state.get("ui_design", DESIGN_APPLE)
-    if mode != DESIGN_XAI:
-        return
-    st.markdown("""
-<style>
-:root{
-  --ui-bg:#0a0a0a;--ui-surface:#191919;--ui-soft:#1a1c20;--ui-soft-2:#141414;
-  --ui-text:#ffffff;--ui-text-2:#dadbdf;--ui-muted:#7d8187;--ui-muted-2:#7d8187;
-  --ui-line:#363a3f;--ui-line-soft:#212327;--ui-accent:#ffffff;--ui-accent-hover:#fafaf7;
-  --ui-focus:rgba(255,255,255,.18);--ui-success:#dadbdf;--ui-danger:#ff8b8b;
-  --ui-radius-sm:8px;--ui-radius-md:8px;--ui-radius-lg:8px;
-  --app-font:"Inter","Pretendard","Apple SD Gothic Neo","Noto Sans KR","Segoe UI",sans-serif;
-}
-html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"]{background:#0a0a0a!important;color:#fff!important}
-[data-testid="stHeader"]{background:rgba(10,10,10,.90)!important;border-bottom:1px solid #212327!important;backdrop-filter:blur(14px)}
-.block-container{max-width:1200px!important;padding-top:18px!important;padding-bottom:48px!important}
-.app-topbar{border-bottom-color:#212327!important}
-.app-identity,.work-page-head p,.work-page-meta,.work-section-note,.matrix-subtitle,.matrix-legend,.apple-note,.work-note,[data-testid="stCaptionContainer"]{color:#7d8187!important}
-.work-page-head{border-bottom-color:#212327!important}
-.work-page-head h1,.sandbox-title,h1,h2,h3,h4,h5,h6,.work-section-title,.matrix-title,.swap-group-title{color:#fff!important;font-weight:400!important;letter-spacing:-.025em!important}
-.work-page-head h1{font-size:32px!important}
-[data-testid="stVerticalBlockBorderWrapper"],[data-testid="stExpander"],[data-testid="stDataFrame"]{background:#191919!important;border-color:#212327!important;border-radius:8px!important;box-shadow:none!important}
-[data-testid="stExpander"] summary:hover{background:#1a1c20!important}
-.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{background:transparent!important;color:#fff!important;border:1px solid rgba(255,255,255,.25)!important;border-radius:9999px!important;font-weight:400!important}
-.stButton>button:hover,.stDownloadButton>button:hover,.stFormSubmitButton>button:hover{background:#1a1c20!important;border-color:rgba(255,255,255,.42)!important}
-.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{background:#fff!important;color:#0a0a0a!important;border-color:#fff!important}
-[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{background:#1a1c20!important;color:#fff!important;border-color:#212327!important;border-radius:8px!important}
-[data-testid="stDataFrame"] [role="columnheader"]{background:#1a1c20!important;color:#dadbdf!important;border-color:#212327!important;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,monospace!important;letter-spacing:1.2px!important;text-transform:uppercase}
-[data-testid="stDataFrame"] [role="gridcell"]{background:#191919!important;color:#fff!important;border-color:#212327!important}
-[data-testid="stRadio"] [role="radiogroup"]{gap:6px!important}
-.app-topbar [data-testid="stRadio"] [role="radiogroup"]{background:#1a1c20!important;border-color:#212327!important}
-.app-topbar [data-testid="stRadio"] [role="radio"]{color:#7d8187!important}
-.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:#191919!important;color:#fff!important;box-shadow:none!important}
-.xai-eyebrow{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,monospace;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:#fff;margin:0 0 8px}
-.design-status{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border:1px solid #212327;border-radius:9999px;background:#141414;color:#dadbdf;font:12px/1 ui-monospace,SFMono-Regular,Menlo,Monaco,monospace;letter-spacing:.6px}
-</style>
-""", unsafe_allow_html=True)
-
-_inject_design_css()
+# 현재 선택된 디자인(테마)·글꼴을 CSS 변수로 주입한다. 둘 다 앱 전체에 즉시 적용된다.
+st.markdown(_theme_style_block(st.session_state.ui_theme, st.session_state.ui_font), unsafe_allow_html=True)
 
 # ==========================================================================================
 # 상단 가로 업무 Toolbar
@@ -4441,21 +4362,16 @@ def render_tools_dialog():
         return
 
     st.markdown('<div class="tool-section-title">화면</div>', unsafe_allow_html=True)
-    st.markdown('<div class="xai-eyebrow">DESIGN SYSTEM</div>', unsafe_allow_html=True)
-    selected_design = st.radio(
-        "디자인 스타일", DESIGN_OPTIONS,
-        index=DESIGN_OPTIONS.index(st.session_state.get("ui_design", DESIGN_APPLE)),
-        horizontal=True, key="ui_design_selector", label_visibility="collapsed"
+    selected_theme = st.radio(
+        "디자인",
+        list(UI_THEME_OPTIONS.keys()),
+        index=list(UI_THEME_OPTIONS.keys()).index(st.session_state.get("ui_theme", UI_THEME_DEFAULT)),
+        key="ui_theme_selector",
+        horizontal=True,
+        help="화면 전체의 색상·모양을 전환합니다. 기능과 데이터는 동일하게 유지됩니다.",
     )
-    if selected_design != st.session_state.get("ui_design"):
-        st.session_state.ui_design = selected_design
-        st.rerun()
-    st.markdown(
-        f'<div class="design-status">● {st.session_state.get("ui_design", DESIGN_APPLE)}</div>',
-        unsafe_allow_html=True
-    )
-    st.caption("Apple 업무형과 xAI-inspired의 표현 스타일만 전환합니다. 시간표·교환·보강 데이터와 저장 로직은 그대로 유지됩니다.")
-    st.divider()
+    st.session_state.ui_theme = selected_theme
+
     selected_font = st.selectbox(
         "글꼴",
         list(UI_FONT_OPTIONS.keys()),
@@ -4464,11 +4380,11 @@ def render_tools_dialog():
         help="이 브라우저에서 사용할 수 있는 글꼴을 우선 적용합니다. 학교 PC에 해당 글꼴이 설치되어 있지 않으면 다음 대체 글꼴이 사용됩니다.",
     )
     st.session_state.ui_font = selected_font
-    st.markdown(
-        f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}</style>""",
-        unsafe_allow_html=True,
-    )
-    st.caption("글꼴은 이 기기에 설치된 폰트를 우선 사용합니다.")
+
+    # 테마·글꼴을 하나의 <style> 블록으로 합쳐 즉시 재주입한다. 다이얼로그 안에서
+    # 바뀐 값이 다음 rerun 전에도 바로 반영되도록 여기서도 한 번 더 그린다.
+    st.markdown(_theme_style_block(selected_theme, selected_font), unsafe_allow_html=True)
+    st.caption("디자인·글꼴 선택은 이 기기(브라우저)에만 적용되며, 실제 시간표·결보강 데이터에는 영향을 주지 않습니다.")
 
     st.divider()
 
@@ -4533,7 +4449,7 @@ def render_top_toolbar(visible_tabs):
     """업무 중심 상단 셸. Dialog와 충돌하지 않도록 일반 실행 컨텍스트에서 렌더링한다."""
     core = [t for t in ["시간표 조회", "결강·보강", "시간표 맞교환 & 변경 추천", "변경된 교사 주간표"] if t in visible_tabs]
     secondary = [t for t in visible_tabs if t not in core]
-    c_id, c_nav, c_more, c_design, c_tools, c_user = st.columns([1.25, 4.85, 1.0, .78, .55, .55], vertical_alignment="center")
+    c_id, c_nav, c_more, c_tools, c_user = st.columns([1.25, 5.35, 1.05, .72, .72], vertical_alignment="center")
     with c_id:
         st.markdown(f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_role()}</div>', unsafe_allow_html=True)
     with c_nav:
@@ -4558,11 +4474,6 @@ def render_top_toolbar(visible_tabs):
             picked=st.selectbox("기타 업무",sec_labels,index=sec_labels.index(current_sec),key="top_secondary_nav",label_visibility="collapsed")
             if picked != "더보기" and sec_map.get(picked) != previous:
                 st.session_state.active_tab=sec_map[picked]; _clear_weekly_selection(); st.rerun()
-    with c_design:
-        design_label = "◐ xAI" if st.session_state.get("ui_design", DESIGN_APPLE) == DESIGN_APPLE else "◐ Apple"
-        if st.button(design_label, width="stretch", key="top_design_toggle", help="Apple 업무형 ↔ xAI-inspired 디자인 전환"):
-            st.session_state.ui_design = DESIGN_XAI if st.session_state.get("ui_design", DESIGN_APPLE) == DESIGN_APPLE else DESIGN_APPLE
-            st.rerun()
     with c_tools:
         if st.button("···",width="stretch",key="top_tools_open",help="화면·출력·기타 도구"):
             render_tools_dialog()
@@ -4944,21 +4855,7 @@ if "시간표 변경 테스트용" in tab_map:
             key="test_week_preview", title="테스트 적용 주간표", use_test=True
         )
 
-        test_df = st.session_state.get("test_swaps", pd.DataFrame())
-        if isinstance(test_df, pd.DataFrame) and not test_df.empty:
-            if is_edu_or_master():
-                st.markdown("#### 테스트 결과 반영")
-                st.info("테스트 결과는 저장되지 않습니다. 실제 반영을 누르면 현재 실제 시간표 상태를 다시 검증한 뒤 맞교환 이력에 저장합니다.")
-                confirm_key = "confirm_apply_test_swaps"
-                confirmed = st.checkbox("현재 테스트 결과를 실제 시간표 변경으로 반영합니다.", key=confirm_key)
-                if st.button("✅ 테스트 결과 실제 반영", type="primary", width="stretch", key="apply_test_to_live", disabled=not confirmed):
-                    ok, msg = apply_test_swaps_to_live()
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-
+        if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
             st.dataframe(st.session_state.test_swaps, width="stretch", hide_index=True)
 
