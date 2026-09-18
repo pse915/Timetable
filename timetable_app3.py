@@ -1101,7 +1101,9 @@ def init_state():
     st.session_state.part_time = ensure_part_time_columns(part_time)
     st.session_state.cumulative = cumulative
     st.session_state.duties = ensure_duty_columns(duties)
-    st.session_state._data_version = 0
+    # cache_data 함수들이 session_state를 참조하므로 세션마다 독립적인 cache namespace를 갖게 한다.
+    # 단순히 0부터 시작하면 서로 다른 교사의 테스트 상태가 Streamlit 전역 캐시에 섞일 수 있다.
+    st.session_state._data_version = int(uuid.uuid4().int % 10**12)
     st.session_state.history = []
     st.session_state.history_index = -1
     st.session_state.test_swaps = pd.DataFrame()
@@ -1743,7 +1745,73 @@ def cancel_substitute(cid, period):
 
 
 
-def do_swap(a, b, date_a, date_b, is_part_time_purpose=False, is_test=False):
+def apply_test_swaps_to_actual(test_df=None):
+    """현재 테스트안을 실제 맞교환 이력으로 원자적으로 반영한다.
+
+    테스트는 세션별 임시 상태이고 Google Sheets에는 저장하지 않는다.
+    사용자가 명시적으로 '실제 반영'을 눌렀을 때만 현재 실제 시간표를 기준으로
+    각 변경을 다시 검증하며, 하나라도 실패하면 실제 swaps와 외부 저장을 원상복구한다.
+    테스트용 TESTSW/TESTLINK ID는 실제 SWAP/LINK ID로 새로 발급한다.
+    """
+    if not can_full_data() and not is_teacher():
+        return False, ["현재 권한으로 실제 시간표 변경을 반영할 수 없습니다."]
+    df = test_df if isinstance(test_df, pd.DataFrame) else st.session_state.get("test_swaps", pd.DataFrame())
+    if df is None or df.empty:
+        return False, ["반영할 테스트 변경이 없습니다."]
+
+    before = st.session_state.get("swaps", pd.DataFrame()).copy(deep=True)
+    errors = []
+    try:
+        for _, r in df.iterrows():
+            typ = str(r.get("유형", "")).strip()
+            a = {
+                "교사명": str(r.get("교사A", "")).strip(),
+                "요일": str(r.get("요일A", "")).strip(),
+                "교시": safe_int(r.get("교시A", 0)),
+                "학급": str(r.get("학급A", "")).strip(),
+                "과목": str(r.get("과목A", "")).strip(),
+            }
+            date_a = normalize_date_str(r.get("원본일자", ""))
+            date_b = normalize_date_str(r.get("목표일자", ""))
+            if "연계" in typ:
+                ok = do_linked_swap(
+                    a, str(r.get("교사B", "")).strip(), date_a, date_b,
+                    str(r.get("요일B", "")).strip(), safe_int(r.get("교시B", 0)),
+                    is_test=False, subject_b=str(r.get("과목B", "")).strip(), save=False, history=False
+                )
+            else:
+                b = {
+                    "교사명": str(r.get("교사B", "")).strip(),
+                    "요일": str(r.get("요일B", "")).strip(),
+                    "교시": safe_int(r.get("교시B", 0)),
+                    "학급": str(r.get("학급B", "")).strip(),
+                    "과목": str(r.get("과목B", "")).strip(),
+                }
+                ok = do_swap(a, b, date_a, date_b, is_test=False, save=False, history=False)
+            if not ok:
+                raise ValueError(f"{date_a} {a['교사명']} {a['교시']}교시 변경을 실제 상태에서 재검증하지 못했습니다.")
+
+        # 개별 do_swap의 저장/히스토리 중복을 피하기 위해 최종 상태를 한 번 더 저장한다.
+        if not save_work_data_to_gsheet(["맞교환"]):
+            raise RuntimeError("Google Sheets 저장에 실패했습니다.")
+        push_history(f"테스트 변경 실제 반영 ({len(df)}건)")
+        st.session_state.test_swaps = pd.DataFrame()
+        st.session_state["test_has_cycle"] = False
+        _invalidate_all_caches()
+        return True, []
+    except Exception as exc:
+        # 외부 시트까지 실제 상태로 되돌려 부분 반영을 남기지 않는다.
+        st.session_state.swaps = before
+        try:
+            save_work_data_to_gsheet(["맞교환"])
+        except Exception as rollback_exc:
+            errors.append(f"원상복구 저장도 실패했습니다: {rollback_exc}")
+        errors.insert(0, str(exc))
+        _invalidate_all_caches()
+        return False, errors
+
+
+def do_swap(a, b, date_a, date_b, is_part_time_purpose=False, is_test=False, *, save=True, history=True):
     ok, msg = validate_swap(a, b, date_a, date_b, is_test=is_test)
     if not ok:
         if not is_test: st.warning(msg)
@@ -1769,9 +1837,16 @@ def do_swap(a, b, date_a, date_b, is_part_time_purpose=False, is_test=False):
         st.session_state.test_swaps = pd.concat([st.session_state.get("test_swaps", pd.DataFrame()), pd.DataFrame([rec])], ignore_index=True)
         get_effective_timetable_for_date.clear(); effective_teacher_matrix.clear(); get_single_lesson_1to1_candidates.clear(); get_single_lesson_linked_cycles.clear()
         return True
+    before_swaps = st.session_state.swaps.copy(deep=True)
     st.session_state.swaps = pd.concat([st.session_state.swaps, pd.DataFrame([rec])], ignore_index=True)
-    save_work_data_to_gsheet(["맞교환"])
-    push_history(f"맞교환 ({a['교사명']} ↔ {b['교사명']})")
+    if save:
+        if not save_work_data_to_gsheet(["맞교환"]):
+            st.session_state.swaps = before_swaps
+            _invalidate_all_caches()
+            return False
+    if history:
+        push_history(f"맞교환 ({a['교사명']} ↔ {b['교사명']})")
+    _invalidate_all_caches()
     return True
 
 
@@ -4771,6 +4846,7 @@ if "시간표 변경 테스트용" in tab_map:
         if st.button("🔄 테스트 상태 초기화", type="secondary"):
             st.session_state.test_swaps = pd.DataFrame()
             st.session_state["test_has_cycle"] = False
+            st.session_state["test_confirm_apply"] = False
             get_effective_timetable_for_date.clear()
             effective_teacher_matrix.clear()
             get_single_lesson_1to1_candidates.clear()
@@ -4794,6 +4870,34 @@ if "시간표 변경 테스트용" in tab_map:
         if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
             st.dataframe(st.session_state.test_swaps, width="stretch", hide_index=True)
+
+            # 테스트 → 실제 반영은 명시적 2단계 확인으로 분리한다.
+            # 일반 교사도 기존 실제 맞교환 권한을 그대로 사용하며, 테스트 상태 자체는 저장되지 않는다.
+            if st.session_state.get("test_confirm_apply", False):
+                st.warning(
+                    f"테스트 변경 {len(st.session_state.test_swaps)}건을 실제 시간표에 반영합니다. "
+                    "반영 후에는 실제 맞교환 이력으로 저장되며 되돌리기는 Undo로 가능합니다."
+                )
+                c_apply, c_cancel = st.columns(2)
+                with c_apply:
+                    if st.button("✅ 테스트안을 실제 시간표에 반영", type="primary", key="test_apply_confirm", width="stretch"):
+                        with st.spinner("실제 시간표 반영 및 저장 중..."):
+                            ok, errs = apply_test_swaps_to_actual()
+                        st.session_state["test_confirm_apply"] = False
+                        if ok:
+                            st.success("테스트 변경이 실제 시간표에 반영되었습니다.")
+                            st.rerun()
+                        st.error("테스트 변경을 실제로 반영하지 못했습니다.")
+                        for msg in errs[:5]:
+                            st.warning(msg)
+                with c_cancel:
+                    if st.button("취소", key="test_apply_cancel", width="stretch"):
+                        st.session_state["test_confirm_apply"] = False
+                        st.rerun()
+            else:
+                if st.button("🚀 검토한 테스트 변경을 실제 반영", type="primary", key="test_apply_open", width="stretch"):
+                    st.session_state["test_confirm_apply"] = True
+                    st.rerun()
 
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
