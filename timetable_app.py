@@ -13,6 +13,7 @@ import copy
 from contextlib import contextmanager
 import uuid
 import time as _time
+import threading
 from datetime import date, datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from collections import defaultdict
@@ -121,7 +122,7 @@ a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
-APP_VERSION = "4.2-Apple-LoadFailFast"
+APP_VERSION = "4.3-Apple-NetworkTimeout"
 
 # ==========================================================================================
 # UI 폰트 설정
@@ -617,31 +618,87 @@ def get_teacher_subject(teacher_name: str) -> str:
 def get_gspread_client():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     if "gcp_service_account" not in st.secrets:
-        st.error("GCP Secrets 인증 오류")
-        st.stop()
+        raise RuntimeError("GCP Secrets에 gcp_service_account가 없습니다.")
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
-@st.cache_resource(show_spinner=False)
-def get_spreadsheet(spreadsheet_id: str):
-    return get_gspread_client().open_by_key(spreadsheet_id)
+
+def _run_network_with_timeout(fn, timeout=3.0):
+    """gspread의 timeout 미지정 HTTP 호출이 Streamlit 전체 실행을 붙잡지 않게 한다.
+
+    gspread 일부 호출은 내부적으로 requests timeout을 지정하지 않아 네트워크/Google API
+    장애 시 Streamlit의 첫 script run 자체가 무기한 대기할 수 있다. 데몬 스레드에서
+    호출하고 제한 시간 안에 끝나지 않으면 호출자에게 즉시 TimeoutError를 돌려준다.
+    """
+    result = []
+    error = []
+
+    def worker():
+        try:
+            result.append(fn())
+        except BaseException as exc:
+            error.append(exc)
+
+    thread = threading.Thread(target=worker, name="gsheet-timeout-worker", daemon=True)
+    thread.start()
+    thread.join(timeout=max(1.0, float(timeout)))
+    if thread.is_alive():
+        raise TimeoutError(f"Google Sheets 응답 시간 초과 ({timeout:.0f}초)")
+    if error:
+        raise error[0]
+    return result[0] if result else None
+
 
 def get_worksheet(spreadsheet_id: str, sheet_name: str):
+    """Google Sheets worksheet를 제한시간 안에 가져온다. 실패하면 None."""
     try:
-        return get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
+        cache = st.session_state.setdefault("_gsheet_spreadsheets", {})
+        spreadsheet = cache.get(spreadsheet_id)
+        if spreadsheet is None:
+            client = get_gspread_client()
+            spreadsheet = _run_network_with_timeout(
+                lambda: client.open_by_key(spreadsheet_id), timeout=3
+            )
+            cache[spreadsheet_id] = spreadsheet
+
+        ws_key = f"{spreadsheet_id}:{sheet_name}"
+        ws_cache = st.session_state.setdefault("_gsheet_worksheets", {})
+        if ws_key in ws_cache:
+            return ws_cache[ws_key]
+
+        ws = _run_network_with_timeout(
+            lambda: spreadsheet.worksheet(sheet_name), timeout=3
+        )
+        ws_cache[ws_key] = ws
+        return ws
     except WorksheetNotFound:
         try:
-            return get_spreadsheet(spreadsheet_id).add_worksheet(title=sheet_name, rows=2000, cols=40)
-        except Exception:
+            cache = st.session_state.setdefault("_gsheet_spreadsheets", {})
+            spreadsheet = cache.get(spreadsheet_id)
+            if spreadsheet is None:
+                client = get_gspread_client()
+                spreadsheet = _run_network_with_timeout(
+                    lambda: client.open_by_key(spreadsheet_id), timeout=3
+                )
+                cache[spreadsheet_id] = spreadsheet
+            ws = _run_network_with_timeout(
+                lambda: spreadsheet.add_worksheet(title=sheet_name, rows=2000, cols=40), timeout=3
+            )
+            st.session_state.setdefault("_gsheet_worksheets", {})[f"{spreadsheet_id}:{sheet_name}"] = ws
+            return ws
+        except Exception as e:
+            st.session_state["_gsheet_last_error"] = str(e)
             return None
-    except Exception:
+    except Exception as e:
+        st.session_state["_gsheet_last_error"] = str(e)
         return None
 
 def df_from_worksheet(ws):
     if ws is None:
         return pd.DataFrame()
     try:
-        data = ws.get_all_values()
+        # get_all_values()도 HTTP 호출이므로 반드시 제한시간을 둔다.
+        data = _run_network_with_timeout(lambda: ws.get_all_values(), timeout=3)
         if not data or len(data) < 2:
             return pd.DataFrame()
         headers = [str(h).strip() for h in data[0]]
@@ -650,7 +707,8 @@ def df_from_worksheet(ws):
             row = list(row) + [""] * max(0, len(headers) - len(row))
             rows.append(["" if c is None else str(c).strip() for c in row[:len(headers)]])
         return pd.DataFrame(rows, columns=headers).replace({"nan": "", "None": "", "NaN": ""})
-    except Exception:
+    except Exception as e:
+        st.session_state["_gsheet_last_error"] = str(e)
         return pd.DataFrame()
 
 def df_to_worksheet(ws, df):
@@ -992,9 +1050,11 @@ def init_state():
     if tt is None or tt.empty:
         st.session_state.pop("teachers", None)
         st.session_state.pop("timetable", None)
+        detail = st.session_state.get("_gsheet_last_error", "")
         st.session_state["_load_error"] = (
             "시간표 시트에서 유효한 데이터를 받지 못했습니다. "
             "Google Sheets 인증/공유 권한, 시트 이름(시간표), 네트워크 상태를 확인하세요."
+            + (f" 최근 오류: {detail}" if detail else "")
         )
         return False
 
