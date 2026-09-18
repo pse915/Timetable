@@ -35,894 +35,93 @@ st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", l
 
 st.markdown("""
 <style>
-/* =====================================================================================
-   Apple / ChatGPT-inspired UI system
-   - Light: pure white Apple UI as the primary experience
-   - Dark: restrained system-dark fallback
-   - Optimized for Chrome 1920×1080 and responsive down to mobile
-   ===================================================================================== */
-:root {
-    --apple-bg:#ffffff;
-    --apple-surface:#ffffff;
-    --apple-surface-soft:#f5f5f7;
-    --apple-surface-pearl:#fafafc;
-    --apple-ink:#1d1d1f;
-    --apple-ink-2:#3a3a3c;
-    --apple-muted:#6e6e73;
-    --apple-muted-2:#86868b;
-    --apple-line:#d2d2d7;
-    --apple-line-soft:#e5e5ea;
-    --apple-blue:#0066cc;
-    --apple-blue-hover:#0071e3;
-    --apple-focus:rgba(0,102,204,.22);
-    --apple-radius-sm:8px;
-    --apple-radius-md:12px;
-    --apple-radius-lg:18px;
-    --apple-radius-xl:22px;
-}
-
-html, body,
-[data-testid="stAppViewContainer"],
-[data-testid="stApp"],
-[data-testid="stMain"] {
-    background:var(--apple-bg) !important;
-    color:var(--apple-ink) !important;
-}
-
-body, button, input, textarea, select, [data-testid="stDataFrame"] {
-    font-family:var(--app-font, "SF Pro Text", "SF Pro Display", -apple-system,
-                 BlinkMacSystemFont, "Inter", "Apple SD Gothic Neo", "Noto Sans KR",
-                 sans-serif) !important;
-    -webkit-font-smoothing:antialiased;
-    text-rendering:optimizeLegibility;
-}
-
-[data-testid="stHeader"] {
-    background:rgba(255,255,255,.78) !important;
-    backdrop-filter:saturate(180%) blur(18px);
-    -webkit-backdrop-filter:saturate(180%) blur(18px);
-    border-bottom:1px solid rgba(210,210,215,.72);
-}
-[data-testid="stToolbar"], [data-testid="stDecoration"] { background:transparent !important; }
-[data-testid="stDecoration"] { display:none !important; }
-
-.block-container {
-    width:100% !important;
-    max-width:none !important;
-    padding-top:.55rem !important;
-    padding-bottom:1.25rem !important;
-    padding-left:clamp(.75rem, 1.15vw, 1.5rem) !important;
-    padding-right:clamp(.75rem, 1.15vw, 1.5rem) !important;
-}
-
-/* Cloud header와 실제 앱 toolbar 사이에 확실한 안전 공간 */
-.app-top-safe-space { height:30px; width:100%; flex:0 0 30px; pointer-events:none; }
-
-.app-topbar {
-    position:relative;
-    z-index:2;
-    width:100%;
-    min-height:44px;
-    display:flex;
-    align-items:center;
-    gap:.55rem;
-    padding:.18rem .25rem .38rem;
-    margin:-.08rem 0 .65rem;
-    border-bottom:1px solid var(--apple-line-soft);
-}
-.app-identity {
-    white-space:nowrap;
-    color:var(--apple-muted);
-    font-size:.74rem;
-    line-height:1.15;
-    letter-spacing:-.018em;
-}
-.app-identity strong { color:var(--apple-ink); font-weight:650; }
-.app-topbar .stButton > button {
-    min-height:34px !important;
-    padding:.1rem .72rem !important;
-    border-radius:999px !important;
-    font-size:.77rem !important;
-}
-
-/* Typography */
-h1,h2,h3,h4,h5,h6,p,label,span,div { letter-spacing:-.012em; }
-h1 { font-weight:650 !important; letter-spacing:-.045em !important; }
-h2 { font-weight:650 !important; letter-spacing:-.035em !important; }
-h3 { font-weight:600 !important; letter-spacing:-.03em !important; }
-[data-testid="stCaptionContainer"], .stCaption { color:var(--apple-muted) !important; }
-
-/* Buttons — Apple pill */
-.stButton > button,
-.stDownloadButton > button,
-.stFormSubmitButton > button {
-    min-height:36px !important;
-    border-radius:999px !important;
-    border:1px solid var(--apple-line) !important;
-    background:#fff !important;
-    color:var(--apple-ink) !important;
-    box-shadow:none !important;
-    transition:background .12s ease, border-color .12s ease, transform .08s ease !important;
-}
-.stButton > button:hover,
-.stDownloadButton > button:hover,
-.stFormSubmitButton > button:hover {
-    background:var(--apple-surface-soft) !important;
-    border-color:#b8b8be !important;
-    transform:none;
-    box-shadow:none !important;
-}
-.stButton > button:focus-visible,
-.stDownloadButton > button:focus-visible,
-.stFormSubmitButton > button:focus-visible {
-    outline:3px solid var(--apple-focus) !important;
-    outline-offset:1px;
-}
-.stButton > button[kind="primary"],
-.stFormSubmitButton > button[kind="primary"] {
-    color:#fff !important;
-    background:var(--apple-blue) !important;
-    border-color:var(--apple-blue) !important;
-    font-weight:600 !important;
-}
-.stButton > button[kind="primary"]:hover,
-.stFormSubmitButton > button[kind="primary"]:hover {
-    background:var(--apple-blue-hover) !important;
-    border-color:var(--apple-blue-hover) !important;
-}
-
-/* Inputs / selects */
-[data-baseweb="input"],
-[data-baseweb="textarea"],
-[data-baseweb="select"] > div,
-[data-testid="stDateInput"] > div > div {
-    background:#fff !important;
-    color:var(--apple-ink) !important;
-    border-color:#c7c7cc !important;
-    border-radius:var(--apple-radius-md) !important;
-    box-shadow:none !important;
-}
-[data-baseweb="input"]:focus-within,
-[data-baseweb="textarea"]:focus-within,
-[data-baseweb="select"]:focus-within {
-    border-color:#8ebcf0 !important;
-    box-shadow:0 0 0 3px var(--apple-focus) !important;
-}
-input, textarea { color:var(--apple-ink) !important; background:#fff !important; }
-input::placeholder, textarea::placeholder { color:#8e8e93 !important; }
-[data-baseweb="select"] * { color:var(--apple-ink) !important; }
-
-/* Navigation — Apple-style segmented control */
-[data-testid="stRadio"] {
-    margin:0 !important;
-}
-[data-testid="stRadio"] > div {
-    width:100% !important;
-}
-[data-testid="stRadio"] [role="radiogroup"] {
-    display:flex !important;
-    align-items:center !important;
-    gap:3px !important;
-    width:100% !important;
-    padding:3px !important;
-    background:#f5f5f7 !important;
-    border:1px solid #e5e5ea !important;
-    border-radius:999px !important;
-    overflow-x:auto !important;
-    scrollbar-width:none;
-}
-[data-testid="stRadio"] [role="radiogroup"]::-webkit-scrollbar { display:none; }
-[data-testid="stRadio"] [role="radio"] {
-    flex:0 0 auto !important;
-    min-height:32px !important;
-    padding:0 13px !important;
-    border-radius:999px !important;
-    color:#6e6e73 !important;
-    font-size:13px !important;
-    font-weight:400 !important;
-    letter-spacing:-.2px !important;
-    transition:background .18s ease, color .18s ease, transform .18s ease !important;
-}
-[data-testid="stRadio"] [role="radio"]:hover { background:#ebebf0 !important; color:#1d1d1f !important; }
-[data-testid="stRadio"] [role="radio"][aria-checked="true"] {
-    background:#ffffff !important;
-    color:#1d1d1f !important;
-    font-weight:600 !important;
-    box-shadow:0 1px 3px rgba(0,0,0,.10) !important;
-}
-[data-testid="stRadio"] [role="radio"] > div:first-child { display:none !important; }
-
-/* Apple section rhythm */
-.apple-page-head {
-    display:flex; align-items:flex-end; justify-content:space-between; gap:24px;
-    padding:22px 4px 16px; margin:0 0 8px;
-    border-bottom:1px solid #f0f0f0;
-}
-.apple-page-head h1 { margin:0 !important; font-family:var(--app-font, "SF Pro Display", system-ui, -apple-system, sans-serif) !important;
-    font-size:34px !important; line-height:1.1 !important; font-weight:600 !important; letter-spacing:-.55px !important; }
-.apple-page-head p { margin:7px 0 0 !important; color:#7a7a7a !important; font-size:14px !important; line-height:1.43 !important; }
-.apple-section { margin:14px 0 22px; }
-.apple-section-label { color:#7a7a7a; font-size:12px; font-weight:600; letter-spacing:-.12px; margin:0 0 8px 2px; }
-
-/* Cards / expanders — no heavy elevation */
-[data-testid="stVerticalBlockBorderWrapper"],
-[data-testid="stExpander"] {
-    background:#fff !important;
-    border:1px solid #e0e0e0 !important;
-    border-radius:18px !important;
-    box-shadow:none !important;
-}
-[data-testid="stExpander"] summary {
-    color:#1d1d1f !important;
-    font-weight:600 !important;
-    min-height:46px;
-}
-[data-testid="stExpander"] summary:hover { background:#fafafc !important; }
-[data-testid="stExpander"] summary [class*="material-symbols"] {
-    font-family:"Material Symbols Rounded", "Material Symbols Outlined", sans-serif !important;
-    font-size:20px !important;
-    line-height:1 !important;
-}
-hr, [data-testid="stDivider"] { border-color:var(--apple-line-soft) !important; }
-
-/* DataFrame / matrix */
-.matrix-shell { margin-top:.2rem; }
-[data-testid="stDataFrame"] {
-    border:1px solid #d2d2d7 !important;
-    border-radius:14px !important;
-    overflow:hidden !important;
-    background:#fff !important;
-    box-shadow:none !important;
-}
-[data-testid="stDataFrame"] [role="gridcell"],
-[data-testid="stDataFrame"] [role="columnheader"] {
-    color:var(--apple-ink) !important;
-    border-right:1px solid var(--apple-line-soft) !important;
-    border-bottom:1px solid var(--apple-line-soft) !important;
-}
-[data-testid="stDataFrame"] [role="columnheader"] {
-    background:#f5f5f7 !important;
-    color:#3a3a3c !important;
-    font-weight:600 !important;
-}
-[data-testid="stDataFrame"] [role="gridcell"] { background:#fff !important; }
-
-/* Changed-teacher section */
-.changed-teacher-week-card { margin:.38rem 0 .72rem; }
-.changed-teacher-chip {
-    padding:.36rem .55rem;
-    margin:0 0 .3rem;
-    border:1px solid var(--apple-line-soft);
-    border-radius:10px;
-    background:var(--apple-surface-pearl);
-    font-size:.78rem;
-    color:var(--apple-ink-2);
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
-}
-
-.tool-section-title {
-    color:var(--apple-muted) !important;
-    font-size:.72rem;
-    font-weight:600;
-    margin:.15rem 0 .35rem .05rem;
-}
-.apple-note { margin:.05rem 0 .45rem; color:var(--apple-muted) !important; font-size:.76rem; line-height:1.4; }
-.apple-note strong { color:var(--apple-ink-2) !important; font-weight:600; }
-.sandbox-title { margin:.1rem 0 .1rem; color:var(--apple-ink) !important; font-size:1rem; font-weight:600; }
-.compact-nav { color:var(--apple-muted) !important; font-size:.78rem; margin:0 0 .28rem .15rem; }
-
-/* Dialog — clean frosted Apple surface, no forced transform/margin/width */
-[data-testid="stDialog"] { color:var(--apple-ink) !important; }
-[data-testid="stDialog"] > div > div {
-    max-height:calc(100vh - 4.5rem) !important;
-    overflow-y:auto !important;
-    background:rgba(255,255,255,.97) !important;
-    border:1px solid var(--apple-line) !important;
-    border-radius:22px !important;
-    color:var(--apple-ink) !important;
-    box-shadow:0 24px 70px rgba(0,0,0,.16) !important;
-}
-[data-testid="stDialog"] button,
-[data-testid="stDialog"] input,
-[data-testid="stDialog"] [role="button"] {
-    transition:none !important;
-    animation:none !important;
-}
-
-/* Login / AI landing area */
-.ai-hero-kicker {
-    color:var(--apple-muted);
-    font-size:.76rem;
-    font-weight:600;
-    letter-spacing:.08em;
-    text-transform:uppercase;
-}
-.ai-hero-title {
-    margin:.55rem 0 .65rem;
-    font-size:clamp(2.8rem,6vw,5.6rem);
-    line-height:.98;
-    font-weight:650;
-    letter-spacing:-.065em;
-    color:#1d1d1f;
-}
-.ai-hero-sub { color:var(--apple-muted); font-size:1rem; line-height:1.55; max-width:680px; margin:0 auto 1.25rem; }
-.ai-prompt-glow { position:relative; margin:1.25rem auto 0; max-width:720px; }
-.ai-prompt-glow:after { display:none; }
-
-@media (min-width:1600px) {
-    .block-container { padding-left:1.25rem !important; padding-right:1.25rem !important; }
-    [data-testid="stDataFrame"] { font-size:.9rem; }
-}
-@media (max-width:1100px) {
-    .app-topbar { gap:.35rem; }
-    .app-identity { display:none; }
-}
-@media (max-width:900px) {
-    .block-container { padding-left:.55rem !important; padding-right:.55rem !important; }
-    [data-baseweb="tab-list"] { overflow-x:auto; }
-    [data-baseweb="tab"] { white-space:nowrap; }
-}
-
-/* System dark fallback: same design language, inverted surfaces */
-@media (prefers-color-scheme: dark) {
-    :root {
-        --apple-bg:#000000; --apple-surface:#0d0d0f; --apple-surface-soft:#1c1c1e;
-        --apple-surface-pearl:#151517; --apple-ink:#f5f5f7; --apple-ink-2:#e5e5ea;
-        --apple-muted:#98989d; --apple-muted-2:#6e6e73; --apple-line:#38383d;
-        --apple-line-soft:#28282c; --apple-blue:#2997ff; --apple-blue-hover:#47a6ff;
-        --apple-focus:rgba(41,151,255,.28);
-    }
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"], [data-testid="stMain"] { background:#000 !important; color:#f5f5f7 !important; }
-    [data-testid="stHeader"] { background:rgba(0,0,0,.78) !important; border-bottom-color:#28282c !important; }
-    .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button { background:#151517 !important; color:#f5f5f7 !important; border-color:#38383d !important; }
-    .stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover { background:#202023 !important; }
-    .stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] { background:#f5f5f7 !important; color:#111113 !important; border-color:#f5f5f7 !important; }
-    [data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"] > div, [data-testid="stDateInput"] > div > div, input, textarea { background:#151517 !important; color:#f5f5f7 !important; border-color:#38383d !important; }
-    [data-baseweb="select"] * { color:#f5f5f7 !important; }
-    [data-testid="stVerticalBlockBorderWrapper"], [data-testid="stExpander"] { background:#0d0d0f !important; border-color:#38383d !important; }
-    [data-testid="stExpander"] summary { color:#f5f5f7 !important; }
-    [data-baseweb="tab-list"] { background:#1c1c1e !important; border-color:#28282c !important; }
-    [data-baseweb="tab"][aria-selected="true"] { background:#2c2c2e !important; color:#fff !important; }
-    [data-testid="stRadio"] [role="radiogroup"] { background:#1c1c1e !important; border-color:#38383d !important; }
-    [data-testid="stRadio"] [role="radio"] { color:#98989d !important; }
-    [data-testid="stRadio"] [role="radio"]:hover { background:#2c2c2e !important; color:#f5f5f7 !important; }
-    [data-testid="stRadio"] [role="radio"][aria-checked="true"] { background:#2c2c2e !important; color:#fff !important; box-shadow:0 1px 3px rgba(0,0,0,.35) !important; }
-    [data-testid="stDataFrame"] { background:#0d0d0f !important; border-color:#48484d !important; }
-    [data-testid="stDataFrame"] [role="gridcell"] { background:#0d0d0f !important; color:#f5f5f7 !important; border-color:#28282c !important; }
-    [data-testid="stDataFrame"] [role="columnheader"] { background:#1c1c1e !important; color:#f5f5f7 !important; border-color:#38383d !important; }
-    [data-testid="stDialog"] > div > div { background:rgba(13,13,15,.98) !important; color:#f5f5f7 !important; border-color:#38383d !important; box-shadow:0 24px 70px rgba(0,0,0,.5) !important; }
-    .changed-teacher-chip { background:#151517; border-color:#303035; color:#e5e5ea; }
-    .ai-hero-title { color:#fff !important; }
-}
-</style>
-<style>
-
-/* -----------------------------------------------------------------------------
-   Apple 업무형 리뉴얼 v3
-   - 장식보다 작업 흐름을 우선
-   - primary action = Action Blue
-   - 카드/버튼의 무거운 그림자 제거
-   - 44px 터치 영역과 명확한 정보 계층
-   ----------------------------------------------------------------------------- */
-.app-top-safe-space { height:30px !important; }
-.app-topbar {
-    min-height:52px !important;
-    padding:4px 4px 9px !important;
-    margin:0 0 4px !important;
-    border-bottom:1px solid #e5e5ea !important;
-}
-.app-identity {
-    font-size:13px !important;
-    color:#6e6e73 !important;
-    letter-spacing:-.22px !important;
-}
-.app-identity strong { color:#1d1d1f !important; font-weight:600 !important; }
-
-/* 상단 업무 메뉴만 segmented navigation으로 사용 */
-.app-topbar [data-testid="stRadio"] { width:100% !important; }
-.app-topbar [data-testid="stRadio"] [role="radiogroup"] {
-    justify-content:flex-start !important;
-    gap:2px !important;
-    padding:3px !important;
-    background:#f5f5f7 !important;
-    border:1px solid #e0e0e0 !important;
-    border-radius:9999px !important;
-}
-.app-topbar [data-testid="stRadio"] [role="radio"] {
-    min-height:38px !important;
-    padding:0 14px !important;
-    font-size:13px !important;
-    color:#6e6e73 !important;
-    border-radius:9999px !important;
-}
-.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
-    background:#fff !important;
-    color:#1d1d1f !important;
-    font-weight:600 !important;
-    box-shadow:none !important;
-    border:1px solid #e0e0e0 !important;
-}
-.app-topbar .stButton > button {
-    min-height:40px !important;
-    font-size:13px !important;
-    padding:0 15px !important;
-    border-radius:9999px !important;
-}
-
-/* 모든 일반 버튼: 44px에 가까운 편안한 작업 영역 */
-.stButton > button,
-.stDownloadButton > button,
-.stFormSubmitButton > button {
-    min-height:42px !important;
-    padding:8px 18px !important;
-    border-radius:9999px !important;
-    border:1px solid #d2d2d7 !important;
-    background:#fff !important;
-    color:#1d1d1f !important;
-    box-shadow:none !important;
-    transition:background .12s ease, border-color .12s ease, transform .08s ease !important;
-}
-.stButton > button:hover,
-.stDownloadButton > button:hover,
-.stFormSubmitButton > button:hover {
-    background:#f5f5f7 !important;
-    border-color:#b8b8be !important;
-    box-shadow:none !important;
-    transform:none !important;
-}
-.stButton > button:active,
-.stDownloadButton > button:active,
-.stFormSubmitButton > button:active { transform:scale(.98) !important; }
-.stButton > button[kind="primary"],
-.stFormSubmitButton > button[kind="primary"] {
-    min-height:44px !important;
-    background:#0066cc !important;
-    border-color:#0066cc !important;
-    color:#fff !important;
-    font-weight:600 !important;
-}
-.stButton > button[kind="primary"]:hover,
-.stFormSubmitButton > button[kind="primary"]:hover {
-    background:#0071e3 !important;
-    border-color:#0071e3 !important;
-}
-
-/* 일반 보기 방식 radio는 업무메뉴와 다른 문법으로 */
-[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"] {
-    background:transparent !important;
-    border:0 !important;
-    padding:0 !important;
-    gap:8px !important;
-    overflow:visible !important;
-}
-[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"] {
-    min-height:38px !important;
-    padding:7px 14px !important;
-    border:1px solid #e0e0e0 !important;
-    border-radius:9999px !important;
-    background:#fff !important;
-    color:#6e6e73 !important;
-}
-[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"] {
-    background:#f5f5f7 !important;
-    color:#1d1d1f !important;
-    border-color:#c7c7cc !important;
-    font-weight:600 !important;
-    box-shadow:none !important;
-}
-
-/* 페이지 헤더: 업무 제목 + 설명을 더 조용하게 */
-.apple-page-head {
-    padding:18px 4px 14px !important;
-    margin:0 0 10px !important;
-    border-bottom:1px solid #f0f0f0 !important;
-}
-.apple-page-head h1 {
-    font-size:32px !important;
-    line-height:1.12 !important;
-    font-weight:600 !important;
-    letter-spacing:-.8px !important;
-}
-.apple-page-head p {
-    margin-top:6px !important;
-    font-size:14px !important;
-    line-height:1.5 !important;
-    color:#6e6e73 !important;
-}
-.apple-section-label {
-    font-size:12px !important;
-    color:#6e6e73 !important;
-    white-space:nowrap;
-}
-
-/* 업무 카드 / expander */
-[data-testid="stVerticalBlockBorderWrapper"],
-[data-testid="stExpander"] {
-    border:1px solid #e0e0e0 !important;
-    border-radius:18px !important;
-    box-shadow:none !important;
-    background:#fff !important;
-}
-[data-testid="stExpander"] summary {
-    min-height:50px !important;
-    padding:8px 14px !important;
-    font-size:15px !important;
-    color:#1d1d1f !important;
-}
-
-/* 입력 컨트롤: 검색/선택은 pill, 날짜도 충분한 높이 */
-[data-baseweb="input"],
-[data-baseweb="textarea"],
-[data-baseweb="select"] > div,
-[data-testid="stDateInput"] > div > div {
-    min-height:42px !important;
-    border-radius:11px !important;
-    border-color:#c7c7cc !important;
-    box-shadow:none !important;
-}
-[data-baseweb="select"] > div { min-height:42px !important; }
-
-/* 핵심 매트릭스: 얇은 선 + 충분한 행 높이 */
-.matrix-shell { margin-top:4px !important; }
-[data-testid="stDataFrame"] {
-    border:1px solid #d2d2d7 !important;
-    border-radius:14px !important;
-    box-shadow:none !important;
-    overflow:hidden !important;
-}
-[data-testid="stDataFrame"] [role="columnheader"] {
-    background:#f5f5f7 !important;
-    color:#3a3a3c !important;
-    font-size:12px !important;
-    font-weight:600 !important;
-}
-[data-testid="stDataFrame"] [role="gridcell"] {
-    background:#fff !important;
-    color:#1d1d1f !important;
-    font-size:13px !important;
-}
-
-/* 테스트 샌드박스: '안전한 작업 공간'의 시각적 계층 */
-.sandbox-title {
-    margin:2px 0 3px !important;
-    font-size:24px !important;
-    line-height:1.2 !important;
-    font-weight:600 !important;
-    letter-spacing:-.5px !important;
-}
-.sandbox-title + .apple-note {
-    margin-bottom:14px !important;
-}
-.sandbox-title ~ [data-testid="stButton"] button { min-height:44px !important; }
-.apple-note {
-    color:#6e6e73 !important;
-    font-size:13px !important;
-    line-height:1.55 !important;
-}
-.apple-note strong { color:#1d1d1f !important; font-weight:600 !important; }
-
-/* 테스트 목록/관리 결과표는 white utility surface */
-[data-testid="stDataFrame"] + div { min-height:0; }
-
-/* Dialog는 작업 집중 공간. 외부 위치/transform은 건드리지 않는다. */
-[data-testid="stDialog"] > div > div {
-    border:1px solid #d2d2d7 !important;
-    border-radius:18px !important;
-    box-shadow:0 18px 50px rgba(0,0,0,.12) !important;
-}
-[data-testid="stDialog"] .stButton > button { min-height:44px !important; }
-
-/* 모바일에서는 메뉴가 잘리지 않고 가로 스크롤 */
-@media (max-width:1100px) {
-    .app-identity { display:none !important; }
-    .app-topbar { gap:4px !important; }
-    .app-topbar [data-testid="stRadio"] [role="radio"] { padding:0 11px !important; }
-}
-@media (max-width:700px) {
-    .block-container { padding-left:10px !important; padding-right:10px !important; }
-    .apple-page-head { padding-top:14px !important; }
-    .apple-page-head h1 { font-size:27px !important; }
-    .apple-page-head { display:block !important; }
-    .apple-section-label { margin-top:8px; }
-}
-
-/* 주간 작업 Dialog의 검색 범위/slider는 레이아웃 점프 없이 고정 높이로 표시 */
-.weekly-search-range {
-    margin:10px 0 2px !important;
-    padding:8px 0 0 !important;
-    color:var(--apple-ink) !important;
-    font-size:13px !important;
-    line-height:20px !important;
-}
-.weekly-search-range span { color:var(--apple-muted) !important; font-weight:400 !important; }
-[data-testid="stDialog"] [data-testid="stSlider"] {
-    margin:0 !important;
-    padding:4px 0 0 !important;
-}
-[data-testid="stDialog"] [data-testid="stSlider"] > label {
-    position:static !important;
-    display:block !important;
-    margin:0 0 6px !important;
-    padding:0 !important;
-    line-height:20px !important;
-    min-height:20px !important;
-}
-[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"] {
-    min-height:36px !important;
-    margin:0 !important;
-}
-[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"] > div {
-    line-height:normal !important;
-}
-
-/* -----------------------------------------------------------------------------
-   Apple Dark UI refinement
-   - 브라우저/OS가 다크 모드일 때 전체 업무 UI를 같은 색상 토큰으로 전환
-   - 순수 검정보다 눈부심을 줄인 #1c1c1e 계열 surface 사용
-   - 매트릭스의 셀 경계/헤더/상태 표시를 별도로 보정
-   ----------------------------------------------------------------------------- */
-@media (prefers-color-scheme: dark) {
-    :root {
-        --apple-bg:#000000;
-        --apple-surface:#1c1c1e;
-        --apple-surface-soft:#2c2c2e;
-        --apple-surface-pearl:#232326;
-        --apple-ink:#f5f5f7;
-        --apple-ink-2:#e5e5ea;
-        --apple-muted:#a1a1a6;
-        --apple-muted-2:#8e8e93;
-        --apple-line:#48484a;
-        --apple-line-soft:#38383a;
-        --apple-blue:#2997ff;
-        --apple-blue-hover:#47a6ff;
-        --apple-focus:rgba(41,151,255,.32);
-    }
-
-    html, body,
-    [data-testid="stAppViewContainer"],
-    [data-testid="stApp"],
-    [data-testid="stMain"],
-    [data-testid="stMainBlockContainer"] {
-        background:var(--apple-bg) !important;
-        color:var(--apple-ink) !important;
-    }
-
-    [data-testid="stHeader"] {
-        background:rgba(0,0,0,.86) !important;
-        border-bottom:1px solid #2c2c2e !important;
-    }
-
-    [data-testid="stHeader"] *,
-    [data-testid="stMain"] *,
-    [data-testid="stAppViewContainer"] * {
-        scrollbar-color:#48484a transparent;
-    }
-
-    /* Streamlit 기본 텍스트 계층 */
-    h1,h2,h3,h4,h5,h6,
-    p, label, span, div, li, td, th {
-        color:inherit;
-    }
-    [data-testid="stCaptionContainer"],
-    .stCaption,
-    .apple-page-head p,
-    .apple-section-label,
-    .apple-note,
-    .compact-nav,
-    .tool-section-title {
-        color:var(--apple-muted) !important;
-    }
-
-    .apple-page-head {
-        border-bottom-color:#2c2c2e !important;
-    }
-    .apple-page-head h1,
-    .sandbox-title,
-    .ai-hero-title {
-        color:var(--apple-ink) !important;
-    }
-    .apple-note strong,
-    .app-identity strong {
-        color:var(--apple-ink) !important;
-    }
-
-    .weekly-search-range { color:#f5f5f7 !important; }
-    .weekly-search-range span { color:#a1a1a6 !important; }
-    [data-testid="stDialog"] [data-testid="stSlider"] > label { color:#f5f5f7 !important; }
-
-    /* 상단 업무 메뉴 */
-    .app-topbar {
-        border-bottom-color:#2c2c2e !important;
-    }
-    .app-identity {
-        color:var(--apple-muted) !important;
-    }
-    .app-topbar [data-testid="stRadio"] [role="radiogroup"] {
-        background:#1c1c1e !important;
-        border-color:#38383a !important;
-    }
-    .app-topbar [data-testid="stRadio"] [role="radio"] {
-        color:#a1a1a6 !important;
-    }
-    .app-topbar [data-testid="stRadio"] [role="radio"]:hover {
-        background:#2c2c2e !important;
-        color:#f5f5f7 !important;
-    }
-    .app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
-        background:#3a3a3c !important;
-        color:#fff !important;
-        border-color:#48484a !important;
-    }
-
-    /* 일반 버튼 */
-    .stButton > button,
-    .stDownloadButton > button,
-    .stFormSubmitButton > button {
-        background:#1c1c1e !important;
-        color:#f5f5f7 !important;
-        border-color:#48484a !important;
-    }
-    .stButton > button:hover,
-    .stDownloadButton > button:hover,
-    .stFormSubmitButton > button:hover {
-        background:#2c2c2e !important;
-        border-color:#636366 !important;
-    }
-    .stButton > button[kind="primary"],
-    .stFormSubmitButton > button[kind="primary"] {
-        background:var(--apple-blue) !important;
-        color:#fff !important;
-        border-color:var(--apple-blue) !important;
-    }
-    .stButton > button[kind="primary"]:hover,
-    .stFormSubmitButton > button[kind="primary"]:hover {
-        background:var(--apple-blue-hover) !important;
-        border-color:var(--apple-blue-hover) !important;
-    }
-
-    /* 입력/선택 */
-    [data-baseweb="input"],
-    [data-baseweb="textarea"],
-    [data-baseweb="select"] > div,
-    [data-testid="stDateInput"] > div > div,
-    [data-testid="stNumberInput"] > div > div,
-    input, textarea {
-        background:#1c1c1e !important;
-        color:#f5f5f7 !important;
-        border-color:#48484a !important;
-        caret-color:#2997ff !important;
-    }
-    input::placeholder,
-    textarea::placeholder {
-        color:#8e8e93 !important;
-    }
-    [data-baseweb="select"] *,
-    [data-baseweb="input"] *,
-    [data-baseweb="textarea"] * {
-        color:#f5f5f7 !important;
-    }
-    [data-baseweb="select"] > div:hover {
-        border-color:#636366 !important;
-    }
-    [data-baseweb="input"]:focus-within,
-    [data-baseweb="textarea"]:focus-within,
-    [data-baseweb="select"]:focus-within {
-        border-color:#2997ff !important;
-        box-shadow:0 0 0 3px rgba(41,151,255,.25) !important;
-    }
-
-    /* 팝업/메뉴/캘린더 등 BaseWeb overlay */
-    [data-baseweb="popover"],
-    [data-baseweb="menu"],
-    [role="listbox"],
-    [data-baseweb="calendar"],
-    [data-baseweb="modal"] {
-        background:#1c1c1e !important;
-        color:#f5f5f7 !important;
-        border-color:#48484a !important;
-    }
-    [role="option"]:hover,
-    [role="menuitem"]:hover {
-        background:#2c2c2e !important;
-    }
-
-    /* 카드 / expander */
-    [data-testid="stVerticalBlockBorderWrapper"],
-    [data-testid="stExpander"] {
-        background:#1c1c1e !important;
-        border-color:#38383a !important;
-        color:#f5f5f7 !important;
-    }
-    [data-testid="stExpander"] summary {
-        color:#f5f5f7 !important;
-    }
-    [data-testid="stExpander"] summary:hover {
-        background:#232326 !important;
-    }
-    hr, [data-testid="stDivider"] {
-        border-color:#38383a !important;
-    }
-
-    /* 핵심 주간 매트릭스 */
-    [data-testid="stDataFrame"] {
-        background:#1c1c1e !important;
-        border-color:#48484a !important;
-    }
-    [data-testid="stDataFrame"] [role="columnheader"] {
-        background:#2c2c2e !important;
-        color:#f5f5f7 !important;
-        border-color:#48484a !important;
-    }
-    [data-testid="stDataFrame"] [role="gridcell"] {
-        background:#1c1c1e !important;
-        color:#f5f5f7 !important;
-        border-color:#38383a !important;
-    }
-    [data-testid="stDataFrame"] [role="gridcell"]:hover {
-        background:#252528 !important;
-    }
-
-    /* 변경 교사 chip / 상태성 UI */
-    .changed-teacher-chip {
-        background:#232326 !important;
-        color:#e5e5ea !important;
-        border-color:#38383a !important;
-    }
-
-    /* Dialog */
-    [data-testid="stDialog"] {
-        color:#f5f5f7 !important;
-    }
-    [data-testid="stDialog"] > div > div {
-        background:#1c1c1e !important;
-        color:#f5f5f7 !important;
-        border-color:#48484a !important;
-        box-shadow:0 24px 70px rgba(0,0,0,.58) !important;
-    }
-    [data-testid="stDialog"] .stButton > button {
-        background:#2c2c2e !important;
-        color:#f5f5f7 !important;
-        border-color:#48484a !important;
-    }
-    [data-testid="stDialog"] .stButton > button[kind="primary"] {
-        background:#2997ff !important;
-        color:#fff !important;
-        border-color:#2997ff !important;
-    }
-
-    /* 알림/메시지 컨테이너는 원래 의미를 유지하되 다크 surface로 */
-    [data-testid="stAlert"] {
-        background:#1c1c1e !important;
-        color:#f5f5f7 !important;
-        border-color:#48484a !important;
-    }
-
-    /* 링크/포커스 */
-    a {
-        color:#2997ff !important;
-    }
-    *:focus-visible {
-        outline-color:#2997ff !important;
-    }
-}
-
-/* 선택한 폰트는 실제 텍스트 컨트롤에만 적용.
-   중요: Streamlit/BaseWeb의 Material Symbols 아이콘까지 font-family를 덮어쓰면
-   keyboard_arrow_down / arrow_right 같은 아이콘 이름이 글자로 노출되는 버그가 생긴다. */
-html, body,
-button, input, textarea, select {
-    font-family:var(--app-font, "SF Pro Text", "SF Pro Display", -apple-system,
-                 BlinkMacSystemFont, "Inter", "Apple SD Gothic Neo",
-                 "Noto Sans KR", sans-serif) !important;
-}
+/* =====================================================================
+   SCHOOL OPS UI — Apple Workbench
+   원칙: 업무 우선 / 정보 밀도는 유지 / 장식은 최소화 / 한 화면 한 목적
+   ===================================================================== */
+:root{
+ --ui-bg:#ffffff;--ui-surface:#ffffff;--ui-soft:#f5f5f7;--ui-soft-2:#fafafc;
+ --ui-text:#1d1d1f;--ui-text-2:#3a3a3c;--ui-muted:#6e6e73;--ui-muted-2:#86868b;
+ --ui-line:#d2d2d7;--ui-line-soft:#e5e5ea;--ui-accent:#0066cc;--ui-accent-hover:#0071e3;
+ --ui-focus:rgba(0,102,204,.20);--ui-success:#1b7f3a;--ui-danger:#c62828;
+ --ui-radius-sm:8px;--ui-radius-md:12px;--ui-radius-lg:16px;--ui-pill:999px;
+}
+html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"]{background:var(--ui-bg)!important;color:var(--ui-text)!important}
+body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+/* 텍스트에만 앱 폰트 적용. Streamlit 아이콘 폰트는 건드리지 않는다. */
+p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"]{font-family:var(--app-font,"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif)!important}
+[class*="material-symbols"],[data-testid="stIconMaterial"]{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-style:normal!important}
+[data-testid="stHeader"]{background:rgba(255,255,255,.88)!important;border-bottom:1px solid var(--ui-line-soft)!important;backdrop-filter:saturate(150%) blur(16px)}
+[data-testid="stDecoration"]{display:none!important}
+.block-container{width:100%!important;max-width:none!important;padding:0 clamp(16px,2.2vw,42px) 36px!important}
+.app-top-safe-space{height:30px;width:100%}
+/* ---------- app shell ---------- */
+.app-topbar{position:relative;z-index:3;display:flex;align-items:center;gap:14px;min-height:54px;padding:4px 0 8px;margin:0 0 14px;border-bottom:1px solid var(--ui-line-soft)}
+.app-identity{white-space:nowrap;color:var(--ui-muted);font-size:12px;line-height:1.25}.app-identity strong{color:var(--ui-text);font-weight:600}
+.app-topbar .stButton>button{min-height:34px!important;padding:6px 13px!important;border-radius:var(--ui-pill)!important;font-size:12px!important}
+.app-topbar [data-testid="stRadio"] [role="radiogroup"]{display:flex!important;align-items:center!important;gap:2px!important;width:100%!important;padding:2px!important;background:var(--ui-soft)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-pill)!important;overflow-x:auto!important;scrollbar-width:none}
+.app-topbar [data-testid="stRadio"] [role="radiogroup"]::-webkit-scrollbar{display:none}
+.app-topbar [data-testid="stRadio"] [role="radio"]{flex:0 0 auto!important;min-height:34px!important;padding:0 14px!important;border-radius:var(--ui-pill)!important;color:var(--ui-muted)!important;font-size:13px!important;font-weight:500!important;background:transparent!important;border:0!important}
+.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-weight:600!important;box-shadow:0 1px 3px rgba(0,0,0,.08)!important}
+.app-topbar [data-testid="stRadio"] [role="radio"]>div:first-child{display:none!important}
+.app-topbar [data-testid="stSelectbox"]>div>div{min-height:34px!important;border-radius:var(--ui-pill)!important;background:var(--ui-soft)!important;border-color:var(--ui-line-soft)!important}
+/* ---------- page header ---------- */
+.work-page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:8px 2px 16px;margin:0 0 18px;border-bottom:1px solid var(--ui-line-soft)}
+.work-page-head h1{margin:0!important;font-size:30px!important;line-height:1.12!important;font-weight:600!important;letter-spacing:-.04em!important;color:var(--ui-text)!important}
+.work-page-head p{margin:6px 0 0!important;font-size:13px!important;line-height:1.45!important;color:var(--ui-muted)!important}
+.work-page-meta{font-size:12px;color:var(--ui-muted);white-space:nowrap;padding-bottom:3px}
+/* ---------- sections / cards ---------- */
+.work-section{margin:0 0 24px}.work-section-title{font-size:14px;font-weight:600;color:var(--ui-text);margin:0 0 8px 2px}.work-section-note{font-size:12px;color:var(--ui-muted);margin:-3px 0 10px 2px}
+[data-testid="stVerticalBlockBorderWrapper"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-lg)!important;box-shadow:none!important}
+[data-testid="stExpander"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-md)!important;box-shadow:none!important;overflow:hidden!important}
+[data-testid="stExpander"] summary{min-height:42px!important;padding:6px 12px!important;color:var(--ui-text)!important;font-size:13px!important;font-weight:600!important}
+[data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}
+/* ---------- typography ---------- */
+h1,h2,h3,h4,h5,h6{color:var(--ui-text)!important}h2{font-size:22px!important;font-weight:600!important;letter-spacing:-.025em!important}h3{font-size:18px!important;font-weight:600!important;letter-spacing:-.02em!important}h4{font-size:15px!important;font-weight:600!important}
+[data-testid="stCaptionContainer"],.stCaption{color:var(--ui-muted)!important;font-size:12px!important;line-height:1.45!important}
+/* ---------- controls ---------- */
+.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:40px!important;padding:7px 16px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;box-shadow:none!important;transform:none!important;transition:background .12s ease,border-color .12s ease!important;font-size:13px!important;font-weight:500!important}
+.stButton>button:hover,.stDownloadButton>button:hover,.stFormSubmitButton>button:hover{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;box-shadow:none!important}
+.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{background:var(--ui-accent)!important;border-color:var(--ui-accent)!important;color:#fff!important;font-weight:600!important}
+.stButton>button[kind="primary"]:hover,.stFormSubmitButton>button[kind="primary"]:hover{background:var(--ui-accent-hover)!important;border-color:var(--ui-accent-hover)!important}
+.stButton>button:focus-visible,.stDownloadButton>button:focus-visible,.stFormSubmitButton>button:focus-visible{outline:3px solid var(--ui-focus)!important;outline-offset:1px}
+[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{min-height:40px!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-sm)!important;box-shadow:none!important}
+[data-baseweb="input"] input,[data-baseweb="textarea"] textarea,[data-baseweb="select"] input{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-text)!important;background:transparent!important;font-size:13px!important}
+input::placeholder,textarea::placeholder{color:var(--ui-muted-2)!important}
+[data-baseweb="input"]:focus-within,[data-baseweb="textarea"]:focus-within,[data-baseweb="select"]:focus-within{border-color:var(--ui-accent)!important;box-shadow:0 0 0 3px var(--ui-focus)!important}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{display:flex!important;gap:6px!important;padding:0!important;background:transparent!important;border:0!important;overflow:visible!important;flex-wrap:wrap}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;padding:6px 13px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text-2)!important;font-size:13px!important;font-weight:500!important}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"]{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;color:var(--ui-text)!important;font-weight:600!important}
+/* ---------- timetable ---------- */
+.swap-result-summary{margin:8px 0 10px;padding:8px 12px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft);font-size:12px;color:var(--ui-muted)}.swap-result-summary strong{color:var(--ui-text);font-weight:600}
+.matrix-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 9px}.matrix-title{font-size:14px;font-weight:600;color:var(--ui-text)}.matrix-subtitle{font-size:12px;color:var(--ui-muted)}
+.matrix-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--ui-muted);margin:0 0 8px 2px}.matrix-legend span{white-space:nowrap}
+[data-testid="stDataFrame"]{border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-md)!important;overflow:hidden!important;background:var(--ui-surface)!important;box-shadow:none!important}
+[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important;font-size:12px!important;font-weight:600!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
+[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-size:13px!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
+/* ---------- changed teachers ---------- */
+.changed-teacher-selector{display:flex;align-items:center;gap:8px;margin:0 0 10px}.changed-teacher-chip{display:inline-flex;align-items:center;padding:7px 10px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft-2);color:var(--ui-text);font-size:12px}
+/* ---------- notes / states ---------- */
+.apple-note,.work-note{padding:10px 12px;margin:0 0 12px;background:var(--ui-soft-2);border:1px solid var(--ui-line-soft);border-radius:10px;color:var(--ui-muted);font-size:12px;line-height:1.5}.apple-note strong,.work-note strong{color:var(--ui-text)}
+.sandbox-title{margin:0 0 4px!important;font-size:24px!important;line-height:1.2!important;font-weight:600!important;letter-spacing:-.045em!important;color:var(--ui-text)!important}
+/* ---------- dialog ---------- */
+[data-testid="stDialog"]>div>div{max-height:calc(100vh - 5rem)!important;overflow-y:auto!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:18px!important;box-shadow:0 18px 48px rgba(0,0,0,.14)!important}
+[data-testid="stDialog"] [data-testid="stVerticalBlockBorderWrapper"]{border:0!important;background:transparent!important}
+[data-testid="stDialog"] [data-testid="stSlider"]{margin:0!important;padding:3px 0!important}[data-testid="stDialog"] [data-testid="stSlider"]>label{display:none!important}
+[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"]{min-height:34px!important;margin:0!important}
+/* ---------- tabs / links ---------- */
+[data-baseweb="tab-list"]{gap:4px!important;border-bottom:1px solid var(--ui-line-soft)!important}[data-baseweb="tab"]{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-muted)!important}[data-baseweb="tab"][aria-selected="true"]{color:var(--ui-text)!important}
+a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var(--ui-line-soft)!important}
+/* ---------- utility ---------- */
+[data-testid="stMetric"]{padding:8px 0!important}.ui-kpi-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px}.ui-kpi{padding:13px 15px;border:1px solid var(--ui-line-soft);border-radius:12px;background:var(--ui-surface)}.ui-kpi-label{font-size:11px;color:var(--ui-muted)}.ui-kpi-value{margin-top:4px;font-size:21px;font-weight:600;color:var(--ui-text)}
+@media(max-width:900px){.block-container{padding-left:12px!important;padding-right:12px!important}.app-top-safe-space{height:24px}.work-page-head{display:block}.work-page-meta{margin-top:8px}.ui-kpi-row{grid-template-columns:1fr}.app-topbar{overflow:hidden}}
+@media(prefers-color-scheme:dark){:root{--ui-bg:#000;--ui-surface:#1c1c1e;--ui-soft:#2c2c2e;--ui-soft-2:#232326;--ui-text:#f5f5f7;--ui-text-2:#e5e5ea;--ui-muted:#a1a1a6;--ui-muted-2:#8e8e93;--ui-line:#48484a;--ui-line-soft:#38383a;--ui-accent:#2997ff;--ui-accent-hover:#47a6ff;--ui-focus:rgba(41,151,255,.30)}[data-testid="stHeader"]{background:rgba(0,0,0,.76)!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button,[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"]{background:var(--ui-surface)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important}[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important}[data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}[data-testid="stDialog"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}.ui-kpi{background:var(--ui-surface)!important;border-color:var(--ui-line-soft)!important}}
 </style>
 """, unsafe_allow_html=True)
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.6-Apple-CSS-Clean"
 
 # ==========================================================================================
 # UI 폰트 설정
@@ -2875,118 +2074,97 @@ def get_single_lesson_1to1_candidates(
     teacher: str, orig_date_str: str, orig_period: int,
     orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0, use_test: bool = False
 ) -> pd.DataFrame:
-    """선택한 원본 수업 한 건만 대상으로 동일 학급 1:1 교환 후보를 찾는다.
-
-    테스트 모드에서는
-    - 원본 수업이 이미 테스트 변경에 사용되었으면 다시 후보를 만들지 않고,
-    - 목표 수업도 이미 테스트 변경에 사용된 슬롯이면 후보에서 제외한다.
-    """
+    """선택 수업의 실제 1:1 맞교환 가능 수업을 검색 기간 전체에서 전수 탐색한다."""
     source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
+    source_str = source_date.strftime("%Y-%m-%d")
     source_day = WEEKDAY_KR[source_date.weekday()]
-    # 선택일 당일을 포함한 미래 평일을 검색한다.
-    # 같은 날에는 다른 교시(예: 1교시 ↔ 4교시)도 후보가 될 수 있다.
+    source_period = safe_int(orig_period)
+    source_class = str(orig_class).strip()
+    source_subject = str(orig_subject).strip()
+    teacher = str(teacher).strip()
+
     monday = source_date - timedelta(days=source_date.weekday())
     friday = monday + timedelta(days=4)
+    end_date = friday + timedelta(days=max(0, int(future_days)))
     search_dates = [
         source_date + timedelta(days=i)
-        for i in range((friday - source_date).days + 1)
+        for i in range((end_date - source_date).days + 1)
         if (source_date + timedelta(days=i)).weekday() < 5
     ]
-    if future_days > 0:
-        last_weekday = friday
-        search_dates.extend(
-            last_weekday + timedelta(days=i)
-            for i in range(1, future_days + 1)
-            if (last_weekday + timedelta(days=i)).weekday() < 5
-        )
 
     ver = version or st.session_state.get("_data_version", 0)
-    source_str = source_date.strftime("%Y-%m-%d")
     source_tt = get_effective_timetable_for_date(source_str, ver, use_test=use_test)
-    if source_tt.empty:
+    if source_tt is None or source_tt.empty:
         return pd.DataFrame()
-
-    # 변경된 슬롯도 현재 적용 시간표의 실제 상태이므로 그대로 후보 계산에 포함한다.
-    # 과거에 변경되었는지 여부가 아니라, 현재 시점의 교사/날짜/교시 상태를 기준으로 판정한다.
     source_match = source_tt[
-        (source_tt["교사명"] == str(teacher).strip())
-        & (source_tt["교시"] == safe_int(orig_period))
-        & (source_tt["학급"] == str(orig_class).strip())
-        & (source_tt["과목"] == str(orig_subject).strip())
+        (source_tt["교사명"].astype(str).str.strip() == teacher)
+        & (source_tt["교시"].apply(safe_int) == source_period)
+        & (source_tt["학급"].astype(str).str.strip() == source_class)
+        & (source_tt["과목"].astype(str).str.strip() == source_subject)
     ]
     if source_match.empty:
         return pd.DataFrame()
 
-    results = []
-    seen = set()
-    source_group = subject_group(orig_subject)
+    source_group = subject_group(source_subject)
+    source_grade = grade_of(source_class)
+    results, seen = [], set()
 
     for target_date in search_dates:
         target_str = target_date.strftime("%Y-%m-%d")
-        # 선택한 당일은 포함한다.
-        # 당일에는 같은 교시뿐 아니라 다른 교시의 수업도 1:1 교환 후보가 될 수 있다.
-        # 선택일 이전 날짜만 제외하고, 선택일 이후 날짜는 기존 미래 검색 범위를 유지한다.
-        if target_str < source_str:
-            continue
         target_day = WEEKDAY_KR[target_date.weekday()]
         target_tt = get_effective_timetable_for_date(target_str, ver, use_test=use_test)
-        if target_tt.empty:
+        if target_tt is None or target_tt.empty:
             continue
-
-        # 당일: 1교시 → 4교시처럼 서로 다른 교시도 허용.
-        # 이후 날짜: 기존 동작을 유지해 원본과 같은 교시를 검색한다.
-        target_periods = (
-            list(range(1, PERIODS_PER_DAY.get(target_day, MAX_PERIOD) + 1))
-            if target_str == source_str else [orig_period]
-        )
-
-        for target_period in target_periods:
-            # A 교사가 목표 슬롯에서 공강이어야 상대 수업을 받을 수 있다.
+        max_period = PERIODS_PER_DAY.get(target_day, MAX_PERIOD)
+        for target_period in range(1, max_period + 1):
+            if target_str == source_str and target_period == source_period:
+                continue
             if not is_free(teacher, target_day, target_period, target_str, target_tt):
                 continue
-
-            candidates = target_tt[
-                (target_tt["교시"] == target_period)
-                & (target_tt["학급"] == orig_class)
-                & (target_tt["교사명"] != teacher)
-            ].drop_duplicates(subset=["교사명", "교시"])
-
+            candidates = target_tt[target_tt["교시"].apply(safe_int) == target_period]
+            candidates = candidates[candidates["교사명"].astype(str).str.strip() != teacher]
+            candidates = candidates.drop_duplicates(subset=["교사명", "학급", "과목"])
             for _, candidate in candidates.iterrows():
                 other_teacher = str(candidate["교사명"]).strip()
-                target_period = safe_int(candidate["교시"])
-                # 상대 교사는 선택한 원본 슬롯으로 이동할 수 있어야 한다.
-                key = (target_str, other_teacher, target_period)
-                if key in seen or target_period <= 0:
+                other_class = str(candidate["학급"]).strip()
+                other_subject = str(candidate["과목"]).strip()
+                if not other_teacher or not other_class or not other_subject:
                     continue
-                if target_str == source_str and target_period == safe_int(orig_period):
+                if not is_free(other_teacher, source_day, source_period, source_str, source_tt):
                     continue
-                if not is_free(teacher, target_day, target_period, target_str, target_tt):
-                    continue
-                if not is_free(other_teacher, source_day, orig_period, source_str, source_tt):
+                key = (target_str, target_period, other_teacher, other_class, other_subject)
+                if key in seen:
                     continue
                 seen.add(key)
-                score = 200
+                same_class = other_class == source_class
+                same_grade = grade_of(other_class) == source_grade
+                same_group = subject_group(other_subject) == source_group
+                reasons = ["내 공강", "상대 교사 공강"]
+                if same_class:
+                    reasons.insert(0, "동일 학급")
+                elif same_grade:
+                    reasons.insert(0, "동일 학년")
+                if same_group:
+                    reasons.append("같은 과목군")
+                score = (300 if same_class else 120 if same_grade else 0) + (40 if same_group else 0)
                 if target_str == source_str:
-                    score += 15
-                    # 당일 교시 차이가 작은 후보를 우선한다.
-                    score += max(0, 8 - abs(target_period - orig_period))
-                if subject_group(str(candidate["과목"])) == source_group:
-                    score += 40
-                if target_str[:7] == source_str[:7]:
-                    score += 10
+                    score += 20 + max(0, 8 - abs(target_period - source_period))
                 results.append({
-                    "원본일자": source_str, "원본요일": source_day, "원본교시": orig_period,
-                    "원본학급": orig_class, "원본과목": orig_subject,
+                    "원본일자": source_str, "원본요일": source_day, "원본교시": source_period,
+                    "원본학급": source_class, "원본과목": source_subject,
                     "이동희망일": target_str, "이동요일": target_day, "이동희망교시": target_period,
-                    "상대교사": other_teacher,
-                    "상대학급": str(candidate["학급"]), "상대과목": str(candidate["과목"]),
-                    "상대수업": f"{candidate['학급']} {candidate['과목']}",
-                    "동일학급": "🏆", "동학년": "", "점수": score
+                    "상대교사": other_teacher, "상대학급": other_class, "상대과목": other_subject,
+                    "상대수업": f"{other_class} {other_subject}",
+                    "동일학급": "🏆" if same_class else "",
+                    "동학년": "동일 학년" if same_grade and not same_class else "",
+                    "교환가능사유": " · ".join(reasons), "점수": score,
                 })
-
+    if not results:
+        return pd.DataFrame(columns=["원본일자","원본요일","원본교시","원본학급","원본과목","이동희망일","이동요일","이동희망교시","상대교사","상대학급","상대과목","상대수업","동일학급","동학년","교환가능사유","점수"])
     return pd.DataFrame(results).sort_values(
-        ["점수", "이동희망일", "상대교사"], ascending=[False, True, True]
-    ).reset_index(drop=True) if results else pd.DataFrame()
+        ["동일학급","점수","이동희망일","이동희망교시","상대교사","상대학급"],
+        ascending=[False,False,True,True,True,True], kind="stable"
+    ).reset_index(drop=True)
 
 @st.cache_data(show_spinner=False, ttl=180)
 def get_single_lesson_linked_cycles(
@@ -3431,8 +2609,15 @@ def _filter_current_swap_candidates(df, lesson, *, use_test=False):
                & (te["교시"].apply(safe_int) == tp)
                & (te["학급"].astype(str).str.strip() == tc)
                & (te["과목"].astype(str).str.strip() == ts)]
-        if not m.empty:
-            valid_rows.append(idx)
+        if m.empty:
+            continue
+        # 캐시 결과가 오래된 경우에도 실제 교환 가능 조건을 마지막으로 재검증한다.
+        target_day = WEEKDAY_KR[datetime.strptime(td, "%Y-%m-%d").weekday()]
+        if not is_free(source_teacher, target_day, tp, td, te):
+            continue
+        if not is_free(tt, WEEKDAY_KR[datetime.strptime(source_date, "%Y-%m-%d").weekday()], source_period, source_date, source_e):
+            continue
+        valid_rows.append(idx)
     return df.loc[valid_rows].reset_index(drop=True)
 
 
@@ -3598,16 +2783,33 @@ def _weekly_action_dialog():
         if df_swap.empty:
             st.info("현재 조건에서 가능한 1:1 맞교환 위치가 없습니다.")
         else:
-            st.caption(f"가능한 1:1 교환 후보 {len(df_swap)}건 · 동일 학급을 우선 검색했습니다.")
-            shortlist = df_swap.head(12).copy()
+            same_df = df_swap[df_swap["동일학급"].astype(str).str.strip() == "🏆"].copy()
+            other_df = df_swap[df_swap["동일학급"].astype(str).str.strip() != "🏆"].copy()
+            st.markdown(
+                f'<div class="swap-result-summary"><strong>{len(df_swap)}개</strong> 교환 가능 · <strong>{len(same_df)}개</strong> 동일 학급 · <strong>{len(other_df)}개</strong> 다른 학급</div>',
+                unsafe_allow_html=True,
+            )
+            display_rows = df_swap.copy()
+            display_rows["구분"] = display_rows["동일학급"].map(lambda x: "동일 학급" if str(x).strip() == "🏆" else "다른 학급")
+            display_rows["날짜"] = display_rows.apply(lambda r: f"{r['이동희망일']} ({r['이동요일']})", axis=1)
+            display_rows["교시"] = display_rows["이동희망교시"].apply(lambda x: f"{safe_int(x)}교시")
+            display_rows["상대 수업"] = display_rows.apply(lambda r: f"{r['상대교사']} · {r['상대학급']} · {r['상대과목']}", axis=1)
+            display_rows["가능 사유"] = display_rows["교환가능사유"]
+            display_view = display_rows[["구분","날짜","교시","상대 수업","가능 사유"]].copy()
+            st.dataframe(display_view, use_container_width=True, hide_index=True, height=min(360, 58 + len(display_view) * 35), column_config={
+                "구분": st.column_config.TextColumn("구분", width="small"),
+                "날짜": st.column_config.TextColumn("날짜", width="small"),
+                "교시": st.column_config.TextColumn("교시", width="small"),
+                "상대 수업": st.column_config.TextColumn("상대 수업", width="medium"),
+                "가능 사유": st.column_config.TextColumn("교환 가능 사유", width="large"),
+            })
             labels = [
-                f"{row['이동희망일']} ({row['이동요일']}) · {safe_int(row.get('이동희망교시', row['원본교시']))}교시 · "
-                f"{row['상대교사']} · {row['상대학급']} {row['상대과목']}"
-                for _, row in shortlist.iterrows()
+                f"{row['이동희망일']} ({row['이동요일']}) · {safe_int(row['이동희망교시'])}교시 · {row['상대교사']} · {row['상대학급']} {row['상대과목']}"
+                for _, row in df_swap.iterrows()
             ]
             dialog_instance = int(st.session_state.get("weekly_dialog_instance", 0) or 0)
-            pick_label = st.selectbox("교환할 수업", labels, key=f"weekly_dialog_swap_pick_{dialog_instance}")
-            picked = shortlist.iloc[labels.index(pick_label)]
+            pick_label = st.selectbox("교환할 수업 선택", labels, key=f"weekly_dialog_swap_pick_{dialog_instance}")
+            picked = df_swap.iloc[labels.index(pick_label)]
             st.caption(
                 f"상대 수업: **{picked['상대교사']} · {picked['이동희망일']} · "
                 f"{safe_int(picked.get('이동희망교시', picked['원본교시']))}교시 · {picked['상대학급']} · {picked['상대과목']}**"
@@ -4943,47 +4145,41 @@ def render_tools_dialog():
 
 @st.fragment
 def render_top_toolbar(visible_tabs):
-    """ID/이름/권한과 업무 메뉴를 상단 한 줄에 배치한다.
-
-    도구는 popover가 아니라 별도 dialog로 연다. 따라서 fragment 재실행이 발생해도
-    도구 창의 위치/폭이 앵커를 따라 누적 이동하지 않는다.
-    """
-    c_id, c_nav, c_tools, c_user = st.columns([1.35, 5.85, .85, .8], vertical_alignment="center")
+    """업무 중심 상단 셸. 핵심 업무 4개만 전면에 두고 관리 기능은 더보기로 묶는다."""
+    core = [t for t in ["시간표 조회", "결강·보강", "시간표 맞교환 & 변경 추천", "변경된 교사 주간표"] if t in visible_tabs]
+    secondary = [t for t in visible_tabs if t not in core]
+    c_id, c_nav, c_more, c_tools, c_user = st.columns([1.25, 5.35, 1.05, .72, .72], vertical_alignment="center")
     with c_id:
-        st.markdown(f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_user()} · {current_role()}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_role()}</div>', unsafe_allow_html=True)
     with c_nav:
         if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs:
             st.session_state.active_tab = visible_tabs[0]
-        previous_active = st.session_state.active_tab
-        nav_options = [NAV_LABELS.get(t, t) for t in visible_tabs]
-        label_to_tab = dict(zip(nav_options, visible_tabs))
-        previous_label = NAV_LABELS.get(previous_active, previous_active)
-        active_label = st.radio(
-            "업무 메뉴", nav_options, index=nav_options.index(previous_label),
-            horizontal=True, key="top_active_tab", label_visibility="collapsed"
-        )
-        active = label_to_tab.get(active_label, visible_tabs[0])
-        st.session_state.active_tab = active
-        if active != previous_active:
-            # 탭 전환은 '새 업무 화면'으로 취급한다. 직전 화면에서 선택했던
-            # 수업/팝업 상태를 그대로 두면, 새 탭을 연 직후 이전 수업 dialog가
-            # 다시 나타날 수 있다. 특히 빈 공간을 눌러 선택을 해제한 뒤 탭을
-            # 바꾸는 경우 dataframe 위젯의 내부 selection이 rerun에서 재전달될
-            # 수 있으므로, 선택값 + dialog + 후보 캐시 + widget epoch를 함께 초기화한다.
-            _clear_weekly_selection()
-            st.session_state.pop("weekly_dialog_use_test", None)
-            st.session_state.pop("weekly_dialog_title", None)
-            st.session_state.pop("weekly_dialog_instance", None)
-            st.rerun()
+        previous = st.session_state.active_tab
+        if core:
+            labels=[NAV_LABELS.get(t,t) for t in core]
+            mapping=dict(zip(labels,core))
+            selected = NAV_LABELS.get(previous,previous) if previous in core else labels[0]
+            active_label=st.radio("핵심 업무",labels,index=labels.index(selected),horizontal=True,key="top_core_nav",label_visibility="collapsed")
+            active=mapping.get(active_label,core[0])
+        else:
+            active=previous
+        if active != previous:
+            _clear_weekly_selection(); st.session_state.pop("weekly_dialog_use_test",None); st.session_state.pop("weekly_dialog_title",None); st.session_state.pop("weekly_dialog_instance",None); st.rerun()
+    with c_more:
+        if secondary:
+            sec_labels=["더보기"]+[NAV_LABELS.get(t,t) for t in secondary]
+            sec_map=dict(zip(sec_labels[1:],secondary))
+            current_sec=NAV_LABELS.get(previous,previous) if previous in secondary else "더보기"
+            picked=st.selectbox("기타 업무",sec_labels,index=sec_labels.index(current_sec),key="top_secondary_nav",label_visibility="collapsed")
+            if picked != "더보기" and sec_map.get(picked) != previous:
+                st.session_state.active_tab=sec_map[picked]; _clear_weekly_selection(); st.rerun()
     with c_tools:
-        if st.button("도구", use_container_width=True, key="top_tools_open"):
+        if st.button("···",use_container_width=True,key="top_tools_open",help="화면·출력·기타 도구"):
             render_tools_dialog()
     with c_user:
-        if st.button("로그아웃", use_container_width=True, key="top_logout"):
-            for k in list(st.session_state.keys()):
-                del st.session_state[k]
+        if st.button("↪",use_container_width=True,key="top_logout",help="로그아웃"):
+            for k in list(st.session_state.keys()): del st.session_state[k]
             st.rerun()
-
 
 if current_role() == ROLE_GUEST:
     st.title("게스트 모드")
@@ -5042,9 +4238,9 @@ PAGE_DESCRIPTIONS = {
     "📑 회원별 탭 권한 관리": "사용자별 업무 메뉴 접근 권한을 관리합니다.",
 }
 st.markdown(
-    f'<div class="apple-page-head"><div><h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
+    f'<div class="work-page-head"><div><h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
     f'<p>{PAGE_DESCRIPTIONS.get(active_tab, "학교 시간표와 결보강 업무를 관리합니다.")}</p></div>'
-    f'<div class="apple-section-label">{current_role()} · {current_name() or current_user()}</div></div>',
+    f'<div class="work-page-meta">{current_role()} · {current_name() or current_user()}</div></div>',
     unsafe_allow_html=True
 )
 
@@ -5072,11 +4268,13 @@ if "시간표 조회" in tab_map:
                 st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
         elif view == "교사별 주간":
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_week_ref")
+            st.markdown('<div class="matrix-legend"><span>↻ 교환</span><span>+ 보강</span><span>• 시간강사</span></div>', unsafe_allow_html=True)
             render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
         elif view == "학급별 주간":
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_class_ref")
+            st.markdown('<div class="matrix-legend"><span>과목명 기준 · 조회 전용</span><span>↻ 교환</span><span>+ 보강</span></div>', unsafe_allow_html=True)
             render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_class_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체학급_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_class')
@@ -5389,70 +4587,20 @@ if "시간표 변경 테스트용" in tab_map:
 # ------------------------------------------------------------------ 변경된 교사 주간표
 if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
-        # 상단 영역은 달력과 변경 교사 목록을 좌우로 나눈다.
-        # 달력은 필요한 만큼만 사용하고, 남는 가로 공간에는 변경 교사를 배치해
-        # 날짜 선택과 대상 교사 확인을 한 화면에서 끝낼 수 있도록 한다.
-        top_calendar, top_teachers = st.columns([0.42, 0.58], vertical_alignment="top")
-        with top_calendar:
-            ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
-        with top_teachers:
-            changed = get_changed_teachers_for_week(ref)
-            st.markdown(
-                f"<div style='font-size:.82rem;font-weight:650;color:#374151;margin:.05rem 0 .45rem'>"
-                f"변경 교사 <span style='color:#6b7280;font-weight:500'>{len(changed)}명</span></div>",
-                unsafe_allow_html=True,
-            )
-            if changed:
-                # 이름은 3열로 배치해 긴 한 줄 목록보다 빠르게 훑을 수 있게 한다.
-                teacher_cols = st.columns(3)
-                for i, teacher_name in enumerate(changed):
-                    with teacher_cols[i % 3]:
-                        st.markdown(
-                            f"<div style='padding:.28rem .45rem;margin:0 0 .28rem;"
-                            f"font-size:.78rem'>{teacher_name}</div>",
-                            unsafe_allow_html=True,
-                        )
-            else:
-                st.caption("이번 주차 변경 교사 없음")
-
+        ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
+        changed = get_changed_teachers_for_week(ref)
         if not changed:
-            st.info("이번 주차 변경 교사 없음")
+            st.markdown('<div class="work-note"><strong>변경된 교사가 없습니다.</strong> 선택한 주간에는 현재 시간표 변경 이력이 없습니다.</div>', unsafe_allow_html=True)
         else:
-            # 변경 교사마다 별도의 매트릭스를 만들지 않고, 한 개의 주간표에
-            # 교사별 1행씩 배치한다. 기존 방식은 교사 수만큼 표가 반복되어
-            # 화면이 길어지고, 같은 헤더가 계속 반복되어 가독성이 떨어졌다.
-            changed_week = effective_teacher_matrix(ref, st.session_state.get("_data_version", 0), use_test=False)
-            if changed_week.empty:
-                st.info("변경 교사의 주간 시간표를 표시할 데이터가 없습니다.")
+            st.markdown(f'<div class="work-section-title">이번 주 변경 교사 <span style="color:var(--ui-muted);font-weight:400">{len(changed)}명</span></div>', unsafe_allow_html=True)
+            selected_changed = st.selectbox("교사", changed, key="changed_teacher_selected", label_visibility="collapsed")
+            teacher_grid, _ = get_teacher_week_view(str(selected_changed), ref, use_test=False)
+            if teacher_grid.empty:
+                st.info("선택한 교사의 주간 시간표를 표시할 데이터가 없습니다.")
             else:
-                changed_names = {str(t).strip() for t in changed}
-                changed_week = changed_week[
-                    changed_week["교사명"].astype(str).str.strip().isin(changed_names)
-                ].copy()
-                changed_week["__order"] = changed_week["교사명"].astype(str).str.strip().map(
-                    {str(t).strip(): i for i, t in enumerate(changed)}
-                )
-                changed_week = (
-                    changed_week.sort_values("__order", kind="stable")
-                    .drop(columns="__order")
-                    .reset_index(drop=True)
-                )
-                st.caption("교사별 개별 주간표 · 🔄 교환 · 🧪 테스트교환 · 🟢 보강 · 🟡 시간강사")
-                # 변경 교사는 서로 섞지 않고, 이미지처럼 교사별 카드 안에
-                # 1~7교시를 세로로 두고 월~금 5열을 가로로 배치한다.
-                # 이렇게 하면 한 화면에서 읽기 쉽고 교사별 구분도 명확하다.
-                for idx, teacher_name in enumerate(changed):
-                    teacher_grid, _ = get_teacher_week_view(str(teacher_name), ref, use_test=False)
-                    if teacher_grid.empty:
-                        continue
-                    with st.expander(f"👤 {teacher_name}", expanded=True):
-                        render_standard_weekly_matrix(
-                            teacher_grid, ref, row_label="교시",
-                            key=f"changed_teacher_week_{idx}",
-                            title=None, use_test=False, height=286,
-                            open_dialog=False
-                        )
-
+                st.markdown(f'<div class="matrix-toolbar"><div><div class="matrix-title">{selected_changed} · 변경된 주간 시간표</div><div class="matrix-subtitle">조회 전용 · 셀을 눌러도 작업 창이 열리지 않습니다.</div></div></div>', unsafe_allow_html=True)
+                st.markdown('<div class="matrix-legend"><span>↻ 교환</span><span>+ 보강</span><span>• 시간강사</span></div>', unsafe_allow_html=True)
+                render_standard_weekly_matrix(teacher_grid, ref, row_label="교시", key="changed_teacher_week_single", title=None, use_test=False, height=310, open_dialog=False)
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
     with tab_map["📋 복무 관리 & 판단"]:
