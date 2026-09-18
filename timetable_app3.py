@@ -4959,7 +4959,10 @@ def render_salary_tab():
             key="salary_sabom_checkbox",
             help="수학연한 2년 이상의 사범계 학교 졸업 시 +1년 적용",
         )
-        st.success("💡 사범계 가산연수 적용: +1년") if st.session_state.salary_is_sabom else st.info("💡 가산연수 미적용: +0년")
+        if st.session_state.salary_is_sabom:
+            st.success("💡 사범계 가산연수 적용: +1년")
+        else:
+            st.info("💡 가산연수 미적용: +0년")
 
     with st.container(border=True):
         head1, head2 = st.columns([4, 1])
@@ -5208,7 +5211,7 @@ if not st.session_state.logged_in:
 # 교무행정 화면은 시간표 Google Sheets에 의존하지 않도록 시간표 초기화를 지연한다.
 allowed_tabs_preview = get_user_allowed_tabs()
 visible_tabs_preview = [t for t in ALL_APP_TABS if t in allowed_tabs_preview]
-# 교무행정 대분류/호봉획정 메뉴는 로그인 사용자에게 항상 탐색 가능하게 표시한다.
+# 교무 대분류/호봉획정 메뉴는 로그인 사용자에게 항상 탐색 가능하게 표시한다.
 # 권한이 없는 사용자가 실제 화면을 열면 아래 본문에서 권한 안내를 표시한다.
 if current_role() != ROLE_GUEST and "교무호봉획정" not in visible_tabs_preview:
     visible_tabs_preview.append("교무호봉획정")
@@ -5220,10 +5223,10 @@ if can_manage_ids():
 if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs_preview:
     if "교무호봉획정" in visible_tabs_preview and current_role() == ROLE_OFFICE:
         st.session_state.active_tab = "교무호봉획정"
-        st.session_state.app_category = "🏫 교무행정"
+        st.session_state.app_category = "🏫 교무"
     else:
         st.session_state.active_tab = visible_tabs_preview[0] if visible_tabs_preview else None
-        st.session_state.app_category = "📚 수업" if st.session_state.active_tab in ALL_TABS else "🏫 교무행정"
+        st.session_state.app_category = "📚 수업" if st.session_state.active_tab in ALL_TABS else "🏫 교무"
 
 if st.session_state.get("active_tab") in ALL_TABS and not init_state():
     st.error("⚠️ 시간표 초기화에 실패했습니다.")
@@ -5340,7 +5343,7 @@ def render_top_toolbar(visible_tabs):
     # 실제 세부 메뉴 접근권한은 기존 visible_tabs로 계속 제한한다.
     category_map = {
         "📚 수업": [t for t in ALL_TABS if t in visible_tabs],
-        "🏫 교무행정": OFFICE_TABS[:] if current_role() != ROLE_GUEST else [],
+        "🏫 교무": OFFICE_TABS[:] if current_role() != ROLE_GUEST else [],
     }
     available_categories = [c for c, tabs in category_map.items() if tabs]
     if not available_categories:
@@ -5348,8 +5351,8 @@ def render_top_toolbar(visible_tabs):
 
     old_active = st.session_state.get("active_tab")
     if "app_category" not in st.session_state or st.session_state.app_category not in available_categories:
-        if old_active in category_map.get("🏫 교무행정", []):
-            st.session_state.app_category = "🏫 교무행정"
+        if old_active in category_map.get("🏫 교무", []):
+            st.session_state.app_category = "🏫 교무"
         else:
             st.session_state.app_category = available_categories[0]
 
@@ -5360,24 +5363,28 @@ def render_top_toolbar(visible_tabs):
             unsafe_allow_html=True,
         )
     with top_nav:
-        previous_category = st.session_state.app_category
-        picked_category = st.radio(
-            "업무 영역",
-            available_categories,
-            index=available_categories.index(previous_category),
-            horizontal=True,
-            key="app_category_nav",
-            label_visibility="collapsed",
-        )
-        if picked_category != previous_category:
-            st.session_state.app_category = picked_category
-            sub_tabs = category_map.get(picked_category, [])
-            st.session_state.active_tab = sub_tabs[0] if sub_tabs else None
-            _clear_weekly_selection()
-            st.session_state.pop("weekly_dialog_use_test", None)
-            st.session_state.pop("weekly_dialog_title", None)
-            st.session_state.pop("weekly_dialog_instance", None)
-            st.rerun()
+        # 대분류는 radio 대신 두 개의 명시적인 버튼으로 렌더링한다.
+        # Streamlit 상단 radio CSS/폭 제약으로 "교무"가 사라지는 현상을 방지한다.
+        category_cols = st.columns(2, gap="small")
+        for category, col in zip(available_categories, category_cols):
+            with col:
+                is_active = st.session_state.app_category == category
+                if st.button(
+                    category,
+                    key=f"app_category_btn_{category}",
+                    width="stretch",
+                    type="primary" if is_active else "secondary",
+                    help="현재 선택된 업무 영역" if is_active else f"{category} 업무로 이동",
+                ):
+                    if category != st.session_state.app_category:
+                        st.session_state.app_category = category
+                        sub_tabs = category_map.get(category, [])
+                        st.session_state.active_tab = sub_tabs[0] if sub_tabs else None
+                        _clear_weekly_selection()
+                        st.session_state.pop("weekly_dialog_use_test", None)
+                        st.session_state.pop("weekly_dialog_title", None)
+                        st.session_state.pop("weekly_dialog_instance", None)
+                        st.rerun()
 
     with top_tools:
         if st.button("···", width="stretch", key="top_tools_open", help="화면·출력·기타 도구"):
