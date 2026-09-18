@@ -117,9 +117,92 @@ a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var
 </style>
 """, unsafe_allow_html=True)
 
+# ==========================================================================================
+# 5.0 WEB DESIGN RENEWAL — 업무용 제품처럼 보이게 만드는 최종 레이어
+# - 기존 업무 로직은 건드리지 않고 시각적 위계/밀도/상호작용만 재정렬한다.
+# - 목표: "표를 읽는 시간"과 "다음 행동을 찾는 시간"을 줄인다.
+# ==========================================================================================
+st.markdown(r"""
+<style>
+:root{
+ --ui-bg:#fff;--ui-surface:#fff;--ui-soft:#f5f5f7;--ui-soft-2:#fafafa;
+ --ui-text:#1d1d1f;--ui-text-2:#424245;--ui-muted:#6e6e73;--ui-muted-2:#86868b;
+ --ui-line:#d2d2d7;--ui-line-soft:#e8e8ed;--ui-accent:#0066cc;--ui-accent-hover:#0077ed;
+}
+/* 01. App shell: 상단은 "제품 내비게이션", 본문은 "업무 캔버스"로 분리 */
+.block-container{padding-top:0!important;padding-bottom:56px!important}
+.app-top-safe-space{height:30px!important}
+.app-topbar{min-height:58px!important;padding:0 0 10px!important;margin-bottom:26px!important;gap:18px!important;border-bottom:1px solid #e8e8ed!important}
+.app-identity{font-size:11px!important;color:#86868b!important;letter-spacing:-.01em!important}
+.app-identity strong{font-size:13px!important;color:#1d1d1f!important}
+.app-topbar .stButton>button{height:36px!important;min-height:36px!important;border-radius:10px!important;padding:5px 12px!important}
+.app-topbar [data-testid="stRadio"] [role="radiogroup"]{background:transparent!important;border:0!important;padding:0!important;gap:4px!important}
+.app-topbar [data-testid="stRadio"] [role="radio"]{height:36px!important;min-height:36px!important;padding:0 13px!important;border-radius:9px!important;font-size:12px!important;color:#6e6e73!important}
+.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:#f5f5f7!important;color:#1d1d1f!important;box-shadow:none!important}
+
+/* 02. Page header: 제목은 크고, 설명은 작게. 업무 메타는 오른쪽으로 고정 */
+.work-page-head{padding:0 2px 20px!important;margin-bottom:22px!important;border-bottom:0!important;align-items:center!important}
+.work-page-head h1{font-size:32px!important;line-height:1.1!important;letter-spacing:-.045em!important}
+.work-page-head p{font-size:13px!important;margin-top:7px!important;color:#86868b!important}
+.work-page-meta{font-size:11px!important;color:#86868b!important;padding:7px 10px!important;border:1px solid #e8e8ed!important;border-radius:999px!important;background:#fafafa!important}
+
+/* 03. 업무 섹션: 카드 남발 대신 얇은 구획선과 여백 */
+.work-section{margin-bottom:30px!important}
+.work-section-title{font-size:15px!important;margin-bottom:5px!important}
+.work-section-note{font-size:12px!important;color:#86868b!important}
+
+/* 04. 컨트롤: label보다 실제 선택값이 먼저 보이게 */
+[data-testid="stDateInput"] label,[data-testid="stSelectbox"] label,[data-testid="stRadio"] label,[data-testid="stTextInput"] label,[data-testid="stNumberInput"] label{font-size:11px!important;color:#6e6e73!important;font-weight:500!important;margin-bottom:5px!important}
+[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{border-color:#d2d2d7!important;border-radius:9px!important;min-height:38px!important}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{gap:5px!important}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;border-radius:9px!important;padding:5px 12px!important}
+
+/* 05. Primary / secondary action hierarchy */
+.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:38px!important;border-radius:9px!important;font-size:12px!important;padding:6px 14px!important}
+.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{border-radius:9px!important}
+
+/* 06. Matrix: 이 앱의 핵심 제품 UI. 셀은 크고, 헤더는 조용하게 */
+.matrix-toolbar{margin:0 0 8px!important}
+.matrix-title{font-size:15px!important;font-weight:600!important;letter-spacing:-.02em!important}
+.matrix-subtitle{font-size:11px!important;color:#86868b!important}
+.matrix-legend{gap:14px!important;margin:0 0 9px 2px!important;font-size:11px!important;color:#86868b!important}
+[data-testid="stDataFrame"]{border:1px solid #d2d2d7!important;border-radius:10px!important;box-shadow:none!important}
+[data-testid="stDataFrame"] [role="columnheader"]{background:#f5f5f7!important;color:#424245!important;font-size:11px!important;font-weight:600!important;border-color:#e8e8ed!important}
+[data-testid="stDataFrame"] [role="gridcell"]{font-size:12px!important;border-color:#eeeeef!important}
+
+/* 07. Search/result table: 정보의 덩어리를 "구간 → 결과"로 읽히게 */
+.swap-result-summary{margin:12px 0!important;padding:10px 13px!important;border-radius:9px!important;background:#f5f5f7!important;border-color:#e8e8ed!important}
+.swap-group-head{margin:20px 0 6px!important;padding:0!important}
+.swap-group-title{font-size:13px!important}
+.swap-group-count{border:0!important;background:#f5f5f7!important;border-radius:999px!important}
+
+/* 08. Dialog: 작업창은 좁고 선명하게. 제목/내용/행동의 3단 구조 */
+[data-testid="stDialog"]>div>div{border:1px solid #d2d2d7!important;border-radius:16px!important;box-shadow:0 16px 50px rgba(0,0,0,.12)!important}
+[data-testid="stDialog"] h1,[data-testid="stDialog"] h2,[data-testid="stDialog"] h3{letter-spacing:-.03em!important}
+[data-testid="stDialog"] .stButton>button{min-height:40px!important}
+
+/* 09. 상태 메시지: 컬러를 면적으로 쓰지 않고 얇게 사용 */
+[data-testid="stAlert"]{border-radius:9px!important;font-size:12px!important}
+.apple-note,.work-note{padding:10px 12px!important;border-radius:9px!important;background:#fafafa!important}
+.sandbox-title{font-size:28px!important;letter-spacing:-.045em!important;margin-bottom:7px!important}
+
+/* 10. 모바일/노트북: 1366px에서도 매트릭스가 답답하지 않게 */
+@media(max-width:1400px){
+ .block-container{padding-left:22px!important;padding-right:22px!important}
+ .app-topbar{gap:10px!important}
+ .app-topbar [data-testid="stRadio"] [role="radio"]{padding:0 10px!important}
+}
+@media(max-width:900px){
+ .block-container{padding-left:14px!important;padding-right:14px!important}
+ .work-page-head{display:block!important}
+ .work-page-meta{display:inline-block;margin-top:10px}
+}
+</style>
+""", unsafe_allow_html=True)
+
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
-APP_VERSION = "4.5-Apple-DeepCleanup-GSheet"
+APP_VERSION = "5.0-Apple-ProductUX-Renewal"
 
 # ==========================================================================================
 # UI 폰트 설정
@@ -4475,7 +4558,9 @@ PAGE_DESCRIPTIONS = {
     "📑 회원별 탭 권한 관리": "사용자별 업무 메뉴 접근 권한을 관리합니다.",
 }
 st.markdown(
-    f'<div class="work-page-head"><div><h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
+    f'<div class="work-page-head"><div>'
+    f'<div style="font-size:11px;color:#86868b;margin-bottom:6px;letter-spacing:.01em">{SCHOOL_NAME} · {SCHOOL_YEAR}</div>'
+    f'<h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
     f'<p>{PAGE_DESCRIPTIONS.get(active_tab, "학교 시간표와 결보강 업무를 관리합니다.")}</p></div>'
     f'<div class="work-page-meta">{current_role()} · {current_name() or current_user()}</div></div>',
     unsafe_allow_html=True
