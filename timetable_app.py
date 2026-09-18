@@ -9,21 +9,18 @@
 """
 
 import io
-import copy
 from contextlib import contextmanager
 import uuid
-import time as _time
-from datetime import date, datetime, timedelta, time
+import threading
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
-import numpy as np
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 import gspread
-from gspread.exceptions import APIError, WorksheetNotFound
+from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.page import PageMargins
@@ -35,43 +32,94 @@ st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", l
 
 st.markdown("""
 <style>
-/* CLEAN Apple DESIGN SYSTEM — single source of truth */
-:root{--ui-bg:#fff;--ui-surface:#fff;--ui-surface-2:#f5f5f7;--ui-surface-3:#fafafc;--ui-text:#1d1d1f;--ui-text-2:#3a3a3c;--ui-muted:#6e6e73;--ui-muted-2:#86868b;--ui-line:#d2d2d7;--ui-line-soft:#e5e5ea;--ui-accent:#0066cc;--ui-accent-hover:#0071e3;--ui-focus:rgba(0,102,204,.22);}
+/* =====================================================================
+   SCHOOL OPS UI — Apple Workbench
+   원칙: 업무 우선 / 정보 밀도는 유지 / 장식은 최소화 / 한 화면 한 목적
+   ===================================================================== */
+:root{
+ --ui-bg:#ffffff;--ui-surface:#ffffff;--ui-soft:#f5f5f7;--ui-soft-2:#fafafc;
+ --ui-text:#1d1d1f;--ui-text-2:#3a3a3c;--ui-muted:#6e6e73;--ui-muted-2:#86868b;
+ --ui-line:#d2d2d7;--ui-line-soft:#e5e5ea;--ui-accent:#0066cc;--ui-accent-hover:#0071e3;
+ --ui-focus:rgba(0,102,204,.20);--ui-success:#1b7f3a;--ui-danger:#c62828;
+ --ui-radius-sm:8px;--ui-radius-md:12px;--ui-radius-lg:16px;--ui-pill:999px;
+}
 html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"]{background:var(--ui-bg)!important;color:var(--ui-text)!important}
 body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-/* Selected font is limited to text-bearing elements; Streamlit icon fonts are preserved. */
-.stMarkdown,.stCaption,[data-testid="stCaptionContainer"],p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[role="radio"],[role="tab"],[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"]{font-family:var(--app-font,"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif)!important;-webkit-font-smoothing:antialiased}
+/* 텍스트에만 앱 폰트 적용. Streamlit 아이콘 폰트는 건드리지 않는다. */
+p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"]{font-family:var(--app-font,"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif)!important}
 [class*="material-symbols"],[data-testid="stIconMaterial"]{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-style:normal!important}
-[data-testid="stExpander"] summary [class*="material-symbols"],[data-testid="stExpander"] summary [data-testid="stIconMaterial"]{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-size:20px!important;line-height:1!important}
-[data-testid="stHeader"]{background:rgba(255,255,255,.82)!important;border-bottom:1px solid var(--ui-line-soft)!important;backdrop-filter:saturate(160%) blur(14px)}
+[data-testid="stHeader"]{background:rgba(255,255,255,.88)!important;border-bottom:1px solid var(--ui-line-soft)!important;backdrop-filter:saturate(150%) blur(16px)}
 [data-testid="stDecoration"]{display:none!important}
-.block-container{width:100%!important;max-width:none!important;padding:.6rem clamp(.75rem,1.15vw,1.5rem) 1.25rem!important}
-.app-top-safe-space{height:30px;width:100%;pointer-events:none}
-.app-topbar{position:relative;z-index:2;display:flex;align-items:center;gap:.55rem;width:100%;min-height:48px;padding:4px 4px 7px;margin:0 0 6px;border-bottom:1px solid var(--ui-line-soft)}
-.app-identity{white-space:nowrap;color:var(--ui-muted);font-size:13px;line-height:1.2;letter-spacing:-.1px}.app-identity strong{color:var(--ui-text);font-weight:600}.app-topbar .stButton>button{min-height:34px!important;padding:4px 12px!important;border-radius:999px!important;font-size:13px!important}
-h1,h2,h3,h4,h5,h6{color:var(--ui-text)!important;margin-top:0}h1{font-size:30px!important;font-weight:600!important;letter-spacing:-.035em!important}h2{font-size:24px!important;font-weight:600!important;letter-spacing:-.025em!important}h3{font-size:19px!important;font-weight:600!important;letter-spacing:-.02em!important}[data-testid="stCaptionContainer"],.stCaption{color:var(--ui-muted)!important}
-.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:40px!important;padding:7px 16px!important;border:1px solid var(--ui-line)!important;border-radius:999px!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;box-shadow:none!important;transform:none!important;transition:background .12s ease,border-color .12s ease!important}.stButton>button:hover,.stDownloadButton>button:hover,.stFormSubmitButton>button:hover{background:var(--ui-surface-2)!important;border-color:var(--ui-line)!important;box-shadow:none!important;transform:none!important}.stButton>button:focus-visible,.stDownloadButton>button:focus-visible,.stFormSubmitButton>button:focus-visible{outline:3px solid var(--ui-focus)!important;outline-offset:1px}.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{background:var(--ui-accent)!important;border-color:var(--ui-accent)!important;color:#fff!important;font-weight:600!important}.stButton>button[kind="primary"]:hover,.stFormSubmitButton>button[kind="primary"]:hover{background:var(--ui-accent-hover)!important;border-color:var(--ui-accent-hover)!important}
-[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{min-height:40px!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:999px!important;box-shadow:none!important}[data-baseweb="input"] input,[data-baseweb="textarea"] textarea,[data-baseweb="select"] input{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-text)!important;background:transparent!important}input::placeholder,textarea::placeholder{color:var(--ui-muted-2)!important}[data-baseweb="input"]:focus-within,[data-baseweb="textarea"]:focus-within,[data-baseweb="select"]:focus-within{border-color:var(--ui-accent)!important;box-shadow:0 0 0 3px var(--ui-focus)!important}
-.app-topbar [data-testid="stRadio"] [role="radiogroup"]{display:flex!important;align-items:center!important;gap:2px!important;width:100%!important;padding:3px!important;background:var(--ui-surface-2)!important;border:1px solid var(--ui-line-soft)!important;border-radius:999px!important;overflow-x:auto!important;scrollbar-width:none}.app-topbar [data-testid="stRadio"] [role="radiogroup"]::-webkit-scrollbar{display:none}.app-topbar [data-testid="stRadio"] [role="radio"]{flex:0 0 auto!important;min-height:34px!important;padding:0 13px!important;border-radius:999px!important;color:var(--ui-muted)!important;font-size:13px!important;font-weight:500!important}.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-weight:600!important;box-shadow:0 1px 3px rgba(0,0,0,.08)!important}.app-topbar [data-testid="stRadio"] [role="radio"]>div:first-child{display:none!important}
-[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{display:flex!important;gap:7px!important;padding:0!important;background:transparent!important;border:0!important;overflow:visible!important}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;padding:6px 13px!important;border:1px solid var(--ui-line)!important;border-radius:999px!important;background:var(--ui-surface)!important;color:var(--ui-text-2)!important;font-size:13px!important;font-weight:500!important}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"]{background:var(--ui-surface-2)!important;border-color:var(--ui-line)!important;font-weight:600!important}
-.apple-page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;padding:16px 4px 13px;margin:0 0 12px;border-bottom:1px solid var(--ui-line-soft)}.apple-page-head h1{margin:0!important;color:var(--ui-text)!important;font-family:var(--app-font,"SF Pro Display",system-ui,sans-serif)!important;font-size:32px!important;line-height:1.12!important;font-weight:600!important;letter-spacing:-0.045em!important}.apple-page-head p{margin:6px 0 0!important;color:var(--ui-muted)!important;font-size:14px!important;line-height:1.45!important}.apple-section{margin:14px 0 22px}.apple-section-label{color:var(--ui-muted)!important;font-size:12px!important;font-weight:600!important;margin:0 0 8px 2px}
-[data-testid="stVerticalBlockBorderWrapper"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:16px!important;box-shadow:none!important}[data-testid="stExpander"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:16px!important;box-shadow:none!important;overflow:hidden!important}[data-testid="stExpander"] summary{min-height:44px!important;padding:7px 12px!important;color:var(--ui-text)!important;font-size:14px!important;font-weight:600!important}[data-testid="stExpander"] summary:hover{background:var(--ui-surface-2)!important}
-.matrix-shell{margin-top:4px}[data-testid="stDataFrame"]{border:1px solid var(--ui-line)!important;border-radius:14px!important;overflow:hidden!important;background:var(--ui-surface)!important;box-shadow:none!important}[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-surface-2)!important;color:var(--ui-text-2)!important;font-size:12px!important;font-weight:600!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-size:13px!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
-.changed-teacher-chip{padding:7px 9px;margin:0 0 5px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-surface-3);color:var(--ui-text);font-size:13px}.apple-note{margin:0 0 12px;color:var(--ui-muted);font-size:13px;line-height:1.45}.apple-note strong{color:var(--ui-text)}.sandbox-title{margin:2px 0 4px!important;font-size:24px!important;line-height:1.2!important;font-weight:600!important;color:var(--ui-text)!important;letter-spacing:-0.045em!important}.compact-nav{display:flex;gap:6px;align-items:center}
-.weekly-search-range{margin:8px 0 0!important;padding:0!important;color:var(--ui-text)!important;font-size:14px!important;line-height:20px!important}.weekly-search-range span{color:var(--ui-muted)!important;font-weight:400!important}[data-testid="stDialog"] [data-testid="stSlider"]{margin:0!important;padding:4px 0!important}[data-testid="stDialog"] [data-testid="stSlider"]>label{display:none!important}[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"]{min-height:34px!important;margin:0!important}
-[data-testid="stDialog"]>div>div{max-height:calc(100vh - 5rem)!important;overflow-y:auto!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:18px!important;box-shadow:0 18px 48px rgba(0,0,0,.16)!important}[data-testid="stDialog"] [data-testid="stVerticalBlockBorderWrapper"]{border:0!important;background:transparent!important}
-a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var(--ui-line-soft)!important}.ai-hero-kicker{color:var(--ui-muted);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}.ai-hero-title{margin:.5rem 0 .65rem;font-size:clamp(2.8rem,6vw,5.6rem);line-height:.98;font-weight:600;letter-spacing:-0.06em;color:var(--ui-text)}.ai-prompt-glow,.ai-prompt-glow:after{box-shadow:none!important;background:none!important}
+.block-container{width:100%!important;max-width:none!important;padding:0 clamp(16px,2.2vw,42px) 36px!important}
+.app-top-safe-space{height:30px;width:100%}
+/* ---------- app shell ---------- */
+.app-topbar{position:relative;z-index:3;display:flex;align-items:center;gap:14px;min-height:54px;padding:4px 0 8px;margin:0 0 14px;border-bottom:1px solid var(--ui-line-soft)}
+.app-identity{white-space:nowrap;color:var(--ui-muted);font-size:12px;line-height:1.25}.app-identity strong{color:var(--ui-text);font-weight:600}
+.app-topbar .stButton>button{min-height:34px!important;padding:6px 13px!important;border-radius:var(--ui-pill)!important;font-size:12px!important}
+.app-topbar [data-testid="stRadio"] [role="radiogroup"]{display:flex!important;align-items:center!important;gap:2px!important;width:100%!important;padding:2px!important;background:var(--ui-soft)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-pill)!important;overflow-x:auto!important;scrollbar-width:none}
+.app-topbar [data-testid="stRadio"] [role="radiogroup"]::-webkit-scrollbar{display:none}
+.app-topbar [data-testid="stRadio"] [role="radio"]{flex:0 0 auto!important;min-height:34px!important;padding:0 14px!important;border-radius:var(--ui-pill)!important;color:var(--ui-muted)!important;font-size:13px!important;font-weight:500!important;background:transparent!important;border:0!important}
+.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-weight:600!important;box-shadow:0 1px 3px rgba(0,0,0,.08)!important}
+.app-topbar [data-testid="stRadio"] [role="radio"]>div:first-child{display:none!important}
+.app-topbar [data-testid="stSelectbox"]>div>div{min-height:34px!important;border-radius:var(--ui-pill)!important;background:var(--ui-soft)!important;border-color:var(--ui-line-soft)!important}
+/* ---------- page header ---------- */
+.work-page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:8px 2px 16px;margin:0 0 18px;border-bottom:1px solid var(--ui-line-soft)}
+.work-page-head h1{margin:0!important;font-size:30px!important;line-height:1.12!important;font-weight:600!important;letter-spacing:-.04em!important;color:var(--ui-text)!important}
+.work-page-head p{margin:6px 0 0!important;font-size:13px!important;line-height:1.45!important;color:var(--ui-muted)!important}
+.work-page-meta{font-size:12px;color:var(--ui-muted);white-space:nowrap;padding-bottom:3px}
+/* ---------- sections / cards ---------- */
+.work-section{margin:0 0 24px}.work-section-title{font-size:14px;font-weight:600;color:var(--ui-text);margin:0 0 8px 2px}.work-section-note{font-size:12px;color:var(--ui-muted);margin:-3px 0 10px 2px}
+[data-testid="stVerticalBlockBorderWrapper"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-lg)!important;box-shadow:none!important}
+[data-testid="stExpander"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-md)!important;box-shadow:none!important;overflow:hidden!important}
+[data-testid="stExpander"] summary{min-height:42px!important;padding:6px 12px!important;color:var(--ui-text)!important;font-size:13px!important;font-weight:600!important}
+[data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}
+/* ---------- typography ---------- */
+h1,h2,h3,h4,h5,h6{color:var(--ui-text)!important}h2{font-size:22px!important;font-weight:600!important;letter-spacing:-.025em!important}h3{font-size:18px!important;font-weight:600!important;letter-spacing:-.02em!important}h4{font-size:15px!important;font-weight:600!important}
+[data-testid="stCaptionContainer"],.stCaption{color:var(--ui-muted)!important;font-size:12px!important;line-height:1.45!important}
+/* ---------- controls ---------- */
+.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:40px!important;padding:7px 16px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;box-shadow:none!important;transform:none!important;transition:background .12s ease,border-color .12s ease!important;font-size:13px!important;font-weight:500!important}
+.stButton>button:hover,.stDownloadButton>button:hover,.stFormSubmitButton>button:hover{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;box-shadow:none!important}
+.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{background:var(--ui-accent)!important;border-color:var(--ui-accent)!important;color:#fff!important;font-weight:600!important}
+.stButton>button[kind="primary"]:hover,.stFormSubmitButton>button[kind="primary"]:hover{background:var(--ui-accent-hover)!important;border-color:var(--ui-accent-hover)!important}
+.stButton>button:focus-visible,.stDownloadButton>button:focus-visible,.stFormSubmitButton>button:focus-visible{outline:3px solid var(--ui-focus)!important;outline-offset:1px}
+[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{min-height:40px!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-sm)!important;box-shadow:none!important}
+[data-baseweb="input"] input,[data-baseweb="textarea"] textarea,[data-baseweb="select"] input{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-text)!important;background:transparent!important;font-size:13px!important}
+input::placeholder,textarea::placeholder{color:var(--ui-muted-2)!important}
+[data-baseweb="input"]:focus-within,[data-baseweb="textarea"]:focus-within,[data-baseweb="select"]:focus-within{border-color:var(--ui-accent)!important;box-shadow:0 0 0 3px var(--ui-focus)!important}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{display:flex!important;gap:6px!important;padding:0!important;background:transparent!important;border:0!important;overflow:visible!important;flex-wrap:wrap}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;padding:6px 13px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text-2)!important;font-size:13px!important;font-weight:500!important}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"]{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;color:var(--ui-text)!important;font-weight:600!important}
+/* ---------- timetable ---------- */
+.swap-result-summary{margin:8px 0 10px;padding:8px 12px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft);font-size:12px;color:var(--ui-muted)}.swap-result-summary strong{color:var(--ui-text);font-weight:600}
+.matrix-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 9px}.matrix-title{font-size:14px;font-weight:600;color:var(--ui-text)}.matrix-subtitle{font-size:12px;color:var(--ui-muted)}
+.matrix-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--ui-muted);margin:0 0 8px 2px}.matrix-legend span{white-space:nowrap}
+[data-testid="stDataFrame"]{border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-md)!important;overflow:hidden!important;background:var(--ui-surface)!important;box-shadow:none!important}
+[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important;font-size:12px!important;font-weight:600!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
+[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-size:13px!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
+/* ---------- changed teachers ---------- */
+.changed-teacher-selector{display:flex;align-items:center;gap:8px;margin:0 0 10px}.changed-teacher-chip{display:inline-flex;align-items:center;padding:7px 10px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft-2);color:var(--ui-text);font-size:12px}
+/* ---------- notes / states ---------- */
+.apple-note,.work-note{padding:10px 12px;margin:0 0 12px;background:var(--ui-soft-2);border:1px solid var(--ui-line-soft);border-radius:10px;color:var(--ui-muted);font-size:12px;line-height:1.5}.apple-note strong,.work-note strong{color:var(--ui-text)}
+.sandbox-title{margin:0 0 4px!important;font-size:24px!important;line-height:1.2!important;font-weight:600!important;letter-spacing:-.045em!important;color:var(--ui-text)!important}
+.swap-group-head{display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px;padding-top:4px}.swap-group-title{font-size:13px;font-weight:600;color:var(--ui-text)}.swap-group-count{font-size:11px;color:var(--ui-muted);padding:3px 7px;border:1px solid var(--ui-line-soft);border-radius:999px;background:var(--ui-soft)}
+/* ---------- dialog ---------- */
+[data-testid="stDialog"]>div>div{max-height:calc(100vh - 5rem)!important;overflow-y:auto!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:18px!important;box-shadow:0 18px 48px rgba(0,0,0,.14)!important}
+[data-testid="stDialog"] [data-testid="stVerticalBlockBorderWrapper"]{border:0!important;background:transparent!important}
+[data-testid="stDialog"] [data-testid="stSlider"]{margin:0!important;padding:3px 0!important}[data-testid="stDialog"] [data-testid="stSlider"]>label{display:none!important}
+[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"]{min-height:34px!important;margin:0!important}
+/* ---------- tabs / links ---------- */
 [data-baseweb="tab-list"]{gap:4px!important;border-bottom:1px solid var(--ui-line-soft)!important}[data-baseweb="tab"]{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-muted)!important}[data-baseweb="tab"][aria-selected="true"]{color:var(--ui-text)!important}
-@media(max-width:900px){.app-top-safe-space{height:24px}.block-container{padding-left:.65rem!important;padding-right:.65rem!important}.apple-page-head{display:block;padding-top:12px}.apple-page-head h1{font-size:27px!important}.app-topbar{overflow:hidden}}
-@media(prefers-color-scheme:dark){:root{--ui-bg:#000;--ui-surface:#1c1c1e;--ui-surface-2:#2c2c2e;--ui-surface-3:#232326;--ui-text:#f5f5f7;--ui-text-2:#e5e5ea;--ui-muted:#a1a1a6;--ui-muted-2:#8e8e93;--ui-line:#48484a;--ui-line-soft:#38383a;--ui-accent:#2997ff;--ui-accent-hover:#47a6ff;--ui-focus:rgba(41,151,255,.30);}[data-testid="stHeader"]{background:rgba(0,0,0,.72)!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button,[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"]{background:var(--ui-surface)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-surface-2)!important;color:var(--ui-text-2)!important}[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important}[data-testid="stExpander"] summary:hover{background:var(--ui-surface-2)!important}[data-testid="stDialog"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}}
-
-.swap-result-group{display:flex;align-items:center;justify-content:space-between;margin:10px 0 6px;font-size:13px;font-weight:600;color:var(--ui-ink);}.swap-result-group em{font-size:11px;font-style:normal;font-weight:500;color:var(--ui-muted);}
+a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var(--ui-line-soft)!important}
+/* ---------- utility ---------- */
+[data-testid="stMetric"]{padding:8px 0!important}.ui-kpi-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px}.ui-kpi{padding:13px 15px;border:1px solid var(--ui-line-soft);border-radius:12px;background:var(--ui-surface)}.ui-kpi-label{font-size:11px;color:var(--ui-muted)}.ui-kpi-value{margin-top:4px;font-size:21px;font-weight:600;color:var(--ui-text)}
+@media(max-width:900px){.block-container{padding-left:12px!important;padding-right:12px!important}.app-top-safe-space{height:24px}.work-page-head{display:block}.work-page-meta{margin-top:8px}.ui-kpi-row{grid-template-columns:1fr}.app-topbar{overflow:hidden}}
+@media(prefers-color-scheme:dark){:root{--ui-bg:#000;--ui-surface:#1c1c1e;--ui-soft:#2c2c2e;--ui-soft-2:#232326;--ui-text:#f5f5f7;--ui-text-2:#e5e5ea;--ui-muted:#a1a1a6;--ui-muted-2:#8e8e93;--ui-line:#48484a;--ui-line-soft:#38383a;--ui-accent:#2997ff;--ui-accent-hover:#47a6ff;--ui-focus:rgba(41,151,255,.30)}[data-testid="stHeader"]{background:rgba(0,0,0,.76)!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button,[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"]{background:var(--ui-surface)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important}[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important}[data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}[data-testid="stDialog"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}.ui-kpi{background:var(--ui-surface)!important;border-color:var(--ui-line-soft)!important}}
 </style>
 """, unsafe_allow_html=True)
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
-APP_VERSION = "3.1-Apple-1to1-UX"
+APP_VERSION = "4.5-Apple-DeepCleanup-GSheet"
 
 # ==========================================================================================
 # UI 폰트 설정
@@ -95,6 +143,9 @@ SCHOOL_WEEKDAYS = (0, 1, 2, 3, 4)  # 학교 표시는 월~금만
 # 주간표는 한국 학교 일정 기준으로 현재 주를 판정한다.
 # 서버가 UTC여도 날짜가 하루 밀리지 않도록 Asia/Seoul을 명시한다.
 KST = ZoneInfo("Asia/Seoul")
+
+# Google API가 멈춘 세션에서 재실행마다 데몬 스레드가 누적되지 않도록 동시 요청 수를 제한한다.
+_GSHEET_NETWORK_SEMAPHORE = threading.BoundedSemaphore(2)
 
 def _today_kst() -> date:
     return datetime.now(KST).date()
@@ -298,14 +349,14 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
     st.markdown(f"**{label}**")
     nav1, nav2, nav3 = st.columns([1, 4, 1])
     with nav1:
-        if st.button("◀", key=f"{key}_prev", use_container_width=True):
+        if st.button("◀", key=f"{key}_prev", width="stretch"):
             m = st.session_state[month_key]
             st.session_state[month_key] = (m.replace(day=1) - timedelta(days=1)).replace(day=1)
             st.rerun()
     with nav2:
         st.markdown(f"<div style='text-align:center;font-weight:700;font-size:1.05rem'>{st.session_state[month_key].year}년 {st.session_state[month_key].month}월</div>", unsafe_allow_html=True)
     with nav3:
-        if st.button("▶", key=f"{key}_next", use_container_width=True):
+        if st.button("▶", key=f"{key}_next", width="stretch"):
             m = st.session_state[month_key]
             nm = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
             st.session_state[month_key] = nm
@@ -313,7 +364,7 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
 
     quick1, quick2 = st.columns([1, 5])
     with quick1:
-        if st.button("오늘", key=f"{key}_today", use_container_width=True):
+        if st.button("오늘", key=f"{key}_today", width="stretch"):
             today = _today_kst()
             if today.weekday() >= 5:
                 today = today - timedelta(days=today.weekday() - 4)
@@ -327,7 +378,7 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
     event = st.dataframe(
         cal,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         height=235,
         key=f"{key}_grid",
         on_select="rerun",
@@ -378,7 +429,7 @@ def period_matrix_picker(label, key, selected=None, allow_all=True):
     for p, col in enumerate(cols, 1):
         with col:
             active = p in selected
-            if st.button(f"{'✓ ' if active else ''}{p}교시", key=f"{key}_{p}", use_container_width=True, type="primary" if active else "secondary"):
+            if st.button(f"{'✓ ' if active else ''}{p}교시", key=f"{key}_{p}", width="stretch", type="primary" if active else "secondary"):
                 if active:
                     selected.remove(p)
                 else:
@@ -386,7 +437,7 @@ def period_matrix_picker(label, key, selected=None, allow_all=True):
                 st.rerun()
     if allow_all:
         all_active = 0 in selected
-        if st.button(f"{'✓ ' if all_active else ''}하루 전체", key=f"{key}_all", use_container_width=True, type="primary" if all_active else "secondary"):
+        if st.button(f"{'✓ ' if all_active else ''}하루 전체", key=f"{key}_all", width="stretch", type="primary" if all_active else "secondary"):
             if all_active:
                 selected.clear()
             else:
@@ -451,7 +502,7 @@ def daily_schedule_picker(ref_date=None, key="daily_schedule", *, teacher_filter
     teacher_key = str(teacher_filter or "all").strip().replace(" ", "_")
     matrix_key = f"{key}_matrix_{picked_date:%Y%m%d}_{teacher_key}_{'test' if use_test else 'live'}"
     state_key = f"_{key}_selected_cells_{picked_date:%Y%m%d}_{teacher_key}_{'test' if use_test else 'live'}"
-    event=st.dataframe(matrix, hide_index=True, use_container_width=True, height=height,
+    event=st.dataframe(matrix, hide_index=True, width="stretch", height=height,
                        key=matrix_key, on_select="rerun",
                        selection_mode="multi-cell" if multi else "single-cell")
     cells=getattr(getattr(event,"selection",None),"cells",[]) or []
@@ -567,31 +618,108 @@ def get_teacher_subject(teacher_name: str) -> str:
 def get_gspread_client():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     if "gcp_service_account" not in st.secrets:
-        st.error("GCP Secrets 인증 오류")
-        st.stop()
+        raise RuntimeError("GCP Secrets에 gcp_service_account가 없습니다.")
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
     return gspread.authorize(creds)
 
-@st.cache_resource(show_spinner=False)
-def get_spreadsheet(spreadsheet_id: str):
-    return get_gspread_client().open_by_key(spreadsheet_id)
+
+def _clear_gsheet_runtime_cache():
+    """Google Sheets 연결 객체만 비운다. 데이터 캐시를 실패 상태로 저장하지 않는다."""
+    st.session_state.pop("_gsheet_spreadsheets", None)
+    st.session_state.pop("_gsheet_worksheets", None)
+    st.session_state.pop("_gsheet_last_error", None)
+    try:
+        get_gspread_client.clear()
+    except Exception:
+        pass
+
+
+def _run_network_with_timeout(fn, timeout=3.0):
+    """gspread의 timeout 미지정 HTTP 호출이 Streamlit 전체 실행을 붙잡지 않게 한다.
+
+    gspread 일부 호출은 내부적으로 requests timeout을 지정하지 않아 네트워크/Google API
+    장애 시 Streamlit의 첫 script run 자체가 무기한 대기할 수 있다. 데몬 스레드에서
+    호출하고 제한 시간 안에 끝나지 않으면 호출자에게 즉시 TimeoutError를 돌려준다.
+    """
+    result = []
+    error = []
+
+    def worker():
+        try:
+            result.append(fn())
+        except BaseException as exc:
+            error.append(exc)
+
+    timeout = max(1.0, float(timeout))
+    if not _GSHEET_NETWORK_SEMAPHORE.acquire(timeout=0.25):
+        raise TimeoutError("Google Sheets 요청이 이전 네트워크 작업으로 잠겨 있습니다. 잠시 후 다시 시도해 주세요.")
+
+    def guarded_worker():
+        try:
+            worker()
+        finally:
+            _GSHEET_NETWORK_SEMAPHORE.release()
+
+    thread = threading.Thread(target=guarded_worker, name="gsheet-timeout-worker", daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+    if thread.is_alive():
+        raise TimeoutError(f"Google Sheets 응답 시간 초과 ({timeout:.0f}초)")
+    if error:
+        raise error[0]
+    return result[0] if result else None
+
 
 def get_worksheet(spreadsheet_id: str, sheet_name: str):
+    """Google Sheets worksheet를 제한시간 안에 가져온다. 실패하면 None."""
     try:
-        return get_spreadsheet(spreadsheet_id).worksheet(sheet_name)
+        cache = st.session_state.setdefault("_gsheet_spreadsheets", {})
+        spreadsheet = cache.get(spreadsheet_id)
+        if spreadsheet is None:
+            client = get_gspread_client()
+            spreadsheet = _run_network_with_timeout(
+                lambda: client.open_by_key(spreadsheet_id), timeout=3
+            )
+            cache[spreadsheet_id] = spreadsheet
+
+        ws_key = f"{spreadsheet_id}:{sheet_name}"
+        ws_cache = st.session_state.setdefault("_gsheet_worksheets", {})
+        if ws_key in ws_cache:
+            return ws_cache[ws_key]
+
+        ws = _run_network_with_timeout(
+            lambda: spreadsheet.worksheet(sheet_name), timeout=3
+        )
+        ws_cache[ws_key] = ws
+        return ws
     except WorksheetNotFound:
         try:
-            return get_spreadsheet(spreadsheet_id).add_worksheet(title=sheet_name, rows=2000, cols=40)
-        except Exception:
+            cache = st.session_state.setdefault("_gsheet_spreadsheets", {})
+            spreadsheet = cache.get(spreadsheet_id)
+            if spreadsheet is None:
+                client = get_gspread_client()
+                spreadsheet = _run_network_with_timeout(
+                    lambda: client.open_by_key(spreadsheet_id), timeout=3
+                )
+                cache[spreadsheet_id] = spreadsheet
+            ws = _run_network_with_timeout(
+                lambda: spreadsheet.add_worksheet(title=sheet_name, rows=2000, cols=40), timeout=3
+            )
+            st.session_state.setdefault("_gsheet_worksheets", {})[f"{spreadsheet_id}:{sheet_name}"] = ws
+            return ws
+        except Exception as e:
+            st.session_state["_gsheet_last_error"] = str(e)
             return None
-    except Exception:
+    except Exception as e:
+        st.session_state["_gsheet_last_error"] = str(e)
         return None
 
 def df_from_worksheet(ws):
     if ws is None:
         return pd.DataFrame()
     try:
-        data = ws.get_all_values()
+        # get_all_values()도 HTTP 호출이므로 반드시 제한시간을 둔다.
+        data = _run_network_with_timeout(lambda: ws.get_all_values(), timeout=3)
         if not data or len(data) < 2:
             return pd.DataFrame()
         headers = [str(h).strip() for h in data[0]]
@@ -600,25 +728,31 @@ def df_from_worksheet(ws):
             row = list(row) + [""] * max(0, len(headers) - len(row))
             rows.append(["" if c is None else str(c).strip() for c in row[:len(headers)]])
         return pd.DataFrame(rows, columns=headers).replace({"nan": "", "None": "", "NaN": ""})
-    except Exception:
+    except Exception as e:
+        st.session_state["_gsheet_last_error"] = str(e)
         return pd.DataFrame()
 
 def df_to_worksheet(ws, df):
+    """DataFrame을 Google Sheets에 기록한다. 쓰기 실패를 절대 조용히 삼키지 않는다."""
     if ws is None:
-        return
+        raise RuntimeError("Google Sheets 워크시트를 열 수 없습니다.")
     try:
-        ws.clear()
+        _run_network_with_timeout(lambda: ws.clear(), timeout=5)
         if df is None or df.empty:
-            return
-        values = [df.fillna("").astype(str).columns.tolist()] + df.fillna("").astype(str).values.tolist()
-        ws.update("A1", values, value_input_option="USER_ENTERED")
-    except Exception:
-        pass
+            return True
+        clean = df.fillna("").astype(str)
+        values = [clean.columns.tolist()] + clean.values.tolist()
+        _run_network_with_timeout(
+            lambda: ws.update("A1", values, value_input_option="USER_ENTERED"), timeout=8
+        )
+        return True
+    except Exception as exc:
+        st.session_state["_gsheet_last_error"] = str(exc)
+        raise RuntimeError(f"Google Sheets 저장 실패: {exc}") from exc
 
 # ==========================================================================================
 # 아이디 / 권한 / 예산 / 수업교체신청
 # ==========================================================================================
-@st.cache_data(ttl=30, show_spinner=False)
 def load_id_sheet():
     ws = get_worksheet(WORK_SHEET_ID, "아이디저장함")
     df = df_from_worksheet(ws)
@@ -638,7 +772,6 @@ def load_id_sheet():
 def save_id_sheet(df):
     ws = get_worksheet(WORK_SHEET_ID, "아이디저장함")
     df_to_worksheet(ws, df)
-    load_id_sheet.clear()
 
 def save_id_request(name, email, desired_id, memo):
     ws = get_worksheet(WORK_SHEET_ID, "아이디추가요청")
@@ -656,7 +789,6 @@ def save_id_request(name, email, desired_id, memo):
         df = pd.concat([df, new], ignore_index=True)
     df_to_worksheet(ws, df)
 
-@st.cache_data(ttl=15, show_spinner=False)
 def load_budget_df():
     ws = get_worksheet(WORK_SHEET_ID, "예산")
     df = df_from_worksheet(ws)
@@ -710,7 +842,6 @@ def update_budget(change_amount: int, reason: str = "보강"):
         df = pd.concat([df, new_row], ignore_index=True)
         ws = get_worksheet(WORK_SHEET_ID, "예산")
         df_to_worksheet(ws, df)
-        load_budget_df.clear()
         return new_balance
     except Exception as e:
         st.warning(f"예산 업데이트 실패: {e}")
@@ -721,7 +852,6 @@ SWAP_REQUEST_COLS = [
     "목표일자", "교사B", "요일B", "교시B", "학급B", "과목B", "유형", "신청시각", "상태"
 ]
 
-@st.cache_data(ttl=30, show_spinner=False)
 def load_swap_requests():
     ws = get_worksheet(WORK_SHEET_ID, "수업교체신청")
     df = df_from_worksheet(ws)
@@ -738,7 +868,6 @@ def save_swap_request(rec: dict):
     df = pd.concat([df, new], ignore_index=True)
     ws = get_worksheet(WORK_SHEET_ID, "수업교체신청")
     df_to_worksheet(ws, df)
-    load_swap_requests.clear()
 
 # ==========================================================================================
 # 히스토리
@@ -777,8 +906,7 @@ def _restore_history_snapshot(snap):
     budget_df = snap.get("budget_df")
     if isinstance(budget_df, pd.DataFrame) and not budget_df.empty:
         df_to_worksheet(get_worksheet(WORK_SHEET_ID, "예산"), budget_df)
-        load_budget_df.clear()
-    _invalidate_all_caches()
+        _invalidate_all_caches()
 
 
 def undo():
@@ -811,8 +939,6 @@ def _invalidate_all_caches():
     class_matrix.clear()
     cumulative_sub_count.clear()
     weekly_load.clear()
-    load_budget_df.clear()
-    load_swap_requests.clear()
 
 # ==========================================================================================
 # 데이터 로드
@@ -851,13 +977,16 @@ def ensure_input_user(df, default=""):
         df["입력자"] = default
     return df
 
-@st.cache_data(ttl=300, show_spinner="시간표 로딩...")
 def load_timetable_from_gsheet():
     try:
         ti = df_from_worksheet(get_worksheet(TIMETABLE_SHEET_ID, "교사정보"))
         tt = df_from_worksheet(get_worksheet(TIMETABLE_SHEET_ID, "시간표"))
         if tt.empty:
-            return ti, pd.DataFrame(columns=["교사명", "요일", "교시", "과목", "학급", "과목군"])
+            raise RuntimeError("'시간표' 시트에서 데이터를 읽지 못했습니다.")
+        required = ["교사명", "요일", "교시", "과목", "학급"]
+        missing = [c for c in required if c not in tt.columns]
+        if missing:
+            raise RuntimeError("'시간표' 시트에 필요한 열이 없습니다: " + ", ".join(missing))
         tt["교시"] = tt["교시"].apply(safe_int)
         for c in ["교사명", "요일", "과목", "학급"]:
             tt[c] = tt[c].astype(str).str.strip()
@@ -865,12 +994,12 @@ def load_timetable_from_gsheet():
             tt["과목군"] = tt["과목"].map(subject_group)
         tt = tt[tt["요일"].isin(DAYS) & (tt["교시"] >= 1) & (tt["교시"] <= MAX_PERIOD)]
         tt = tt.drop_duplicates(subset=["교사명", "요일", "교시"]).reset_index(drop=True)
+        st.session_state.pop("_gsheet_last_error", None)
         return ti, tt
     except Exception as e:
-        st.error(f"시간표 로드 실패: {e}")
+        st.session_state["_gsheet_last_error"] = str(e)
         return pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=60, show_spinner="작업 데이터 로딩...")
 def load_work_data_from_gsheet():
     try:
         absences = ensure_input_user(df_from_worksheet(get_worksheet(WORK_SHEET_ID, "결강")))
@@ -897,7 +1026,7 @@ def load_work_data_from_gsheet():
             duties["일자"] = duties["일자"].apply(normalize_date_str)
         return absences, subs, swaps, part_time, cumulative, duties
     except Exception as e:
-        st.error(f"작업 데이터 로드 실패: {e}")
+        st.session_state["_gsheet_last_error"] = str(e)
         return (pd.DataFrame(),) * 5 + (pd.DataFrame(columns=DUTY_COLS),)
 
 def save_work_data_to_gsheet(changed_sheets=None):
@@ -929,11 +1058,30 @@ def save_work_data_to_gsheet(changed_sheets=None):
 
 
 def init_state():
-    if "teachers" in st.session_state:
-        return
+    # 실패한 첫 로드를 정상 상태로 저장하지 않는다. 기존 버전은 Google Sheets
+    # 일시 오류/네트워크 지연으로 tt가 빈 DataFrame이 되어도 "teachers" 키를 먼저
+    # 만들어 버려, 이후 실행마다 실제 재로딩 없이 "시간표를 불러오는 중..."에서
+    # 영구 정지하는 문제가 있었다.
+    existing_tt = st.session_state.get("timetable")
+    existing_ti = st.session_state.get("teachers")
+    if isinstance(existing_tt, pd.DataFrame) and not existing_tt.empty:
+        return True
+
     ti, tt = load_timetable_from_gsheet()
-    st.session_state.teachers = ti
+    if tt is None or tt.empty:
+        st.session_state.pop("teachers", None)
+        st.session_state.pop("timetable", None)
+        detail = st.session_state.get("_gsheet_last_error", "")
+        st.session_state["_load_error"] = (
+            "시간표 시트에서 유효한 데이터를 받지 못했습니다. "
+            "Google Sheets 인증/공유 권한, 시트 이름(시간표), 네트워크 상태를 확인하세요."
+            + (f" 최근 오류: {detail}" if detail else "")
+        )
+        return False
+
+    st.session_state.teachers = ti if isinstance(ti, pd.DataFrame) else pd.DataFrame()
     st.session_state.timetable = tt
+    st.session_state.pop("_load_error", None)
 
     absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
 
@@ -958,6 +1106,7 @@ def init_state():
     st.session_state.history_index = -1
     st.session_state.test_swaps = pd.DataFrame()
     push_history("초기 상태")
+    return True
 
 # ==========================================================================================
 # 핵심 로직
@@ -2024,156 +2173,206 @@ def get_single_lesson_1to1_candidates(
     teacher: str, orig_date_str: str, orig_period: int,
     orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0, use_test: bool = False
 ) -> pd.DataFrame:
-    """선택한 한 수업을 기준으로 실제 1:1 맞교환이 가능한 모든 수업을 탐색한다.
+    """선택 수업의 1:1 맞교환 후보를 검색한다.
 
-    검색 원칙
-    - 선택일 포함, 선택일 이후의 평일만 검색한다.
-    - 같은 날/미래 날짜 모두 해당 날짜의 모든 교시를 검색한다.
-    - 동일 학급을 우선하되 다른 학급도 누락하지 않는다.
-    - Effective Schedule을 기준으로 양쪽 교사의 공강을 모두 검증한다.
-    - 같은 날짜·교시·상대교사·학급·과목은 한 건으로 중복 제거한다.
+    원칙
+    - 선택일 이후의 평일만 검색한다.
+    - 검색 범위의 모든 교시를 검사한다.
+    - 동일 학급 후보를 우선하되 다른 학급도 누락하지 않는다.
+    - A는 목표 슬롯이 공강이고 B는 A의 원본 슬롯이 공강이어야 한다.
+    - 테스트 모드에서는 이미 테스트 변경에 사용된 슬롯을 재사용하지 않는다.
+    - 반복적인 DataFrame 검색을 줄여 대규모 시간표에서도 빠르게 동작한다.
     """
     source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
     source_str = source_date.strftime("%Y-%m-%d")
     source_day = WEEKDAY_KR[source_date.weekday()]
-    orig_period = safe_int(orig_period)
+    source_period = safe_int(orig_period)
+    source_class = str(orig_class).strip()
+    source_subject = str(orig_subject).strip()
     teacher = str(teacher).strip()
-    orig_class = str(orig_class).strip()
-    orig_subject = str(orig_subject).strip()
 
-    # future_days는 '선택 주의 금요일 이후 N일'이라는 기존 UI 의미를 유지한다.
-    # 단, 그 범위 안에서는 날짜별 모든 평일/모든 교시를 검사한다.
+    empty_cols = [
+        "원본일자","원본요일","원본교시","원본학급","원본과목",
+        "이동희망일","이동요일","이동희망교시","상대교사","상대학급",
+        "상대과목","상대수업","동일학급","동학년","교환가능사유","점수"
+    ]
+    if not teacher or not source_str or source_period <= 0 or not source_class:
+        return pd.DataFrame(columns=empty_cols)
+
     monday = source_date - timedelta(days=source_date.weekday())
     friday = monday + timedelta(days=4)
+    end_date = friday + timedelta(days=max(0, int(future_days)))
     search_dates = [
         source_date + timedelta(days=i)
-        for i in range((friday - source_date).days + 1)
+        for i in range((end_date - source_date).days + 1)
         if (source_date + timedelta(days=i)).weekday() < 5
     ]
-    if future_days > 0:
-        search_dates.extend(
-            friday + timedelta(days=i)
-            for i in range(1, int(future_days) + 1)
-            if (friday + timedelta(days=i)).weekday() < 5
-        )
 
     ver = version or st.session_state.get("_data_version", 0)
     source_tt = get_effective_timetable_for_date(source_str, ver, use_test=use_test)
     if source_tt is None or source_tt.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=empty_cols)
 
+    def norm_series(df, col):
+        return df[col].astype(str).str.strip() if col in df.columns else pd.Series("", index=df.index)
+
+    source_teacher_s = norm_series(source_tt, "교사명")
+    source_period_s = source_tt["교시"].apply(safe_int) if "교시" in source_tt.columns else pd.Series(0, index=source_tt.index)
+    source_class_s = norm_series(source_tt, "학급")
+    source_subject_s = norm_series(source_tt, "과목")
     source_match = source_tt[
-        (source_tt["교사명"].astype(str).str.strip() == teacher)
-        & (source_tt["교시"].apply(safe_int) == orig_period)
-        & (source_tt["학급"].astype(str).str.strip() == orig_class)
-        & (source_tt["과목"].astype(str).str.strip() == orig_subject)
+        (source_teacher_s == teacher) &
+        (source_period_s == source_period) &
+        (source_class_s == source_class) &
+        (source_subject_s == source_subject)
     ]
     if source_match.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=empty_cols)
 
-    source_group = subject_group(orig_subject)
-    # 원본 슬롯에서 이미 수업 중인 교사는 한 번만 계산한다. 후보 행마다
-    # is_free()를 다시 호출하지 않아 대규모 시간표에서도 검색 비용을 줄인다.
-    source_busy_teachers = {
-        str(v).strip() for v in source_tt.loc[
-            source_tt["교시"].apply(safe_int) == orig_period, "교사명"
-        ].tolist()
-        if str(v).strip()
-    }
-    results = []
-    seen = set()
+    source_group = subject_group(source_subject)
+    source_grade = grade_of(source_class)
+    source_weekday = source_day
+    source_test_affected = get_test_affected_slots() if use_test else set()
+    source_actual_affected = get_actual_direct_swap_affected_slots()
 
+    # 한 번 계산한 공강 여부를 같은 날짜에서 재사용한다.
+    duty_cache = {}
+    busy_cache = {}
+
+    def busy_set(on_date, tt):
+        if on_date in busy_cache:
+            return busy_cache[on_date]
+        busy = set()
+        if tt is not None and not tt.empty:
+            for r in tt.itertuples(index=False):
+                t = str(getattr(r, "교사명", "")).strip()
+                p = safe_int(getattr(r, "교시", 0))
+                if t and p > 0:
+                    busy.add((t, p))
+        busy_cache[on_date] = busy
+        return busy
+
+    def duty_set(on_date):
+        if on_date in duty_cache:
+            return duty_cache[on_date]
+        ds = set()
+        duties = st.session_state.get("duties", pd.DataFrame())
+        if isinstance(duties, pd.DataFrame) and not duties.empty:
+            for r in duties.itertuples(index=False):
+                if normalize_date_str(getattr(r, "일자", "")) != on_date:
+                    continue
+                t = str(getattr(r, "교사명", "")).strip()
+                p = safe_int(getattr(r, "교시", 0))
+                if t:
+                    ds.add((t, 0 if p <= 0 else p))
+        duty_cache[on_date] = ds
+        return ds
+
+    def teacher_free(t, day, p, on_date, tt):
+        p = safe_int(p)
+        if p <= 0 or (str(t).strip(), p) in busy_set(on_date, tt):
+            return False
+        ds = duty_set(on_date)
+        return (str(t).strip(), 0) not in ds and (str(t).strip(), p) not in ds
+
+    # 원본 슬롯의 상대 교사 공강을 미리 계산할 수 있다.
+    source_busy = busy_set(source_str, source_tt)
+    source_duty = duty_set(source_str)
+
+    results, seen = [], set()
     for target_date in search_dates:
         target_str = target_date.strftime("%Y-%m-%d")
-        if target_str < source_str:
-            continue
         target_day = WEEKDAY_KR[target_date.weekday()]
         target_tt = get_effective_timetable_for_date(target_str, ver, use_test=use_test)
         if target_tt is None or target_tt.empty:
             continue
 
-        periods = sorted({safe_int(v) for v in target_tt["교시"].tolist() if safe_int(v) > 0})
+        target_busy = busy_set(target_str, target_tt)
+        target_duty = duty_set(target_str)
+        target_period_s = target_tt["교시"].apply(safe_int)
+        target_teacher_s = norm_series(target_tt, "교사명")
+        target_class_s = norm_series(target_tt, "학급")
+        target_subject_s = norm_series(target_tt, "과목")
+
         max_period = PERIODS_PER_DAY.get(target_day, MAX_PERIOD)
-        periods = [p for p in periods if p <= max_period]
-
-        # A 교사가 받을 수 있는 시간만 먼저 계산하여 이후 후보별 중복 검사를 줄인다.
-        free_periods = {
-            p for p in periods
-            if is_free(teacher, target_day, p, target_str, target_tt)
-        }
-        if not free_periods:
-            continue
-
-        target_rows = target_tt[target_tt["교시"].apply(safe_int).isin(free_periods)].copy()
-        target_rows["_교시_int"] = target_rows["교시"].apply(safe_int)
-        target_rows["_교사_str"] = target_rows["교사명"].astype(str).str.strip()
-        target_rows["_학급_str"] = target_rows["학급"].astype(str).str.strip()
-        target_rows["_과목_str"] = target_rows["과목"].astype(str).str.strip()
-        target_rows = target_rows[target_rows["_교사_str"] != teacher]
-
-        for _, candidate in target_rows.iterrows():
-            target_period = safe_int(candidate["_교시_int"])
-            other_teacher = str(candidate["_교사_str"]).strip()
-            target_class = str(candidate["_학급_str"]).strip()
-            target_subject = str(candidate["_과목_str"]).strip()
-            if target_period <= 0 or not other_teacher or not target_class or not target_subject:
-                continue
-            if target_str == source_str and target_period == orig_period and target_class == orig_class and other_teacher == teacher:
+        for target_period in range(1, max_period + 1):
+            if target_str == source_str and target_period == source_period:
                 continue
 
-            # 상대교사는 원본 A 수업 시간에 공강이어야 한다.
-            if other_teacher in source_busy_teachers:
+            # A 교사가 목표 슬롯에서 실제로 비어 있어야 한다.
+            if (teacher, target_period) in target_busy or (teacher, 0) in target_duty or (teacher, target_period) in target_duty:
                 continue
 
-            same_class = target_class == orig_class
-            key = (target_str, target_period, other_teacher, target_class, target_subject)
-            if key in seen:
+            period_mask = target_period_s == target_period
+            candidates = target_tt.loc[period_mask, ["교사명","학급","과목"]].copy()
+            if candidates.empty:
                 continue
-            seen.add(key)
+            candidates["교사명"] = candidates["교사명"].astype(str).str.strip()
+            candidates["학급"] = candidates["학급"].astype(str).str.strip()
+            candidates["과목"] = candidates["과목"].astype(str).str.strip()
+            candidates = candidates[(candidates["교사명"] != "") & (candidates["교사명"] != teacher)]
+            candidates = candidates.drop_duplicates(subset=["교사명","학급","과목"])
 
-            same_group = subject_group(target_subject) == source_group
-            reason_parts = ["내 교사 공강", "상대 교사 공강"]
-            if same_class:
-                reason_parts.insert(0, "동일 학급")
-            if same_group:
-                reason_parts.append("동일 과목군")
-            reason = " · ".join(reason_parts)
+            for _, candidate in candidates.iterrows():
+                other_teacher = str(candidate["교사명"]).strip()
+                other_class = str(candidate["학급"]).strip()
+                other_subject = str(candidate["과목"]).strip()
+                if not other_teacher or not other_class or not other_subject:
+                    continue
 
-            score = 100
-            if same_class:
-                score += 1000
-            if same_group:
-                score += 40
-            if target_str == source_str:
-                score += 20
-                score += max(0, 10 - abs(target_period - orig_period))
-            else:
-                score += max(0, 10 - min((target_date - source_date).days, 10))
+                # B가 A의 원본 슬롯으로 이동할 수 있어야 한다.
+                if (other_teacher, source_period) in source_busy:
+                    continue
+                if (other_teacher, 0) in source_duty or (other_teacher, source_period) in source_duty:
+                    continue
 
-            results.append({
-                "구분": "동일 학급" if same_class else "다른 학급",
-                "원본일자": source_str, "원본요일": source_day, "원본교시": orig_period,
-                "원본학급": orig_class, "원본과목": orig_subject,
-                "이동희망일": target_str, "이동요일": target_day, "이동희망교시": target_period,
-                "상대교사": other_teacher, "상대학급": target_class, "상대과목": target_subject,
-                "상대수업": f"{target_class} {target_subject}",
-                "동일학급": "🏆" if same_class else "", "동학년": "",
-                "교환가능사유": reason, "점수": score,
-            })
+                # 실제/테스트 변경으로 이미 잠긴 슬롯은 다시 사용하지 않는다.
+                target_slot = (target_str, other_teacher, target_period)
+                source_other_slot = (source_str, other_teacher, source_period)
+                source_teacher_target = (target_str, teacher, target_period)
+                if use_test and ({target_slot, source_other_slot, source_teacher_target} & source_test_affected):
+                    continue
+                if {target_slot, source_other_slot, source_teacher_target} & source_actual_affected:
+                    continue
+
+                key = (target_str, target_period, other_teacher, other_class, other_subject)
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                same_class = other_class == source_class
+                same_grade = grade_of(other_class) == source_grade
+                same_group = subject_group(other_subject) == source_group
+                reasons = []
+                if same_class:
+                    reasons.append("동일 학급")
+                elif same_grade:
+                    reasons.append("동일 학년")
+                reasons.extend(["내 공강", "상대 교사 공강"])
+                if same_group:
+                    reasons.append("같은 과목군")
+
+                score = (300 if same_class else 120 if same_grade else 0) + (40 if same_group else 0)
+                if target_str == source_str:
+                    score += 20 + max(0, 8 - abs(target_period - source_period))
+
+                results.append({
+                    "원본일자": source_str, "원본요일": source_weekday, "원본교시": source_period,
+                    "원본학급": source_class, "원본과목": source_subject,
+                    "이동희망일": target_str, "이동요일": target_day, "이동희망교시": target_period,
+                    "상대교사": other_teacher, "상대학급": other_class, "상대과목": other_subject,
+                    "상대수업": f"{other_class} {other_subject}",
+                    "동일학급": "🏆" if same_class else "",
+                    "동학년": "동일 학년" if same_grade and not same_class else "",
+                    "교환가능사유": " · ".join(reasons), "점수": score,
+                })
 
     if not results:
-        return pd.DataFrame()
-
-    return (
-        pd.DataFrame(results)
-        .drop_duplicates(subset=["이동희망일", "이동희망교시", "상대교사", "상대학급", "상대과목"])
-        .sort_values(
-            ["구분", "점수", "이동희망일", "이동희망교시", "상대교사", "상대학급"],
-            key=lambda col: col.map({"동일 학급": 0, "다른 학급": 1}).fillna(2) if col.name == "구분" else col,
-            ascending=[True, False, True, True, True, True],
-        )
-        .reset_index(drop=True)
-    )
+        return pd.DataFrame(columns=empty_cols)
+    return pd.DataFrame(results).sort_values(
+        ["동일학급","점수","이동희망일","이동희망교시","상대교사","상대학급"],
+        ascending=[False,False,True,True,True,True], kind="stable"
+    ).reset_index(drop=True)
 
 @st.cache_data(show_spinner=False, ttl=180)
 def get_single_lesson_linked_cycles(
@@ -2618,8 +2817,15 @@ def _filter_current_swap_candidates(df, lesson, *, use_test=False):
                & (te["교시"].apply(safe_int) == tp)
                & (te["학급"].astype(str).str.strip() == tc)
                & (te["과목"].astype(str).str.strip() == ts)]
-        if not m.empty:
-            valid_rows.append(idx)
+        if m.empty:
+            continue
+        # 캐시 결과가 오래된 경우에도 실제 교환 가능 조건을 마지막으로 재검증한다.
+        target_day = WEEKDAY_KR[datetime.strptime(td, "%Y-%m-%d").weekday()]
+        if not is_free(source_teacher, target_day, tp, td, te):
+            continue
+        if not is_free(tt, WEEKDAY_KR[datetime.strptime(source_date, "%Y-%m-%d").weekday()], source_period, source_date, source_e):
+            continue
+        valid_rows.append(idx)
     return df.loc[valid_rows].reset_index(drop=True)
 
 
@@ -2679,7 +2885,7 @@ def _weekly_action_dialog():
         # 다시 수행하지 않는다. 성공 결과를 팝업 안에 그대로 보여주고 사용자가 닫도록 한다.
         st.success(st.session_state.weekly_dialog_result)
         st.caption("시간표가 갱신되었습니다. 팝업을 닫으면 최신 주간표를 확인할 수 있습니다.")
-        if st.button("✖ 닫기", key="dlg_result_close", use_container_width=True):
+        if st.button("✖ 닫기", key="dlg_result_close", width="stretch"):
             st.session_state.pop("weekly_dialog_result", None)
             _clear_weekly_selection()
             _weekly_fragment_rerun()
@@ -2710,7 +2916,7 @@ def _weekly_action_dialog():
         for col, (mode, label) in zip(nav_cols, nav_items):
             with col:
                 if st.button(label, type="primary" if mode == action_mode else "secondary",
-                             key=f"dlg_action_{mode}", use_container_width=True):
+                             key=f"dlg_action_{mode}", width="stretch"):
                     st.session_state.weekly_dialog_action_mode = mode
                     _weekly_fragment_rerun()
         st.markdown(f"#### {dict(nav_items)[action_mode]}")
@@ -2722,7 +2928,7 @@ def _weekly_action_dialog():
                      ("substitute", "🟢 보강"), ("detail", "ℹ️ 상세")]
         for col, (mode, label) in zip(alt_cols, alt_items):
             with col:
-                if st.button(label, type="secondary", key=f"dlg_alt_{mode}", use_container_width=True):
+                if st.button(label, type="secondary", key=f"dlg_alt_{mode}", width="stretch"):
                     st.session_state.weekly_dialog_action_mode = mode
                     _weekly_fragment_rerun()
 
@@ -2785,35 +2991,58 @@ def _weekly_action_dialog():
         if df_swap.empty:
             st.info("현재 조건에서 가능한 1:1 맞교환 위치가 없습니다.")
         else:
-            same_df = df_swap[df_swap["구분"] == "동일 학급"].copy()
-            other_df = df_swap[df_swap["구분"] == "다른 학급"].copy()
-            st.caption(f"전체 {len(df_swap)}건 · 동일 학급 {len(same_df)}건 · 다른 학급 {len(other_df)}건")
+            same_df = df_swap[df_swap["동일학급"].astype(str).str.strip() == "🏆"].copy()
+            other_df = df_swap[df_swap["동일학급"].astype(str).str.strip() != "🏆"].copy()
+            st.markdown(
+                f'<div class="swap-result-summary"><strong>{len(df_swap)}개</strong> 교환 가능 · <strong>{len(same_df)}개</strong> 동일 학급 · <strong>{len(other_df)}개</strong> 다른 학급</div>',
+                unsafe_allow_html=True,
+            )
 
-            # 결과를 먼저 보여주고 선택은 별도로 한다. 긴 selectbox 하나에 모든 정보를
-            # 밀어 넣지 않아도 날짜/교시/학급/사유를 한눈에 비교할 수 있다.
-            visible_cols = ["이동희망일", "이동요일", "이동희망교시", "상대교사", "상대학급", "상대과목", "교환가능사유"]
-            if not same_df.empty:
-                st.markdown('<div class="swap-result-group"><span>동일 학급</span><em>모든 후보 표시</em></div>', unsafe_allow_html=True)
-                st.dataframe(same_df[visible_cols], hide_index=True, use_container_width=True,
-                             height=min(280, 42 + 35 * len(same_df)))
-            if not other_df.empty:
-                st.markdown('<div class="swap-result-group"><span>다른 학급</span><em>동일 학급 다음 후보</em></div>', unsafe_allow_html=True)
-                st.dataframe(other_df[visible_cols], hide_index=True, use_container_width=True,
-                             height=min(280, 42 + 35 * min(len(other_df), 8)))
+            def _swap_result_view(src):
+                view = src.copy()
+                view["날짜"] = view.apply(lambda r: f"{r['이동희망일']} ({r['이동요일']})", axis=1)
+                view["교시"] = view["이동희망교시"].apply(lambda x: f"{safe_int(x)}교시")
+                view = view.rename(columns={
+                    "상대교사": "상대교사", "상대학급": "상대학급", "상대과목": "상대과목",
+                    "교환가능사유": "교환 가능 사유",
+                })
+                return view[["날짜", "교시", "상대교사", "상대학급", "상대과목", "교환 가능 사유"]]
 
-            shortlist = df_swap.copy()
+            def _render_swap_group(title, src, note):
+                st.markdown(
+                    f'<div class="swap-group-head"><span class="swap-group-title">{title}</span><span class="swap-group-count">{len(src)}개</span></div>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(note)
+                if src.empty:
+                    st.info("해당 범주의 교환 가능 수업이 없습니다.")
+                    return
+                view = _swap_result_view(src)
+                st.dataframe(
+                    view, width="stretch", hide_index=True, height=min(520, 44 + max(1, len(view)) * 35),
+                    column_config={
+                        "날짜": st.column_config.TextColumn("날짜", width="small"),
+                        "교시": st.column_config.TextColumn("교시", width="small"),
+                        "상대교사": st.column_config.TextColumn("상대 교사", width="small"),
+                        "상대학급": st.column_config.TextColumn("상대 학급", width="small"),
+                        "상대과목": st.column_config.TextColumn("상대 과목", width="small"),
+                        "교환 가능 사유": st.column_config.TextColumn("교환 가능 사유", width="large"),
+                    },
+                )
+
+            # 검색 결과를 범주별로 분리해 비교 비용을 줄이고, 동일 학급 후보가 다른 학급에 묻히지 않게 한다.
+            _render_swap_group("동일 학급", same_df, "같은 학급의 다른 날짜·교시 수업과 교환 가능한 모든 후보입니다.")
+            _render_swap_group("다른 학급", other_df, "같은 학급 후보가 없거나 다른 학급도 허용할 때 선택할 수 있는 후보입니다.")
             labels = [
-                f"{row['이동희망일']} · {safe_int(row.get('이동희망교시', row['원본교시']))}교시 · "
-                f"{row['상대교사']} · {row['상대학급']} {row['상대과목']} · {row['구분']}"
-                for _, row in shortlist.iterrows()
+                f"{row['이동희망일']} ({row['이동요일']}) · {safe_int(row['이동희망교시'])}교시 · {row['상대교사']} · {row['상대학급']} {row['상대과목']}"
+                for _, row in df_swap.iterrows()
             ]
             dialog_instance = int(st.session_state.get("weekly_dialog_instance", 0) or 0)
             pick_label = st.selectbox("교환할 수업 선택", labels, key=f"weekly_dialog_swap_pick_{dialog_instance}")
-            picked = shortlist.iloc[labels.index(pick_label)]
+            picked = df_swap.iloc[labels.index(pick_label)]
             st.caption(
-                f"선택: **{picked['상대교사']} · {picked['이동희망일']} · "
-                f"{safe_int(picked.get('이동희망교시', picked['원본교시']))}교시 · {picked['상대학급']} · {picked['상대과목']}** · "
-                f"{picked.get('교환가능사유', '조건 확인 완료')}"
+                f"상대 수업: **{picked['상대교사']} · {picked['이동희망일']} · "
+                f"{safe_int(picked.get('이동희망교시', picked['원본교시']))}교시 · {picked['상대학급']} · {picked['상대과목']}**"
             )
             b_info = {
                 "교사명": str(picked["상대교사"]), "일자": str(picked["이동희망일"]),
@@ -2821,7 +3050,7 @@ def _weekly_action_dialog():
                 "학급": str(picked["상대학급"]), "과목": str(picked["상대과목"]),
             }
             button_label = "🧪 1:1 맞교환 테스트" if use_test else "✅ 1:1 맞교환 실행"
-            if st.button(button_label, type="primary", key="dlg_direct_swap", use_container_width=True):
+            if st.button(button_label, type="primary", key="dlg_direct_swap", width="stretch"):
                 try:
                     with _weekly_dialog_loading("1:1 맞교환 처리 중"):
                         ok = do_swap(lesson, b_info, lesson["일자"], b_info["일자"], is_test=use_test)
@@ -2879,7 +3108,7 @@ def _weekly_action_dialog():
                     )
                     st.caption(cyc.get("path_desc", ""))
                     st.caption("학급의 담당교사·과목·시수가 보존되는 순환 후보입니다.")
-                    if st.button("🧪 이 연계 순환 테스트", key=f"dlg_cycle_test_{idx}", use_container_width=True):
+                    if st.button("🧪 이 연계 순환 테스트", key=f"dlg_cycle_test_{idx}", width="stretch"):
                         try:
                             with _weekly_dialog_loading("연계 순환 테스트 중"):
                                 ok = apply_cycle_swaps(cyc["moves"], is_test=True)
@@ -2903,7 +3132,7 @@ def _weekly_action_dialog():
             reason = st.selectbox("사유", ABSENCE_REASONS, key="dlg_abs_reason")
         with r2:
             detail = st.text_input("상세사유", key="dlg_abs_detail")
-        if st.button("📌 결강 등록", type="primary", key="dlg_abs_submit", use_container_width=True):
+        if st.button("📌 결강 등록", type="primary", key="dlg_abs_submit", width="stretch"):
             try:
                 with _weekly_dialog_loading("결강 정보 저장 중"):
                     ok = _register_absence_from_weekly(lesson, reason, detail)
@@ -2928,7 +3157,7 @@ def _weekly_action_dialog():
         if cand.empty:
             st.warning("현재 조건에서 추천 가능한 보강 교사가 없습니다.")
         else:
-            st.dataframe(cand, use_container_width=True, hide_index=True, height=240)
+            st.dataframe(cand, width="stretch", hide_index=True, height=240)
             abs_df = st.session_state.absences
             abs_match = (
                 abs_df[(abs_df["일자"].astype(str) == lesson["일자"]) &
@@ -2941,7 +3170,7 @@ def _weekly_action_dialog():
                 labels = cand["보강교사"].astype(str).tolist()
                 pick = st.selectbox("보강 교사", labels, key="dlg_sub_pick")
                 picked = cand[cand["보강교사"].astype(str) == str(pick)].iloc[0]
-                if st.button("🟢 선택 교사로 보강 배정", type="primary", key="dlg_sub_submit", use_container_width=True):
+                if st.button("🟢 선택 교사로 보강 배정", type="primary", key="dlg_sub_submit", width="stretch"):
                     try:
                         with _weekly_dialog_loading("보강 배정 처리 중"):
                             ok = add_substitute(
@@ -2971,9 +3200,9 @@ def _weekly_action_dialog():
             ("변경ID", lesson.get("변경ID", "")), ("원본교사", lesson.get("원본교사", "")),
             ("원본일자", lesson.get("원본일자", "")), ("원본교시", lesson.get("원본교시", "")),
         ]
-        st.dataframe(pd.DataFrame(detail_rows, columns=["항목", "내용"]), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(detail_rows, columns=["항목", "내용"]), width="stretch", hide_index=True)
 
-    if st.button("✖ 닫기", key="dlg_close", use_container_width=True):
+    if st.button("✖ 닫기", key="dlg_close", width="stretch"):
         st.session_state.pop("weekly_dialog_result", None)
         _clear_weekly_selection()
         _weekly_fragment_rerun()
@@ -3117,7 +3346,7 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         event = st.dataframe(
             display,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             height=height,
             row_height=27 if not teacher_period_grid else 36,
             key=widget_key,
@@ -3148,7 +3377,7 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         st.dataframe(
             display,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             height=height,
             key=f"{key}_legacy__sel{matrix_epoch}",
             column_config=column_config,
@@ -3963,7 +4192,7 @@ def show_login_page():
     st.markdown("</div>", unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("로그인", type="primary", use_container_width=True):
+        if st.button("로그인", type="primary", width="stretch"):
             uid = id_input.strip()
             if not uid:
                 st.error("아이디를 입력해주세요.")
@@ -3992,7 +4221,7 @@ def show_login_page():
                     else:
                         st.error(f"등록되지 않은 아이디입니다. (남은 시도: {remaining}회)")
     with col2:
-        if st.button("게스트로 입장", use_container_width=True):
+        if st.button("게스트로 입장", width="stretch"):
             st.session_state.logged_in = True
             st.session_state.user_id = "게스트"
             st.session_state.user_name = "게스트"
@@ -4044,7 +4273,15 @@ if not st.session_state.logged_in:
     show_login_page()
     st.stop()
 
-init_state()
+if not init_state():
+    st.error("⚠️ 시간표 초기화에 실패했습니다.")
+    st.warning(st.session_state.get("_load_error", "시간표 데이터를 불러오지 못했습니다."))
+    st.caption("무한 로딩으로 멈추지 않도록 앱 실행을 중단했습니다. 상단의 도구가 표시되지 않는 경우 Streamlit Cloud 로그에서 Google Sheets 오류를 확인하세요.")
+    if st.button("🔄 시간표 다시 연결", type="primary", key="fatal_reload_timetable"):
+        _clear_gsheet_runtime_cache()
+        st.session_state.pop("_load_error", None)
+        st.rerun()
+    st.stop()
 
 if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_OPTIONS:
     st.session_state.ui_font = UI_FONT_DEFAULT
@@ -4062,8 +4299,8 @@ st.markdown(
 def render_tools_dialog():
     """상단 도구 창.
 
-    st.popover는 fragment 재실행/레이아웃 재계산 때 앵커 기준 위치가 누적 이동하는
-    현상이 있어 사용하지 않는다. Dialog는 브라우저 viewport 기준으로 고정 배치되므로
+    이전 popover 방식은 fragment 재실행 때 앵커 위치가 흔들릴 수 있어 사용하지 않는다. Dialog는
+    브라우저 viewport 기준으로 고정 배치되므로
     반복해서 열고 닫아도 왼쪽으로 밀리거나 폭이 누적해서 변하지 않는다.
     """
     if current_role() == ROLE_GUEST:
@@ -4088,14 +4325,14 @@ def render_tools_dialog():
     st.divider()
 
     if can_full_data() or is_teacher():
-        if st.button("🔄 시간표 새로고침", use_container_width=True, key="top_reload_timetable"):
-            load_timetable_from_gsheet.clear()
+        if st.button("🔄 시간표 새로고침", width="stretch", key="top_reload_timetable"):
+            _clear_gsheet_runtime_cache()
             ti, tt = load_timetable_from_gsheet()
             st.session_state.teachers, st.session_state.timetable = ti, tt
             _invalidate_all_caches()
             st.rerun()
-        if st.button("🔄 작업내역 새로고침", use_container_width=True, key="top_reload_work"):
-            load_work_data_from_gsheet.clear()
+        if st.button("🔄 작업내역 새로고침", width="stretch", key="top_reload_work"):
+            _clear_gsheet_runtime_cache()
             absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
             st.session_state.absences = ensure_input_user(absences)
             st.session_state.subs = ensure_input_user(subs)
@@ -4104,35 +4341,35 @@ def render_tools_dialog():
             st.session_state.duties = ensure_duty_columns(duties)
             _invalidate_all_caches()
             st.rerun()
-        if st.button("💾 현재 작업 저장", use_container_width=True, type="primary", key="top_save_work"):
+        if st.button("💾 현재 작업 저장", width="stretch", type="primary", key="top_save_work"):
             save_work_data_to_gsheet()
         st.divider()
         a, b = st.columns(2)
-        if a.button("↩ Undo", use_container_width=True, key="top_undo"):
+        if a.button("↩ Undo", width="stretch", key="top_undo"):
             if undo():
                 save_work_data_to_gsheet()
                 st.rerun()
-        if b.button("↪ Redo", use_container_width=True, key="top_redo"):
+        if b.button("↪ Redo", width="stretch", key="top_redo"):
             if redo():
                 save_work_data_to_gsheet()
                 st.rerun()
 
     st.divider()
     st.markdown('<div class="tool-section-title">출력</div>', unsafe_allow_html=True)
-    if st.button("결보강 계획서", use_container_width=True, key="top_personal_plan_open"):
+    if st.button("결보강 계획서", width="stretch", key="top_personal_plan_open"):
         st.session_state["top_output_mode"] = "personal_plan"
-    if is_edu_or_master() and st.button("전체 일일 내역서", use_container_width=True, key="top_daily_report_open"):
+    if is_edu_or_master() and st.button("전체 일일 내역서", width="stretch", key="top_daily_report_open"):
         st.session_state["top_output_mode"] = "daily_report"
 
     output_mode = st.session_state.get("top_output_mode")
     if output_mode == "personal_plan":
         plan_date = st.date_input("기준일", value=_today_kst(), key="top_plan_date", label_visibility="collapsed")
-        if st.button("파일 만들기", type="primary", use_container_width=True, key="top_personal_generate"):
+        if st.button("파일 만들기", type="primary", width="stretch", key="top_personal_generate"):
             html = build_personal_plan_html(current_name(), plan_date.strftime("%Y-%m-%d"))
             st.download_button("HTML 다운로드", html.encode("utf-8"), f"결보강계획서_{current_name()}_{plan_date}.html", "text/html", key="top_dl_personal")
     elif output_mode == "daily_report" and is_edu_or_master():
         rd = st.date_input("기준일", value=_today_kst(), key="top_report_date", label_visibility="collapsed")
-        if st.button("파일 만들기", type="primary", use_container_width=True, key="top_daily_generate"):
+        if st.button("파일 만들기", type="primary", width="stretch", key="top_daily_generate"):
             day = rd.strftime("%Y-%m-%d")
             html = build_report_html(day)
             xls = to_excel_bytes({
@@ -4144,49 +4381,42 @@ def render_tools_dialog():
             st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx", key="top_dl_report_xlsx")
 
 
-@st.fragment
 def render_top_toolbar(visible_tabs):
-    """ID/이름/권한과 업무 메뉴를 상단 한 줄에 배치한다.
-
-    도구는 popover가 아니라 별도 dialog로 연다. 따라서 fragment 재실행이 발생해도
-    도구 창의 위치/폭이 앵커를 따라 누적 이동하지 않는다.
-    """
-    c_id, c_nav, c_tools, c_user = st.columns([1.35, 5.85, .85, .8], vertical_alignment="center")
+    """업무 중심 상단 셸. Dialog와 충돌하지 않도록 일반 실행 컨텍스트에서 렌더링한다."""
+    core = [t for t in ["시간표 조회", "결강·보강", "시간표 맞교환 & 변경 추천", "변경된 교사 주간표"] if t in visible_tabs]
+    secondary = [t for t in visible_tabs if t not in core]
+    c_id, c_nav, c_more, c_tools, c_user = st.columns([1.25, 5.35, 1.05, .72, .72], vertical_alignment="center")
     with c_id:
-        st.markdown(f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_user()} · {current_role()}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_role()}</div>', unsafe_allow_html=True)
     with c_nav:
         if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs:
             st.session_state.active_tab = visible_tabs[0]
-        previous_active = st.session_state.active_tab
-        nav_options = [NAV_LABELS.get(t, t) for t in visible_tabs]
-        label_to_tab = dict(zip(nav_options, visible_tabs))
-        previous_label = NAV_LABELS.get(previous_active, previous_active)
-        active_label = st.radio(
-            "업무 메뉴", nav_options, index=nav_options.index(previous_label),
-            horizontal=True, key="top_active_tab", label_visibility="collapsed"
-        )
-        active = label_to_tab.get(active_label, visible_tabs[0])
-        st.session_state.active_tab = active
-        if active != previous_active:
-            # 탭 전환은 '새 업무 화면'으로 취급한다. 직전 화면에서 선택했던
-            # 수업/팝업 상태를 그대로 두면, 새 탭을 연 직후 이전 수업 dialog가
-            # 다시 나타날 수 있다. 특히 빈 공간을 눌러 선택을 해제한 뒤 탭을
-            # 바꾸는 경우 dataframe 위젯의 내부 selection이 rerun에서 재전달될
-            # 수 있으므로, 선택값 + dialog + 후보 캐시 + widget epoch를 함께 초기화한다.
-            _clear_weekly_selection()
-            st.session_state.pop("weekly_dialog_use_test", None)
-            st.session_state.pop("weekly_dialog_title", None)
-            st.session_state.pop("weekly_dialog_instance", None)
-            st.rerun()
+        previous = st.session_state.active_tab
+        if core:
+            labels=[NAV_LABELS.get(t,t) for t in core]
+            mapping=dict(zip(labels,core))
+            selected = NAV_LABELS.get(previous,previous) if previous in core else labels[0]
+            active_label=st.radio("핵심 업무",labels,index=labels.index(selected),horizontal=True,key="top_core_nav",label_visibility="collapsed")
+            active=mapping.get(active_label,core[0])
+        else:
+            active=previous
+        if active != previous:
+            _clear_weekly_selection(); st.session_state.pop("weekly_dialog_use_test",None); st.session_state.pop("weekly_dialog_title",None); st.session_state.pop("weekly_dialog_instance",None); st.rerun()
+    with c_more:
+        if secondary:
+            sec_labels=["더보기"]+[NAV_LABELS.get(t,t) for t in secondary]
+            sec_map=dict(zip(sec_labels[1:],secondary))
+            current_sec=NAV_LABELS.get(previous,previous) if previous in secondary else "더보기"
+            picked=st.selectbox("기타 업무",sec_labels,index=sec_labels.index(current_sec),key="top_secondary_nav",label_visibility="collapsed")
+            if picked != "더보기" and sec_map.get(picked) != previous:
+                st.session_state.active_tab=sec_map[picked]; _clear_weekly_selection(); st.rerun()
     with c_tools:
-        if st.button("도구", use_container_width=True, key="top_tools_open"):
+        if st.button("···",width="stretch",key="top_tools_open",help="화면·출력·기타 도구"):
             render_tools_dialog()
     with c_user:
-        if st.button("로그아웃", use_container_width=True, key="top_logout"):
-            for k in list(st.session_state.keys()):
-                del st.session_state[k]
+        if st.button("↪",width="stretch",key="top_logout",help="로그아웃"):
+            for k in list(st.session_state.keys()): del st.session_state[k]
             st.rerun()
-
 
 if current_role() == ROLE_GUEST:
     st.title("게스트 모드")
@@ -4205,7 +4435,7 @@ if current_role() == ROLE_GUEST:
     st.stop()
 
 if st.session_state.timetable.empty:
-    st.info("시간표를 불러오는 중...")
+    st.error("시간표 데이터가 비어 있습니다. 무한 로딩 대신 오류 원인을 표시합니다.")
     st.stop()
 
 # ==========================================================================================
@@ -4245,9 +4475,9 @@ PAGE_DESCRIPTIONS = {
     "📑 회원별 탭 권한 관리": "사용자별 업무 메뉴 접근 권한을 관리합니다.",
 }
 st.markdown(
-    f'<div class="apple-page-head"><div><h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
+    f'<div class="work-page-head"><div><h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
     f'<p>{PAGE_DESCRIPTIONS.get(active_tab, "학교 시간표와 결보강 업무를 관리합니다.")}</p></div>'
-    f'<div class="apple-section-label">{current_role()} · {current_name() or current_user()}</div></div>',
+    f'<div class="work-page-meta">{current_role()} · {current_name() or current_user()}</div></div>',
     unsafe_allow_html=True
 )
 
@@ -4272,14 +4502,16 @@ if "시간표 조회" in tab_map:
                     if not m.empty:
                         r=m.iloc[0]
                         details.append({"교사":r["교사명"],"교시":sel["교시"],"학급":r["학급"],"과목":r["과목"],"변경유형":r.get("변경유형","원본"),"변경상세":r.get("변경상세","")})
-                st.dataframe(pd.DataFrame(details),use_container_width=True,hide_index=True)
+                st.dataframe(pd.DataFrame(details),width="stretch",hide_index=True)
         elif view == "교사별 주간":
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_week_ref")
+            st.markdown('<div class="matrix-legend"><span>↻ 교환</span><span>+ 보강</span><span>• 시간강사</span></div>', unsafe_allow_html=True)
             render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
         elif view == "학급별 주간":
             ref=calendar_picker("주간 기준일",_today_kst(),key="view_class_ref")
+            st.markdown('<div class="matrix-legend"><span>과목명 기준 · 조회 전용</span><span>↻ 교환</span><span>+ 보강</span></div>', unsafe_allow_html=True)
             render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_class_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체학급_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_class')
@@ -4335,7 +4567,7 @@ if "시간강사 관리" in tab_map:
             ed = st.data_editor(
                 st.session_state.part_time,
                 num_rows="dynamic",
-                use_container_width=True,
+                width="stretch",
                 height=450,
                 key="pt_ed",
                 hide_index=True,
@@ -4357,7 +4589,7 @@ if "시간강사 관리" in tab_map:
                     st.success("저장 완료")
                     st.rerun()
         else:
-            st.dataframe(st.session_state.part_time, use_container_width=True)
+            st.dataframe(st.session_state.part_time, width="stretch")
 
 # ------------------------------------------------------------------ 결강·보강
 if "결강·보강" in tab_map:
@@ -4424,7 +4656,7 @@ if "결강·보강" in tab_map:
                             rr[f"{pp}교시"]=(f"{r.get('학급','')} {r.get('과목','')} ❗".strip() if r is not None else "")
                         sm_rows.append(rr)
                     sub_matrix=pd.DataFrame(sm_rows,columns=["교사명"]+[f"{p}교시" for p in range(1,MAX_PERIOD+1)])
-                    sub_event=st.dataframe(sub_matrix,hide_index=True,use_container_width=True,height=300,key=f"sub_abs_matrix_{sub_date}",on_select="rerun",selection_mode="single-cell")
+                    sub_event=st.dataframe(sub_matrix,hide_index=True,width="stretch",height=300,key=f"sub_abs_matrix_{sub_date}",on_select="rerun",selection_mode="single-cell")
                     sub_cells=getattr(getattr(sub_event,"selection",None),"cells",[]) or []
                     cid=None; rows=pd.DataFrame(); head=None
                     if sub_cells:
@@ -4507,7 +4739,7 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
         if show_swaps.empty:
             st.info("등록된 실제 맞교환 이력이 없습니다.")
         else:
-            st.dataframe(show_swaps, use_container_width=True, hide_index=True)
+            st.dataframe(show_swaps, width="stretch", hide_index=True)
 
 # ------------------------------------------------------------------ 통계
 if "통계" in tab_map:
@@ -4526,7 +4758,7 @@ if "통계" in tab_map:
             start = _today_kst().replace(day=1)
         cum = cumulative_sub_count(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), st.session_state.get("_data_version", 0))
         df = pd.DataFrame({"교사명": list(cum.keys()), "누적보강": list(cum.values())}).sort_values("누적보강", ascending=False)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
         if not df.empty:
             st.bar_chart(df.set_index("교사명")["누적보강"])
 
@@ -4561,7 +4793,7 @@ if "시간표 변경 테스트용" in tab_map:
 
         if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
-            st.dataframe(st.session_state.test_swaps, use_container_width=True, hide_index=True)
+            st.dataframe(st.session_state.test_swaps, width="stretch", hide_index=True)
 
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
@@ -4592,70 +4824,20 @@ if "시간표 변경 테스트용" in tab_map:
 # ------------------------------------------------------------------ 변경된 교사 주간표
 if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
-        # 상단 영역은 달력과 변경 교사 목록을 좌우로 나눈다.
-        # 달력은 필요한 만큼만 사용하고, 남는 가로 공간에는 변경 교사를 배치해
-        # 날짜 선택과 대상 교사 확인을 한 화면에서 끝낼 수 있도록 한다.
-        top_calendar, top_teachers = st.columns([0.42, 0.58], vertical_alignment="top")
-        with top_calendar:
-            ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
-        with top_teachers:
-            changed = get_changed_teachers_for_week(ref)
-            st.markdown(
-                f"<div style='font-size:.82rem;font-weight:650;color:#374151;margin:.05rem 0 .45rem'>"
-                f"변경 교사 <span style='color:#6b7280;font-weight:500'>{len(changed)}명</span></div>",
-                unsafe_allow_html=True,
-            )
-            if changed:
-                # 이름은 3열로 배치해 긴 한 줄 목록보다 빠르게 훑을 수 있게 한다.
-                teacher_cols = st.columns(3)
-                for i, teacher_name in enumerate(changed):
-                    with teacher_cols[i % 3]:
-                        st.markdown(
-                            f"<div style='padding:.28rem .45rem;margin:0 0 .28rem;"
-                            f"font-size:.78rem'>{teacher_name}</div>",
-                            unsafe_allow_html=True,
-                        )
-            else:
-                st.caption("이번 주차 변경 교사 없음")
-
+        ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
+        changed = get_changed_teachers_for_week(ref)
         if not changed:
-            st.info("이번 주차 변경 교사 없음")
+            st.markdown('<div class="work-note"><strong>변경된 교사가 없습니다.</strong> 선택한 주간에는 현재 시간표 변경 이력이 없습니다.</div>', unsafe_allow_html=True)
         else:
-            # 변경 교사마다 별도의 매트릭스를 만들지 않고, 한 개의 주간표에
-            # 교사별 1행씩 배치한다. 기존 방식은 교사 수만큼 표가 반복되어
-            # 화면이 길어지고, 같은 헤더가 계속 반복되어 가독성이 떨어졌다.
-            changed_week = effective_teacher_matrix(ref, st.session_state.get("_data_version", 0), use_test=False)
-            if changed_week.empty:
-                st.info("변경 교사의 주간 시간표를 표시할 데이터가 없습니다.")
+            st.markdown(f'<div class="work-section-title">이번 주 변경 교사 <span style="color:var(--ui-muted);font-weight:400">{len(changed)}명</span></div>', unsafe_allow_html=True)
+            selected_changed = st.selectbox("교사", changed, key="changed_teacher_selected", label_visibility="collapsed")
+            teacher_grid, _ = get_teacher_week_view(str(selected_changed), ref, use_test=False)
+            if teacher_grid.empty:
+                st.info("선택한 교사의 주간 시간표를 표시할 데이터가 없습니다.")
             else:
-                changed_names = {str(t).strip() for t in changed}
-                changed_week = changed_week[
-                    changed_week["교사명"].astype(str).str.strip().isin(changed_names)
-                ].copy()
-                changed_week["__order"] = changed_week["교사명"].astype(str).str.strip().map(
-                    {str(t).strip(): i for i, t in enumerate(changed)}
-                )
-                changed_week = (
-                    changed_week.sort_values("__order", kind="stable")
-                    .drop(columns="__order")
-                    .reset_index(drop=True)
-                )
-                st.caption("교사별 개별 주간표 · 🔄 교환 · 🧪 테스트교환 · 🟢 보강 · 🟡 시간강사")
-                # 변경 교사는 서로 섞지 않고, 이미지처럼 교사별 카드 안에
-                # 1~7교시를 세로로 두고 월~금 5열을 가로로 배치한다.
-                # 이렇게 하면 한 화면에서 읽기 쉽고 교사별 구분도 명확하다.
-                for idx, teacher_name in enumerate(changed):
-                    teacher_grid, _ = get_teacher_week_view(str(teacher_name), ref, use_test=False)
-                    if teacher_grid.empty:
-                        continue
-                    with st.expander(f"👤 {teacher_name}", expanded=True):
-                        render_standard_weekly_matrix(
-                            teacher_grid, ref, row_label="교시",
-                            key=f"changed_teacher_week_{idx}",
-                            title=None, use_test=False, height=286,
-                            open_dialog=False
-                        )
-
+                st.markdown(f'<div class="matrix-toolbar"><div><div class="matrix-title">{selected_changed} · 변경된 주간 시간표</div><div class="matrix-subtitle">조회 전용 · 셀을 눌러도 작업 창이 열리지 않습니다.</div></div></div>', unsafe_allow_html=True)
+                st.markdown('<div class="matrix-legend"><span>↻ 교환</span><span>+ 보강</span><span>• 시간강사</span></div>', unsafe_allow_html=True)
+                render_standard_weekly_matrix(teacher_grid, ref, row_label="교시", key="changed_teacher_week_single", title=None, use_test=False, height=310, open_dialog=False)
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
     with tab_map["📋 복무 관리 & 판단"]:
@@ -4719,7 +4901,7 @@ if "📋 복무 관리 & 판단" in tab_map:
                 grouped = show_duties.groupby(["교사명", "일자", "사유"]).agg({"교시": list}).reset_index()
                 grouped["교시표시"] = grouped["교시"].apply(format_periods)
                 show_df = grouped[["교사명", "일자", "교시표시", "사유"]]
-                st.dataframe(show_df, height=220, hide_index=True, use_container_width=True)
+                st.dataframe(show_df, height=220, hide_index=True, width="stretch")
 
                 options = [f"{row['교사명']} · {row['일자']} · {row['교시표시']} · {row['사유']}" for _, row in show_df.iterrows()]
                 selected_label = st.selectbox("복무 선택 (이름·일자 기준)", options, key="duty_select_name")
@@ -4884,7 +5066,7 @@ if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
 
         with st.expander("예산 변경 이력 보기"):
             budget_df = load_budget_df()
-            st.dataframe(budget_df.tail(20), use_container_width=True, hide_index=True)
+            st.dataframe(budget_df.tail(20), width="stretch", hide_index=True)
 
         st.markdown("### 1. 불가능한 교사·기간 선택 (시작일 ~ 종료일)")
 
@@ -4928,7 +5110,7 @@ if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
 
         if st.session_state.multi_absent:
             st.write("**현재 선택된 불가능 목록**")
-            st.dataframe(pd.DataFrame(st.session_state.multi_absent), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(st.session_state.multi_absent), width="stretch", hide_index=True)
             if st.button("목록 초기화"):
                 st.session_state.multi_absent = []
                 st.rerun()
@@ -4985,7 +5167,7 @@ if "🛠️ 다중 출장·전체 조정 추천" in tab_map:
 
             if "_multi_recs" in st.session_state and not st.session_state["_multi_recs"].empty:
                 st.markdown("### 추천 결과 (동일학급 우선 + 예산 반영)")
-                st.dataframe(st.session_state["_multi_recs"], use_container_width=True, hide_index=True)
+                st.dataframe(st.session_state["_multi_recs"], width="stretch", hide_index=True)
                 st.caption("실제 적용은 「시간표 맞교환 & 변경 추천」 탭이나 「복무 관리」 탭에서 진행하세요.")
 
 # ------------------------------------------------------------------ 아이디·권한 관리
@@ -4999,7 +5181,7 @@ if "🔑 아이디·권한 관리" in tab_map:
         edited = st.data_editor(
             ids_df,
             num_rows="dynamic",
-            use_container_width=True,
+            width="stretch",
             key="id_editor",
             column_config={
                 "아이디": st.column_config.TextColumn("아이디", required=True),
@@ -5030,7 +5212,7 @@ if "🔑 아이디·권한 관리" in tab_map:
             if st.button("아이디 추가 요청 목록 보기"):
                 req_ws = get_worksheet(WORK_SHEET_ID, "아이디추가요청")
                 req_df = df_from_worksheet(req_ws)
-                st.dataframe(req_df, use_container_width=True)
+                st.dataframe(req_df, width="stretch")
 
         st.divider()
         st.markdown("### 권한 설명")
