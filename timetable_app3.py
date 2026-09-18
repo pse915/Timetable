@@ -73,13 +73,6 @@ p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLab
 [data-testid="stExpander"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-md)!important;box-shadow:none!important;overflow:hidden!important}
 [data-testid="stExpander"] summary{min-height:42px!important;padding:6px 12px!important;color:var(--ui-text)!important;font-size:13px!important;font-weight:600!important}
 [data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}
-/* ---------- login hero (이전 버전에서 정의가 누락되어 스타일이 전혀 먹지 않던 클래스들) ---------- */
-.login-shell{max-width:420px;margin:6vh auto 0}
-.login-mark{background:var(--ui-soft);border:1px solid var(--ui-line-soft);border-radius:var(--ui-radius-lg);padding:20px;text-align:center;margin:0 0 22px}
-.ai-hero-kicker{color:var(--ui-muted);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
-.ai-hero-title{margin:.5rem 0 .5rem;font-size:clamp(1.6rem,3vw,2.3rem);line-height:1.2;font-weight:600;letter-spacing:-.03em;color:var(--ui-text)}
-.ai-hero-sub{color:var(--ui-muted);font-size:14px;line-height:1.55;margin:0 0 1.3rem}
-.ai-prompt-glow{position:relative;margin:0 auto;max-width:420px}
 /* ---------- typography ---------- */
 h1,h2,h3,h4,h5,h6{color:var(--ui-text)!important}h2{font-size:22px!important;font-weight:600!important;letter-spacing:-.025em!important}h3{font-size:18px!important;font-weight:600!important;letter-spacing:-.02em!important}h4{font-size:15px!important;font-weight:600!important}
 [data-testid="stCaptionContainer"],.stCaption{color:var(--ui-muted)!important;font-size:12px!important;line-height:1.45!important}
@@ -140,46 +133,6 @@ UI_FONT_OPTIONS = {
     "Inter": '"Inter", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif',
 }
 UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
-
-# ==========================================================================================
-# UI 디자인(테마) 설정
-# - 화면에서 쓰는 색·모양은 전부 CSS 변수(--ui-*)로만 참조하게 되어 있으므로,
-#   테마 전환은 이 변수들의 값만 바꿔 주입하면 된다. 선택자(버튼/카드/표 등)는
-#   손대지 않으므로 기존 기능·레이아웃은 완전히 그대로 유지된다.
-# - "Apple": 기존 기본 디자인(밝은 배경, 부드러운 pill 형태, 파란 강조색).
-# - "X.AI": xAI(Grok) 브랜드가 주는 느낌을 참고해 새로 만든 다크·고대비·직각 테마.
-#   실제 xAI 웹사이트를 그대로 복제한 것은 아니며, 학교 업무 화면에 맞게 절제해서
-#   재구성한 독자적인 다크 테마다.
-# ==========================================================================================
-UI_THEME_OPTIONS = {
-    "Apple": {
-        "--ui-bg": "#ffffff", "--ui-surface": "#ffffff", "--ui-soft": "#f5f5f7", "--ui-soft-2": "#fafafc",
-        "--ui-text": "#1d1d1f", "--ui-text-2": "#3a3a3c", "--ui-muted": "#6e6e73", "--ui-muted-2": "#86868b",
-        "--ui-line": "#d2d2d7", "--ui-line-soft": "#e5e5ea", "--ui-accent": "#0066cc", "--ui-accent-hover": "#0071e3",
-        "--ui-focus": "rgba(0,102,204,.20)", "--ui-success": "#1b7f3a", "--ui-danger": "#c62828",
-        "--ui-radius-sm": "8px", "--ui-radius-md": "12px", "--ui-radius-lg": "16px", "--ui-pill": "999px",
-    },
-    "X.AI": {
-        "--ui-bg": "#000000", "--ui-surface": "#0c0c0d", "--ui-soft": "#18181a", "--ui-soft-2": "#121213",
-        "--ui-text": "#f5f5f5", "--ui-text-2": "#d4d4d5", "--ui-muted": "#9a9a9d", "--ui-muted-2": "#6f6f73",
-        "--ui-line": "#2c2c2e", "--ui-line-soft": "#232325", "--ui-accent": "#ffffff", "--ui-accent-hover": "#e4e4e4",
-        "--ui-focus": "rgba(255,255,255,.22)", "--ui-success": "#37d67a", "--ui-danger": "#ff5c5c",
-        "--ui-radius-sm": "3px", "--ui-radius-md": "5px", "--ui-radius-lg": "7px", "--ui-pill": "6px",
-    },
-}
-UI_THEME_DEFAULT = "Apple"
-
-
-def _theme_style_block(theme_name: str, font_name: str) -> str:
-    """선택된 테마(색상·모양 변수)와 글꼴을 하나의 <style> 블록으로 합쳐 반환한다.
-
-    테마 이름이 알 수 없는 값이면(세션 손상 등) 조용히 기본 테마로 대체해
-    KeyError로 화면 전체가 죽는 일이 없게 한다.
-    """
-    tokens = UI_THEME_OPTIONS.get(theme_name, UI_THEME_OPTIONS[UI_THEME_DEFAULT])
-    font_stack = UI_FONT_OPTIONS.get(font_name, UI_FONT_OPTIONS[UI_FONT_DEFAULT])
-    vars_css = ";".join(f"{k}:{v}" for k, v in tokens.items())
-    return f"""<style>:root {{ {vars_css}; --app-font: {font_stack}; }}</style>"""
 
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
@@ -3345,7 +3298,7 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         return None
     monday = ref_date - timedelta(days=ref_date.weekday())
     if title:
-        st.markdown(f"<div style='font-size:.86rem;font-weight:600;color:var(--ui-muted);margin:0 0 .12rem .1rem'>{title}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size:.86rem;font-weight:600;color:#6b7280;margin:0 0 .12rem .1rem'>{title}</div>", unsafe_allow_html=True)
     if show_week_dates:
         dates = [monday + timedelta(days=i) for i in range(5)]
         st.markdown("<div class='compact-nav'>" + "　".join(f"{DAYS[i]} {dates[i]:%m.%d}" for i in range(5)) + "</div>", unsafe_allow_html=True)
@@ -4214,23 +4167,17 @@ def show_login_page():
     if "login_locked" not in st.session_state:
         st.session_state.login_locked = False
 
-    st.markdown("<div class='login-shell'>", unsafe_allow_html=True)
-
     # ===== 구글 드라이브 이미지 =====
     IMAGE_URL = "https://i.imgur.com/Gl0YDO3.jpeg"
     st.markdown(
         f"""
-        <div class="login-mark">
+        <div style="background:rgba(255,255,255,.035); padding:20px; border:1px solid rgba(255,255,255,.08); border-radius: 18px; text-align: center; margin-bottom: 20px;">
             <img src="{IMAGE_URL}" width="150" style="object-fit: contain;">
         </div>
-        """,
+        """, 
         unsafe_allow_html=True
     )
     # ==============================
-    # 이전 버전은 이 카드에 반투명 흰색(rgba(255,255,255,.035))을 썼는데, 페이지 배경 자체가
-    # 흰색이라 카드 배경/테두리가 거의 보이지 않는 상태였다(다크 히어로 배경을 가정한 값이
-    # 흰 배경에 그대로 남아있던 실제 버그). login-mark 클래스는 테마 토큰(var(--ui-soft) 등)을
-    # 쓰므로 Apple/X.AI 테마 전환에도 항상 올바르게 보인다.
 
     st.markdown(f"<div class='ai-hero-kicker'>{SCHOOL_YEAR} · SCHOOL OPERATIONS</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='ai-hero-title'>{SCHOOL_NAME}</div>", unsafe_allow_html=True)
@@ -4286,8 +4233,6 @@ def show_login_page():
     if st.session_state.login_attempts > 0:
         st.warning(f"현재 로그인 실패 횟수: {st.session_state.login_attempts} / {MAX_LOGIN_ATTEMPTS}")
 
-    st.markdown("</div>", unsafe_allow_html=True)  # /.login-shell
-
     st.divider()
     st.markdown("#### 📝 아이디 추가 요청 (게스트용)")
     with st.form("id_request_form"):
@@ -4340,11 +4285,12 @@ if not init_state():
 
 if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_OPTIONS:
     st.session_state.ui_font = UI_FONT_DEFAULT
-if "ui_theme" not in st.session_state or st.session_state.ui_theme not in UI_THEME_OPTIONS:
-    st.session_state.ui_theme = UI_THEME_DEFAULT
 
-# 현재 선택된 디자인(테마)·글꼴을 CSS 변수로 주입한다. 둘 다 앱 전체에 즉시 적용된다.
-st.markdown(_theme_style_block(st.session_state.ui_theme, st.session_state.ui_font), unsafe_allow_html=True)
+# 현재 선택된 폰트를 CSS 변수로 주입한다. 폰트 선택은 앱 전체에 즉시 적용된다.
+st.markdown(
+    f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}</style>""",
+    unsafe_allow_html=True,
+)
 
 # ==========================================================================================
 # 상단 가로 업무 Toolbar
@@ -4362,16 +4308,6 @@ def render_tools_dialog():
         return
 
     st.markdown('<div class="tool-section-title">화면</div>', unsafe_allow_html=True)
-    selected_theme = st.radio(
-        "디자인",
-        list(UI_THEME_OPTIONS.keys()),
-        index=list(UI_THEME_OPTIONS.keys()).index(st.session_state.get("ui_theme", UI_THEME_DEFAULT)),
-        key="ui_theme_selector",
-        horizontal=True,
-        help="화면 전체의 색상·모양을 전환합니다. 기능과 데이터는 동일하게 유지됩니다.",
-    )
-    st.session_state.ui_theme = selected_theme
-
     selected_font = st.selectbox(
         "글꼴",
         list(UI_FONT_OPTIONS.keys()),
@@ -4380,11 +4316,11 @@ def render_tools_dialog():
         help="이 브라우저에서 사용할 수 있는 글꼴을 우선 적용합니다. 학교 PC에 해당 글꼴이 설치되어 있지 않으면 다음 대체 글꼴이 사용됩니다.",
     )
     st.session_state.ui_font = selected_font
-
-    # 테마·글꼴을 하나의 <style> 블록으로 합쳐 즉시 재주입한다. 다이얼로그 안에서
-    # 바뀐 값이 다음 rerun 전에도 바로 반영되도록 여기서도 한 번 더 그린다.
-    st.markdown(_theme_style_block(selected_theme, selected_font), unsafe_allow_html=True)
-    st.caption("디자인·글꼴 선택은 이 기기(브라우저)에만 적용되며, 실제 시간표·결보강 데이터에는 영향을 주지 않습니다.")
+    st.markdown(
+        f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}</style>""",
+        unsafe_allow_html=True,
+    )
+    st.caption("글꼴은 이 기기에 설치된 폰트를 우선 사용합니다.")
 
     st.divider()
 
