@@ -5,13 +5,13 @@
 - 결보강 계획서: 보강수업 칸에 '보강 배정된 교사'가 나오도록 수정
 - 연계 순환 알고리즘 대폭 가속
 - 모든 기존 기능 유지
-- Tesla-inspired 디자인 기조 버전
+- Apple 업무형 디자인 기조 버전
 """
 
 import io
 from contextlib import contextmanager
-import threading
 import uuid
+import threading
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
@@ -39,16 +39,16 @@ st.markdown("""
 :root{
  --ui-bg:#ffffff;--ui-surface:#ffffff;--ui-soft:#f5f5f7;--ui-soft-2:#fafafc;
  --ui-text:#1d1d1f;--ui-text-2:#3a3a3c;--ui-muted:#6e6e73;--ui-muted-2:#86868b;
- --ui-line:#d2d2d7;--ui-line-soft:#e5e5ea;--ui-accent:#3e6ae1;--ui-accent-hover:#3457bd;
- --ui-focus:rgba(62,106,225,.22);--ui-success:#1b7f3a;--ui-danger:#c62828;
- --ui-radius-sm:4px;--ui-radius-md:6px;--ui-radius-lg:8px;--ui-pill:4px;
+ --ui-line:#d2d2d7;--ui-line-soft:#e5e5ea;--ui-accent:#0066cc;--ui-accent-hover:#0071e3;
+ --ui-focus:rgba(0,102,204,.20);--ui-success:#1b7f3a;--ui-danger:#c62828;
+ --ui-radius-sm:8px;--ui-radius-md:12px;--ui-radius-lg:16px;--ui-pill:999px;
 }
 html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"]{background:var(--ui-bg)!important;color:var(--ui-text)!important}
 body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 /* 텍스트에만 앱 폰트 적용. Streamlit 아이콘 폰트는 건드리지 않는다. */
 p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"]{font-family:var(--app-font,"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif)!important}
 [class*="material-symbols"],[data-testid="stIconMaterial"]{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-style:normal!important}
-[data-testid="stHeader"]{background:rgba(255,255,255,.94)!important;border-bottom:1px solid var(--ui-line-soft)!important;backdrop-filter:saturate(150%) blur(16px)}
+[data-testid="stHeader"]{background:rgba(255,255,255,.88)!important;border-bottom:1px solid var(--ui-line-soft)!important;backdrop-filter:saturate(150%) blur(16px)}
 [data-testid="stDecoration"]{display:none!important}
 .block-container{width:100%!important;max-width:none!important;padding:0 clamp(16px,2.2vw,42px) 36px!important}
 .app-top-safe-space{height:30px;width:100%}
@@ -59,12 +59,12 @@ p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLab
 .app-topbar [data-testid="stRadio"] [role="radiogroup"]{display:flex!important;align-items:center!important;gap:2px!important;width:100%!important;padding:2px!important;background:var(--ui-soft)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-pill)!important;overflow-x:auto!important;scrollbar-width:none}
 .app-topbar [data-testid="stRadio"] [role="radiogroup"]::-webkit-scrollbar{display:none}
 .app-topbar [data-testid="stRadio"] [role="radio"]{flex:0 0 auto!important;min-height:34px!important;padding:0 14px!important;border-radius:var(--ui-pill)!important;color:var(--ui-muted)!important;font-size:13px!important;font-weight:500!important;background:transparent!important;border:0!important}
-.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-weight:600!important;box-shadow:none!important}
+.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-weight:600!important;box-shadow:0 1px 3px rgba(0,0,0,.08)!important}
 .app-topbar [data-testid="stRadio"] [role="radio"]>div:first-child{display:none!important}
 .app-topbar [data-testid="stSelectbox"]>div>div{min-height:34px!important;border-radius:var(--ui-pill)!important;background:var(--ui-soft)!important;border-color:var(--ui-line-soft)!important}
 /* ---------- page header ---------- */
 .work-page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:8px 2px 16px;margin:0 0 18px;border-bottom:1px solid var(--ui-line-soft)}
-.work-page-head h1{margin:0!important;font-size:30px!important;line-height:1.12!important;font-weight:500!important;letter-spacing:0!important;color:var(--ui-text)!important}
+.work-page-head h1{margin:0!important;font-size:30px!important;line-height:1.12!important;font-weight:600!important;letter-spacing:-.04em!important;color:var(--ui-text)!important}
 .work-page-head p{margin:6px 0 0!important;font-size:13px!important;line-height:1.45!important;color:var(--ui-muted)!important}
 .work-page-meta{font-size:12px;color:var(--ui-muted);white-space:nowrap;padding-bottom:3px}
 /* ---------- sections / cards ---------- */
@@ -74,7 +74,7 @@ p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLab
 [data-testid="stExpander"] summary{min-height:42px!important;padding:6px 12px!important;color:var(--ui-text)!important;font-size:13px!important;font-weight:600!important}
 [data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}
 /* ---------- typography ---------- */
-h1,h2,h3,h4,h5,h6{color:var(--ui-text)!important}h2{font-size:22px!important;font-weight:500!important;letter-spacing:0!important}h3{font-size:18px!important;font-weight:500!important;letter-spacing:0!important}h4{font-size:15px!important;font-weight:600!important}
+h1,h2,h3,h4,h5,h6{color:var(--ui-text)!important}h2{font-size:22px!important;font-weight:600!important;letter-spacing:-.025em!important}h3{font-size:18px!important;font-weight:600!important;letter-spacing:-.02em!important}h4{font-size:15px!important;font-weight:600!important}
 [data-testid="stCaptionContainer"],.stCaption{color:var(--ui-muted)!important;font-size:12px!important;line-height:1.45!important}
 /* ---------- controls ---------- */
 .stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:40px!important;padding:7px 16px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;box-shadow:none!important;transform:none!important;transition:background .12s ease,border-color .12s ease!important;font-size:13px!important;font-weight:500!important}
@@ -100,10 +100,10 @@ input::placeholder,textarea::placeholder{color:var(--ui-muted-2)!important}
 .changed-teacher-selector{display:flex;align-items:center;gap:8px;margin:0 0 10px}.changed-teacher-chip{display:inline-flex;align-items:center;padding:7px 10px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft-2);color:var(--ui-text);font-size:12px}
 /* ---------- notes / states ---------- */
 .apple-note,.work-note{padding:10px 12px;margin:0 0 12px;background:var(--ui-soft-2);border:1px solid var(--ui-line-soft);border-radius:10px;color:var(--ui-muted);font-size:12px;line-height:1.5}.apple-note strong,.work-note strong{color:var(--ui-text)}
-.sandbox-title{margin:0 0 4px!important;font-size:24px!important;line-height:1.2!important;font-weight:500!important;letter-spacing:0!important;color:var(--ui-text)!important}
+.sandbox-title{margin:0 0 4px!important;font-size:24px!important;line-height:1.2!important;font-weight:600!important;letter-spacing:-.045em!important;color:var(--ui-text)!important}
 .swap-group-head{display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px;padding-top:4px}.swap-group-title{font-size:13px;font-weight:600;color:var(--ui-text)}.swap-group-count{font-size:11px;color:var(--ui-muted);padding:3px 7px;border:1px solid var(--ui-line-soft);border-radius:999px;background:var(--ui-soft)}
 /* ---------- dialog ---------- */
-[data-testid="stDialog"]>div>div{max-height:calc(100vh - 5rem)!important;overflow-y:auto!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:8px!important;box-shadow:0 10px 30px rgba(0,0,0,.10)!important}
+[data-testid="stDialog"]>div>div{max-height:calc(100vh - 5rem)!important;overflow-y:auto!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:18px!important;box-shadow:0 18px 48px rgba(0,0,0,.14)!important}
 [data-testid="stDialog"] [data-testid="stVerticalBlockBorderWrapper"]{border:0!important;background:transparent!important}
 [data-testid="stDialog"] [data-testid="stSlider"]{margin:0!important;padding:3px 0!important}[data-testid="stDialog"] [data-testid="stSlider"]>label{display:none!important}
 [data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"]{min-height:34px!important;margin:0!important}
@@ -113,33 +113,18 @@ a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var
 /* ---------- utility ---------- */
 [data-testid="stMetric"]{padding:8px 0!important}.ui-kpi-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px}.ui-kpi{padding:13px 15px;border:1px solid var(--ui-line-soft);border-radius:12px;background:var(--ui-surface)}.ui-kpi-label{font-size:11px;color:var(--ui-muted)}.ui-kpi-value{margin-top:4px;font-size:21px;font-weight:600;color:var(--ui-text)}
 @media(max-width:900px){.block-container{padding-left:12px!important;padding-right:12px!important}.app-top-safe-space{height:24px}.work-page-head{display:block}.work-page-meta{margin-top:8px}.ui-kpi-row{grid-template-columns:1fr}.app-topbar{overflow:hidden}}
-@media(prefers-color-scheme:dark){:root{--ui-bg:#000;--ui-surface:#1c1c1e;--ui-soft:#2c2c2e;--ui-soft-2:#232326;--ui-text:#f5f5f7;--ui-text-2:#e5e5ea;--ui-muted:#a1a1a6;--ui-muted-2:#8e8e93;--ui-line:#48484a;--ui-line-soft:#38383a;--ui-accent:#2997ff;--ui-accent-hover:#47a6ff;--ui-focus:rgba(41,151,255,.30)}[data-testid="stHeader"]{background:rgba(0,0,0,.92)!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button,[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"]{background:var(--ui-surface)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important}[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important}[data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}[data-testid="stDialog"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}.ui-kpi{background:var(--ui-surface)!important;border-color:var(--ui-line-soft)!important}}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown(r"""
-<style>
-:root{--ui-bg:#fff;--ui-surface:#fff;--ui-soft:#f5f5f7;--ui-text:#171a20;--ui-text-2:#393c41;--ui-muted:#6e7074;--ui-line:#d8dadd;--ui-accent:#3e6ae1}
-.block-container{padding-top:0!important;padding-bottom:56px!important}
-.app-top-safe-space{height:30px!important}.app-topbar{min-height:58px!important;padding:0 0 10px!important;margin-bottom:26px!important;border-bottom:1px solid #eceef0!important;gap:16px!important}
-.app-identity{font-size:11px!important;color:#7b7e83!important}.app-identity strong{font-size:13px!important;color:#171a20!important}
-.app-topbar .stButton>button{height:36px!important;min-height:36px!important;border-radius:6px!important}.app-topbar [data-testid="stRadio"] [role="radiogroup"]{background:transparent!important;border:0!important;padding:0!important;gap:2px!important}.app-topbar [data-testid="stRadio"] [role="radio"]{height:36px!important;min-height:36px!important;padding:0 12px!important;border-radius:6px!important;font-size:12px!important}.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:#f0f1f2!important;color:#171a20!important;box-shadow:none!important}
-.work-page-head{padding:0 2px 20px!important;margin-bottom:22px!important;border-bottom:0!important;align-items:center!important}.work-page-head h1{font-size:32px!important;line-height:1.1!important;letter-spacing:-.035em!important}.work-page-head p{font-size:13px!important;color:#7b7e83!important;margin-top:7px!important}.work-page-meta{font-size:11px!important;color:#7b7e83!important;padding:7px 10px!important;border:1px solid #e3e5e7!important;border-radius:6px!important;background:#fafafa!important}
-.work-section{margin-bottom:30px!important}.work-section-title{font-size:15px!important}.work-section-note{font-size:12px!important;color:#7b7e83!important}
-[data-testid="stDateInput"] label,[data-testid="stSelectbox"] label,[data-testid="stRadio"] label,[data-testid="stTextInput"] label{font-size:11px!important;color:#6e7074!important;font-weight:500!important;margin-bottom:5px!important}
-[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{border-radius:6px!important;border-color:#d8dadd!important;min-height:38px!important}
-.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:38px!important;border-radius:6px!important;font-size:12px!important;padding:6px 14px!important}.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{background:#3e6ae1!important;border-color:#3e6ae1!important}
-[data-testid="stDataFrame"]{border:1px solid #d8dadd!important;border-radius:6px!important;box-shadow:none!important}.secondary-menu-row{margin:6px 0 14px!important;padding:8px;border:1px solid #d8dadd;border-radius:8px;background:#f7f7f7}.secondary-menu-row .stButton>button{min-height:34px!important;height:34px!important;font-size:12px!important;padding:0 10px!important}.matrix-toolbar{margin-bottom:8px!important}.matrix-title{font-size:15px!important}.matrix-subtitle{font-size:11px!important;color:#7b7e83!important}.matrix-legend{gap:14px!important;font-size:11px!important;color:#7b7e83!important}
-[data-testid="stDataFrame"] [role="columnheader"]{background:#f3f4f5!important;font-size:11px!important;color:#393c41!important;border-color:#e7e8ea!important}.swap-result-summary{border-radius:6px!important;background:#f3f4f5!important;border-color:#e7e8ea!important}.swap-group-head{margin:20px 0 6px!important;padding:0!important}.swap-group-count{border:0!important;border-radius:6px!important;background:#f3f4f5!important}
-[data-testid="stDialog"]>div>div{border-radius:8px!important;border:1px solid #d8dadd!important;box-shadow:0 14px 42px rgba(0,0,0,.12)!important}.apple-note,.work-note{border-radius:6px!important;background:#fafafa!important}.sandbox-title{font-size:28px!important;letter-spacing:-.04em!important}
-@media(max-width:1400px){.block-container{padding-left:22px!important;padding-right:22px!important}.app-topbar{gap:9px!important}}
-@media(max-width:900px){.block-container{padding-left:14px!important;padding-right:14px!important}.work-page-head{display:block!important}.work-page-meta{display:inline-block;margin-top:10px}}
+@media(prefers-color-scheme:dark){:root{--ui-bg:#000;--ui-surface:#1c1c1e;--ui-soft:#2c2c2e;--ui-soft-2:#232326;--ui-text:#f5f5f7;--ui-text-2:#e5e5ea;--ui-muted:#a1a1a6;--ui-muted-2:#8e8e93;--ui-line:#48484a;--ui-line-soft:#38383a;--ui-accent:#2997ff;--ui-accent-hover:#47a6ff;--ui-focus:rgba(41,151,255,.30)}[data-testid="stHeader"]{background:rgba(0,0,0,.76)!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button,[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"]{background:var(--ui-surface)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important}[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important}[data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}[data-testid="stDialog"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}.ui-kpi{background:var(--ui-surface)!important;border-color:var(--ui-line-soft)!important}}
 </style>
 """, unsafe_allow_html=True)
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
-APP_VERSION = "5.0-Tesla-ProductUX-Renewal-StartupSafe"
+APP_VERSION = "4.6-Apple-xAI-UX-Stable"
+
+# UI 디자인 모드: 업무 데이터/로직과 완전히 분리된 표현 계층이다.
+DESIGN_APPLE = "Apple 업무형"
+DESIGN_XAI = "xAI-inspired"
+DESIGN_OPTIONS = [DESIGN_APPLE, DESIGN_XAI]
 
 # ==========================================================================================
 # UI 폰트 설정
@@ -147,13 +132,12 @@ APP_VERSION = "5.0-Tesla-ProductUX-Renewal-StartupSafe"
 # - 한국어 fallback을 충분히 제공하여 학교 PC에서도 깨지지 않게 한다.
 # ==========================================================================================
 UI_FONT_OPTIONS = {
-    "Universal Sans (Tesla)": '"Universal Sans Text", "Universal Sans Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", Arial, sans-serif',
     "시스템 기본 (Apple / Windows)": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif',
     "Pretendard": '"Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif',
     "Noto Sans KR": '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif',
     "Inter": '"Inter", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif',
 }
-UI_FONT_DEFAULT = "Universal Sans (Tesla)"
+UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
 
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
@@ -781,12 +765,7 @@ def load_id_sheet():
         df = pd.DataFrame([{
             "아이디": MASTER_ID, "이름": "관리자", "권한": ROLE_MASTER, "허용탭": ",".join(ALL_TABS)
         }])
-        # 시트가 일시적으로 접근되지 않더라도 로그인 화면 자체는 살아 있어야 한다.
-        if ws is not None:
-            try:
-                df_to_worksheet(ws, df)
-            except Exception:
-                pass
+        df_to_worksheet(ws, df)
     for c in ["아이디", "이름", "권한", "허용탭"]:
         if c not in df.columns:
             df[c] = ""
@@ -826,11 +805,7 @@ def load_budget_df():
             "변동금액": 2200000,
             "잔액": 2200000
         }])
-        if ws is not None:
-            try:
-                df_to_worksheet(ws, init_df)
-            except Exception:
-                pass
+        df_to_worksheet(ws, init_df)
         return init_df
     if "보강예산 현황" in df.columns and "잔액" not in df.columns:
         try:
@@ -915,9 +890,7 @@ def push_history(action_name="작업"):
         "swaps": st.session_state.get("swaps", pd.DataFrame()).copy(deep=True),
         "part_time": st.session_state.get("part_time", pd.DataFrame()).copy(deep=True),
         "duties": st.session_state.get("duties", pd.DataFrame()).copy(deep=True),
-        # 예산 시트는 부가 데이터이므로 초기 구동을 막지 않는다.
-        # Google Sheets 장애/권한 문제에서는 빈 snapshot으로 시작하고 실제 예산 기능에서 재시도한다.
-        "budget_df": pd.DataFrame(),
+        "budget_df": load_budget_df().copy(deep=True) if st.session_state.get("logged_in", False) else pd.DataFrame(),
     }
     def fingerprint(x):
         return tuple((k, tuple(v.fillna("").astype(str).tolist())) for k,v in sorted(x.items()) if isinstance(v,pd.DataFrame))
@@ -1090,11 +1063,30 @@ def save_work_data_to_gsheet(changed_sheets=None):
 
 
 def init_state():
-    if "teachers" in st.session_state:
-        return
+    # 실패한 첫 로드를 정상 상태로 저장하지 않는다. 기존 버전은 Google Sheets
+    # 일시 오류/네트워크 지연으로 tt가 빈 DataFrame이 되어도 "teachers" 키를 먼저
+    # 만들어 버려, 이후 실행마다 실제 재로딩 없이 "시간표를 불러오는 중..."에서
+    # 영구 정지하는 문제가 있었다.
+    existing_tt = st.session_state.get("timetable")
+    existing_ti = st.session_state.get("teachers")
+    if isinstance(existing_tt, pd.DataFrame) and not existing_tt.empty:
+        return True
+
     ti, tt = load_timetable_from_gsheet()
-    st.session_state.teachers = ti
+    if tt is None or tt.empty:
+        st.session_state.pop("teachers", None)
+        st.session_state.pop("timetable", None)
+        detail = st.session_state.get("_gsheet_last_error", "")
+        st.session_state["_load_error"] = (
+            "시간표 시트에서 유효한 데이터를 받지 못했습니다. "
+            "Google Sheets 인증/공유 권한, 시트 이름(시간표), 네트워크 상태를 확인하세요."
+            + (f" 최근 오류: {detail}" if detail else "")
+        )
+        return False
+
+    st.session_state.teachers = ti if isinstance(ti, pd.DataFrame) else pd.DataFrame()
     st.session_state.timetable = tt
+    st.session_state.pop("_load_error", None)
 
     absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
 
@@ -1119,6 +1111,7 @@ def init_state():
     st.session_state.history_index = -1
     st.session_state.test_swaps = pd.DataFrame()
     push_history("초기 상태")
+    return True
 
 # ==========================================================================================
 # 핵심 로직
@@ -1816,6 +1809,89 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
     return True
 
 
+def apply_test_swaps_to_live():
+    """현재 테스트 결과를 실제 맞교환 이력으로 반영한다.
+
+    테스트 데이터는 Google Sheets에 저장되지 않는다. 반영 시에는 테스트 시점의
+    상태를 그대로 복사하지 않고 현재 실제 시간표 상태를 기준으로 다시 검증한 뒤
+    실제 `swaps`에 기록한다. 이미 반영한 TEST 변경ID는 중복 반영하지 않는다.
+    """
+    if not is_edu_or_master():
+        return False, "교육과정부 또는 마스터만 테스트 결과를 실제 반영할 수 있습니다."
+    test_df = st.session_state.get("test_swaps", pd.DataFrame())
+    if not isinstance(test_df, pd.DataFrame) or test_df.empty:
+        return False, "반영할 테스트 결과가 없습니다."
+
+    live_df = st.session_state.get("swaps", pd.DataFrame())
+    if not isinstance(live_df, pd.DataFrame):
+        live_df = pd.DataFrame()
+    existing_ids = set(live_df.get("변경ID", pd.Series(dtype=str)).astype(str)) if not live_df.empty else set()
+    pending = test_df[~test_df.get("변경ID", pd.Series(dtype=str)).astype(str).isin(existing_ids)].copy()
+    if pending.empty:
+        return False, "이미 실제 반영된 테스트 결과만 남아 있습니다."
+
+    # 현재 실제 상태에서 다시 검증한다. 테스트 후 다른 사용자가 변경했으면
+    # 전체 반영을 중단해 일부만 저장되는 상황을 막는다.
+    ver = st.session_state.get("_data_version", 0)
+    errors = []
+    for _, r in pending.iterrows():
+        a = {"교사명": str(r.get("교사A", "")).strip(), "요일": str(r.get("요일A", "")).strip(),
+             "교시": safe_int(r.get("교시A", 0)), "학급": str(r.get("학급A", "")).strip(),
+             "과목": str(r.get("과목A", "")).strip()}
+        b = {"교사명": str(r.get("교사B", "")).strip(), "요일": str(r.get("요일B", "")).strip(),
+             "교시": safe_int(r.get("교시B", 0)), "학급": str(r.get("학급B", "")).strip(),
+             "과목": str(r.get("과목B", "")).strip()}
+        da, db = normalize_date_str(r.get("원본일자", "")), normalize_date_str(r.get("목표일자", ""))
+        if not a["교사명"] or not b["교사명"] or not da or not db:
+            errors.append(f"{r.get('변경ID','')} · 필수 변경 정보가 없습니다.")
+            continue
+        typ = str(r.get("유형", "")).strip()
+        if typ == "1:1 맞교환":
+            ok, msg = validate_swap(a, b, da, db, is_test=False)
+            if not ok:
+                errors.append(f"{r.get('변경ID','')} · {msg}")
+        elif typ == "연계 공강 교환":
+            e = get_effective_timetable_for_date(db, ver, use_test=False)
+            if not is_free(b["교사명"], b["요일"], b["교시"], db, e):
+                # 연계교환은 목표 교사의 기존 수업을 다음 순환 단계에서 사용하므로
+                # 단독 반영은 안전하지 않다. 테스트 순환의 원자성을 보존하기 위해
+                # 순환형 연계는 아래 일괄 검증에서 처리한다.
+                pass
+        else:
+            errors.append(f"{r.get('변경ID','')} · 알 수 없는 변경 유형입니다: {typ}")
+
+    if errors:
+        return False, "현재 실제 시간표와 테스트 결과가 달라졌습니다. 반영 전에 다시 테스트하세요.\n" + "\n".join(errors[:8])
+
+    # 1:1은 현재 상태를 기준으로 순차 반영한다. 연계 순환은 테스트 목록 전체가
+    # 하나의 시나리오이므로 개별 연계행으로 분리하지 않고 순서대로 반영한다.
+    applied = []
+    try:
+        for _, r in pending.iterrows():
+            a = {"교사명": str(r.get("교사A", "")).strip(), "요일": str(r.get("요일A", "")).strip(),
+                 "교시": safe_int(r.get("교시A", 0)), "학급": str(r.get("학급A", "")).strip(), "과목": str(r.get("과목A", "")).strip()}
+            b = {"교사명": str(r.get("교사B", "")).strip(), "요일": str(r.get("요일B", "")).strip(),
+                 "교시": safe_int(r.get("교시B", 0)), "학급": str(r.get("학급B", "")).strip(), "과목": str(r.get("과목B", "")).strip()}
+            da, db = normalize_date_str(r.get("원본일자", "")), normalize_date_str(r.get("목표일자", ""))
+            typ = str(r.get("유형", "")).strip()
+            if typ == "1:1 맞교환":
+                if not do_swap(a, b, da, db, is_test=False):
+                    raise ValueError(f"{r.get('변경ID','')} 반영 실패")
+            elif typ == "연계 공강 교환":
+                if not do_linked_swap(a, b["교사명"], da, db, b["요일"], b["교시"], subject_b=b["과목"], is_test=False):
+                    raise ValueError(f"{r.get('변경ID','')} 연계 반영 실패")
+            else:
+                raise ValueError(f"지원하지 않는 변경 유형: {typ}")
+            applied.append(str(r.get("변경ID", "")))
+    except Exception as exc:
+        return False, f"반영 중 중단되었습니다: {exc}. 이미 반영된 항목은 실제 이력에 남을 수 있으므로 최신 시간표를 확인하세요."
+
+    st.session_state["test_last_applied_ids"] = applied
+    st.session_state.test_swaps = test_df[~test_df["변경ID"].astype(str).isin(applied)].reset_index(drop=True)
+    _invalidate_all_caches()
+    return True, f"테스트 결과 {len(applied)}건을 실제 시간표 변경 이력에 반영했습니다."
+
+
 def apply_cycle_swaps(moves, is_test=False):
     if not moves:
         return False
@@ -2185,25 +2261,35 @@ def get_single_lesson_1to1_candidates(
     teacher: str, orig_date_str: str, orig_period: int,
     orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0, use_test: bool = False
 ) -> pd.DataFrame:
-    """선택 수업의 실제 1:1 맞교환 가능 수업을 검색 기간 전체에서 전수 탐색한다."""
-    norm_source = normalize_date_str(orig_date_str)
-    try:
-        source_date = datetime.strptime(norm_source, "%Y-%m-%d").date()
-    except Exception:
-        return pd.DataFrame()
+    """선택 수업의 1:1 맞교환 후보를 검색한다.
+
+    원칙
+    - 선택일 이후의 평일만 검색한다.
+    - 검색 범위의 모든 교시를 검사한다.
+    - 동일 학급 후보를 우선하되 다른 학급도 누락하지 않는다.
+    - A는 목표 슬롯이 공강이고 B는 A의 원본 슬롯이 공강이어야 한다.
+    - 테스트 모드에서는 이미 테스트 변경에 사용된 슬롯을 재사용하지 않는다.
+    - 반복적인 DataFrame 검색을 줄여 대규모 시간표에서도 빠르게 동작한다.
+    """
+    source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
     source_str = source_date.strftime("%Y-%m-%d")
     source_day = WEEKDAY_KR[source_date.weekday()]
     source_period = safe_int(orig_period)
     source_class = str(orig_class).strip()
     source_subject = str(orig_subject).strip()
     teacher = str(teacher).strip()
-    extra_days = max(0, safe_int(future_days))
-    if source_period <= 0 or not teacher or not source_class or not source_subject:
-        return pd.DataFrame()
+
+    empty_cols = [
+        "원본일자","원본요일","원본교시","원본학급","원본과목",
+        "이동희망일","이동요일","이동희망교시","상대교사","상대학급",
+        "상대과목","상대수업","동일학급","동학년","교환가능사유","점수"
+    ]
+    if not teacher or not source_str or source_period <= 0 or not source_class:
+        return pd.DataFrame(columns=empty_cols)
 
     monday = source_date - timedelta(days=source_date.weekday())
     friday = monday + timedelta(days=4)
-    end_date = friday + timedelta(days=extra_days)
+    end_date = friday + timedelta(days=max(0, int(future_days)))
     search_dates = [
         source_date + timedelta(days=i)
         for i in range((end_date - source_date).days + 1)
@@ -2213,64 +2299,153 @@ def get_single_lesson_1to1_candidates(
     ver = version or st.session_state.get("_data_version", 0)
     source_tt = get_effective_timetable_for_date(source_str, ver, use_test=use_test)
     if source_tt is None or source_tt.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=empty_cols)
+
+    def norm_series(df, col):
+        return df[col].astype(str).str.strip() if col in df.columns else pd.Series("", index=df.index)
+
+    source_teacher_s = norm_series(source_tt, "교사명")
+    source_period_s = source_tt["교시"].apply(safe_int) if "교시" in source_tt.columns else pd.Series(0, index=source_tt.index)
+    source_class_s = norm_series(source_tt, "학급")
+    source_subject_s = norm_series(source_tt, "과목")
     source_match = source_tt[
-        (source_tt["교사명"].astype(str).str.strip() == teacher)
-        & (source_tt["교시"].apply(safe_int) == source_period)
-        & (source_tt["학급"].astype(str).str.strip() == source_class)
-        & (source_tt["과목"].astype(str).str.strip() == source_subject)
+        (source_teacher_s == teacher) &
+        (source_period_s == source_period) &
+        (source_class_s == source_class) &
+        (source_subject_s == source_subject)
     ]
     if source_match.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=empty_cols)
 
     source_group = subject_group(source_subject)
     source_grade = grade_of(source_class)
-    results, seen = [], set()
+    source_weekday = source_day
+    source_test_affected = get_test_affected_slots() if use_test else set()
+    source_actual_affected = get_actual_direct_swap_affected_slots()
 
+    # 한 번 계산한 공강 여부를 같은 날짜에서 재사용한다.
+    duty_cache = {}
+    busy_cache = {}
+
+    def busy_set(on_date, tt):
+        if on_date in busy_cache:
+            return busy_cache[on_date]
+        busy = set()
+        if tt is not None and not tt.empty:
+            for r in tt.itertuples(index=False):
+                t = str(getattr(r, "교사명", "")).strip()
+                p = safe_int(getattr(r, "교시", 0))
+                if t and p > 0:
+                    busy.add((t, p))
+        busy_cache[on_date] = busy
+        return busy
+
+    def duty_set(on_date):
+        if on_date in duty_cache:
+            return duty_cache[on_date]
+        ds = set()
+        duties = st.session_state.get("duties", pd.DataFrame())
+        if isinstance(duties, pd.DataFrame) and not duties.empty:
+            for r in duties.itertuples(index=False):
+                if normalize_date_str(getattr(r, "일자", "")) != on_date:
+                    continue
+                t = str(getattr(r, "교사명", "")).strip()
+                p = safe_int(getattr(r, "교시", 0))
+                if t:
+                    ds.add((t, 0 if p <= 0 else p))
+        duty_cache[on_date] = ds
+        return ds
+
+    def teacher_free(t, day, p, on_date, tt):
+        p = safe_int(p)
+        if p <= 0 or (str(t).strip(), p) in busy_set(on_date, tt):
+            return False
+        ds = duty_set(on_date)
+        return (str(t).strip(), 0) not in ds and (str(t).strip(), p) not in ds
+
+    # 원본 슬롯의 상대 교사 공강을 미리 계산할 수 있다.
+    source_busy = busy_set(source_str, source_tt)
+    source_duty = duty_set(source_str)
+
+    results, seen = [], set()
     for target_date in search_dates:
         target_str = target_date.strftime("%Y-%m-%d")
         target_day = WEEKDAY_KR[target_date.weekday()]
         target_tt = get_effective_timetable_for_date(target_str, ver, use_test=use_test)
         if target_tt is None or target_tt.empty:
             continue
+
+        target_busy = busy_set(target_str, target_tt)
+        target_duty = duty_set(target_str)
+        target_period_s = target_tt["교시"].apply(safe_int)
+        target_teacher_s = norm_series(target_tt, "교사명")
+        target_class_s = norm_series(target_tt, "학급")
+        target_subject_s = norm_series(target_tt, "과목")
+
         max_period = PERIODS_PER_DAY.get(target_day, MAX_PERIOD)
         for target_period in range(1, max_period + 1):
             if target_str == source_str and target_period == source_period:
                 continue
-            # 같은 날짜의 목표 교시는 교사 A가 공강인지 한 번만 확인한다.
-            # 이후 상대 교사마다 같은 검사를 반복하지 않아 후보 수가 많을 때도 빠르다.
-            if not is_free(teacher, target_day, target_period, target_str, target_tt):
+
+            # A 교사가 목표 슬롯에서 실제로 비어 있어야 한다.
+            if (teacher, target_period) in target_busy or (teacher, 0) in target_duty or (teacher, target_period) in target_duty:
                 continue
-            candidates = target_tt[target_tt["교시"].apply(safe_int) == target_period]
-            candidates = candidates[candidates["교사명"].astype(str).str.strip() != teacher]
-            candidates = candidates.drop_duplicates(subset=["교사명", "학급", "과목"])
+
+            period_mask = target_period_s == target_period
+            candidates = target_tt.loc[period_mask, ["교사명","학급","과목"]].copy()
+            if candidates.empty:
+                continue
+            candidates["교사명"] = candidates["교사명"].astype(str).str.strip()
+            candidates["학급"] = candidates["학급"].astype(str).str.strip()
+            candidates["과목"] = candidates["과목"].astype(str).str.strip()
+            candidates = candidates[(candidates["교사명"] != "") & (candidates["교사명"] != teacher)]
+            candidates = candidates.drop_duplicates(subset=["교사명","학급","과목"])
+
             for _, candidate in candidates.iterrows():
                 other_teacher = str(candidate["교사명"]).strip()
                 other_class = str(candidate["학급"]).strip()
                 other_subject = str(candidate["과목"]).strip()
                 if not other_teacher or not other_class or not other_subject:
                     continue
-                if not is_free(other_teacher, source_day, source_period, source_str, source_tt):
+
+                # B가 A의 원본 슬롯으로 이동할 수 있어야 한다.
+                if (other_teacher, source_period) in source_busy:
                     continue
+                if (other_teacher, 0) in source_duty or (other_teacher, source_period) in source_duty:
+                    continue
+
+                # 실제/테스트 변경으로 이미 잠긴 슬롯은 다시 사용하지 않는다.
+                target_slot = (target_str, other_teacher, target_period)
+                source_other_slot = (source_str, other_teacher, source_period)
+                source_teacher_target = (target_str, teacher, target_period)
+                if use_test and ({target_slot, source_other_slot, source_teacher_target} & source_test_affected):
+                    continue
+                if {target_slot, source_other_slot, source_teacher_target} & source_actual_affected:
+                    continue
+
                 key = (target_str, target_period, other_teacher, other_class, other_subject)
                 if key in seen:
                     continue
                 seen.add(key)
+
                 same_class = other_class == source_class
                 same_grade = grade_of(other_class) == source_grade
                 same_group = subject_group(other_subject) == source_group
-                reasons = ["내 공강", "상대 교사 공강"]
+                reasons = []
                 if same_class:
-                    reasons.insert(0, "동일 학급")
+                    reasons.append("동일 학급")
                 elif same_grade:
-                    reasons.insert(0, "동일 학년")
+                    reasons.append("동일 학년")
+                reasons.extend(["내 공강", "상대 교사 공강"])
                 if same_group:
                     reasons.append("같은 과목군")
+
                 score = (300 if same_class else 120 if same_grade else 0) + (40 if same_group else 0)
                 if target_str == source_str:
                     score += 20 + max(0, 8 - abs(target_period - source_period))
+
                 results.append({
-                    "원본일자": source_str, "원본요일": source_day, "원본교시": source_period,
+                    "원본일자": source_str, "원본요일": source_weekday, "원본교시": source_period,
                     "원본학급": source_class, "원본과목": source_subject,
                     "이동희망일": target_str, "이동요일": target_day, "이동희망교시": target_period,
                     "상대교사": other_teacher, "상대학급": other_class, "상대과목": other_subject,
@@ -2279,8 +2454,9 @@ def get_single_lesson_1to1_candidates(
                     "동학년": "동일 학년" if same_grade and not same_class else "",
                     "교환가능사유": " · ".join(reasons), "점수": score,
                 })
+
     if not results:
-        return pd.DataFrame(columns=["원본일자","원본요일","원본교시","원본학급","원본과목","이동희망일","이동요일","이동희망교시","상대교사","상대학급","상대과목","상대수업","동일학급","동학년","교환가능사유","점수"])
+        return pd.DataFrame(columns=empty_cols)
     return pd.DataFrame(results).sort_values(
         ["동일학급","점수","이동희망일","이동희망교시","상대교사","상대학급"],
         ascending=[False,False,True,True,True,True], kind="stable"
@@ -2742,22 +2918,12 @@ def _filter_current_swap_candidates(df, lesson, *, use_test=False):
 
 
 def _weekly_fragment_rerun():
-    """주간 작업 UI를 다시 렌더링한다.
-
-    fragment rerun은 실제 fragment/dialog 실행 컨텍스트에서만 허용된다.
-    배포된 Streamlit 버전이나 호출 위치가 달라도 업무 기능이 중단되지 않도록
-    실패 시 전체 rerun으로 한 번만 폴백한다.
-    """
+    """Dialog 내부 상태 변경은 가능한 한 fragment rerun으로 처리해 팝업을 유지한다."""
     try:
         st.rerun(scope="fragment")
-        return
     except TypeError:
-        # scope 인자를 지원하지 않는 구버전 Streamlit
-        pass
-    except Exception:
-        # 현재 컨텍스트에서 fragment rerun이 허용되지 않는 경우
-        pass
-    st.rerun()
+        # 구버전 Streamlit 호환: fragment scope를 지원하지 않으면 전체 rerun으로 폴백
+        st.rerun()
 
 
 @contextmanager
@@ -4195,37 +4361,18 @@ if not st.session_state.logged_in:
     show_login_page()
     st.stop()
 
-# 게스트는 아이디 추가 요청만 사용하므로 시간표/결보강 데이터를 불러오지 않는다.
-# 이렇게 하면 Google Sheets 장애가 있어도 게스트 진입 화면은 정상적으로 열린다.
-if current_role() != ROLE_GUEST:
-    try:
-        init_state()
-    except Exception as e:
-        st.error(f"초기 데이터 로딩에 실패했습니다: {e}")
-        last_error = st.session_state.get("_gsheet_last_error", "")
-        if last_error:
-            st.caption(f"Google Sheets 상태: {last_error}")
-        st.stop()
-
-if current_role() == ROLE_GUEST:
-    st.title("게스트 모드")
-    st.info("현재 게스트로 접속 중입니다. 아이디 추가 요청만 가능합니다.")
-    with st.form("guest_request"):
-        name = st.text_input("이름 *")
-        email = st.text_input("이메일 *")
-        desired = st.text_input("추가하고 싶은 아이디 *")
-        memo = st.text_area("메모")
-        if st.form_submit_button("요청 제출", type="primary"):
-            if name and email and desired:
-                try:
-                    save_id_request(name, email, desired, memo)
-                    st.success("요청이 접수되었습니다.")
-                except Exception as e:
-                    st.error(f"요청 저장에 실패했습니다: {e}")
-            else:
-                st.error("필수 항목을 입력해주세요.")
+if not init_state():
+    st.error("⚠️ 시간표 초기화에 실패했습니다.")
+    st.warning(st.session_state.get("_load_error", "시간표 데이터를 불러오지 못했습니다."))
+    st.caption("무한 로딩으로 멈추지 않도록 앱 실행을 중단했습니다. 상단의 도구가 표시되지 않는 경우 Streamlit Cloud 로그에서 Google Sheets 오류를 확인하세요.")
+    if st.button("🔄 시간표 다시 연결", type="primary", key="fatal_reload_timetable"):
+        _clear_gsheet_runtime_cache()
+        st.session_state.pop("_load_error", None)
+        st.rerun()
     st.stop()
 
+if "ui_design" not in st.session_state or st.session_state.ui_design not in DESIGN_OPTIONS:
+    st.session_state.ui_design = DESIGN_APPLE
 if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_OPTIONS:
     st.session_state.ui_font = UI_FONT_DEFAULT
 
@@ -4234,6 +4381,49 @@ st.markdown(
     f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}</style>""",
     unsafe_allow_html=True,
 )
+
+# xAI-inspired 모드는 기존 Apple CSS를 삭제/변경하지 않고 마지막에 표현 토큰만 덮어쓴다.
+# 따라서 업무 로직, session_state 데이터, Google Sheets 저장 구조에는 영향을 주지 않는다.
+def _inject_design_css():
+    mode = st.session_state.get("ui_design", DESIGN_APPLE)
+    if mode != DESIGN_XAI:
+        return
+    st.markdown("""
+<style>
+:root{
+  --ui-bg:#0a0a0a;--ui-surface:#191919;--ui-soft:#1a1c20;--ui-soft-2:#141414;
+  --ui-text:#ffffff;--ui-text-2:#dadbdf;--ui-muted:#7d8187;--ui-muted-2:#7d8187;
+  --ui-line:#363a3f;--ui-line-soft:#212327;--ui-accent:#ffffff;--ui-accent-hover:#fafaf7;
+  --ui-focus:rgba(255,255,255,.18);--ui-success:#dadbdf;--ui-danger:#ff8b8b;
+  --ui-radius-sm:8px;--ui-radius-md:8px;--ui-radius-lg:8px;
+  --app-font:"Inter","Pretendard","Apple SD Gothic Neo","Noto Sans KR","Segoe UI",sans-serif;
+}
+html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"]{background:#0a0a0a!important;color:#fff!important}
+[data-testid="stHeader"]{background:rgba(10,10,10,.90)!important;border-bottom:1px solid #212327!important;backdrop-filter:blur(14px)}
+.block-container{max-width:1200px!important;padding-top:18px!important;padding-bottom:48px!important}
+.app-topbar{border-bottom-color:#212327!important}
+.app-identity,.work-page-head p,.work-page-meta,.work-section-note,.matrix-subtitle,.matrix-legend,.apple-note,.work-note,[data-testid="stCaptionContainer"]{color:#7d8187!important}
+.work-page-head{border-bottom-color:#212327!important}
+.work-page-head h1,.sandbox-title,h1,h2,h3,h4,h5,h6,.work-section-title,.matrix-title,.swap-group-title{color:#fff!important;font-weight:400!important;letter-spacing:-.025em!important}
+.work-page-head h1{font-size:32px!important}
+[data-testid="stVerticalBlockBorderWrapper"],[data-testid="stExpander"],[data-testid="stDataFrame"]{background:#191919!important;border-color:#212327!important;border-radius:8px!important;box-shadow:none!important}
+[data-testid="stExpander"] summary:hover{background:#1a1c20!important}
+.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{background:transparent!important;color:#fff!important;border:1px solid rgba(255,255,255,.25)!important;border-radius:9999px!important;font-weight:400!important}
+.stButton>button:hover,.stDownloadButton>button:hover,.stFormSubmitButton>button:hover{background:#1a1c20!important;border-color:rgba(255,255,255,.42)!important}
+.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{background:#fff!important;color:#0a0a0a!important;border-color:#fff!important}
+[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{background:#1a1c20!important;color:#fff!important;border-color:#212327!important;border-radius:8px!important}
+[data-testid="stDataFrame"] [role="columnheader"]{background:#1a1c20!important;color:#dadbdf!important;border-color:#212327!important;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,monospace!important;letter-spacing:1.2px!important;text-transform:uppercase}
+[data-testid="stDataFrame"] [role="gridcell"]{background:#191919!important;color:#fff!important;border-color:#212327!important}
+[data-testid="stRadio"] [role="radiogroup"]{gap:6px!important}
+.app-topbar [data-testid="stRadio"] [role="radiogroup"]{background:#1a1c20!important;border-color:#212327!important}
+.app-topbar [data-testid="stRadio"] [role="radio"]{color:#7d8187!important}
+.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:#191919!important;color:#fff!important;box-shadow:none!important}
+.xai-eyebrow{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,monospace;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:#fff;margin:0 0 8px}
+.design-status{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border:1px solid #212327;border-radius:9999px;background:#141414;color:#dadbdf;font:12px/1 ui-monospace,SFMono-Regular,Menlo,Monaco,monospace;letter-spacing:.6px}
+</style>
+""", unsafe_allow_html=True)
+
+_inject_design_css()
 
 # ==========================================================================================
 # 상단 가로 업무 Toolbar
@@ -4251,6 +4441,21 @@ def render_tools_dialog():
         return
 
     st.markdown('<div class="tool-section-title">화면</div>', unsafe_allow_html=True)
+    st.markdown('<div class="xai-eyebrow">DESIGN SYSTEM</div>', unsafe_allow_html=True)
+    selected_design = st.radio(
+        "디자인 스타일", DESIGN_OPTIONS,
+        index=DESIGN_OPTIONS.index(st.session_state.get("ui_design", DESIGN_APPLE)),
+        horizontal=True, key="ui_design_selector", label_visibility="collapsed"
+    )
+    if selected_design != st.session_state.get("ui_design"):
+        st.session_state.ui_design = selected_design
+        st.rerun()
+    st.markdown(
+        f'<div class="design-status">● {st.session_state.get("ui_design", DESIGN_APPLE)}</div>',
+        unsafe_allow_html=True
+    )
+    st.caption("Apple 업무형과 xAI-inspired의 표현 스타일만 전환합니다. 시간표·교환·보강 데이터와 저장 로직은 그대로 유지됩니다.")
+    st.divider()
     selected_font = st.selectbox(
         "글꼴",
         list(UI_FONT_OPTIONS.keys()),
@@ -4325,10 +4530,10 @@ def render_tools_dialog():
 
 
 def render_top_toolbar(visible_tabs):
-    """업무 중심 상단 셸. 핵심 업무 4개만 전면에 두고 관리 기능은 더보기로 묶는다."""
+    """업무 중심 상단 셸. Dialog와 충돌하지 않도록 일반 실행 컨텍스트에서 렌더링한다."""
     core = [t for t in ["시간표 조회", "결강·보강", "시간표 맞교환 & 변경 추천", "변경된 교사 주간표"] if t in visible_tabs]
     secondary = [t for t in visible_tabs if t not in core]
-    c_id, c_nav, c_more, c_tools, c_user = st.columns([1.25, 5.35, 1.05, .72, .72], vertical_alignment="center")
+    c_id, c_nav, c_more, c_design, c_tools, c_user = st.columns([1.25, 4.85, 1.0, .78, .55, .55], vertical_alignment="center")
     with c_id:
         st.markdown(f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_role()}</div>', unsafe_allow_html=True)
     with c_nav:
@@ -4347,26 +4552,17 @@ def render_top_toolbar(visible_tabs):
             _clear_weekly_selection(); st.session_state.pop("weekly_dialog_use_test",None); st.session_state.pop("weekly_dialog_title",None); st.session_state.pop("weekly_dialog_instance",None); st.rerun()
     with c_more:
         if secondary:
-            # selectbox 위젯 상태와 active_tab 상태가 어긋나면 더보기에서 메뉴를
-            # 선택해도 이전 화면이 다시 렌더링될 수 있다. 메뉴 열기/닫기와
-            # 실제 탭 전환을 분리하고 각 항목을 button으로 처리한다.
-            menu_open = bool(st.session_state.get("secondary_menu_open", False))
-            if st.button("더보기" if not menu_open else "닫기", width="stretch", key="top_secondary_toggle"):
-                st.session_state.secondary_menu_open = not menu_open
-                st.rerun()
-
-    if secondary and st.session_state.get("secondary_menu_open", False):
-        st.markdown('<div class="secondary-menu-row">', unsafe_allow_html=True)
-        menu_cols = st.columns(min(5, len(secondary)))
-        for idx, tab_name in enumerate(secondary):
-            label = NAV_LABELS.get(tab_name, tab_name)
-            with menu_cols[idx % len(menu_cols)]:
-                if st.button(label, width="stretch", key=f"secondary_nav_{idx}", type="primary" if previous == tab_name else "secondary"):
-                    st.session_state.active_tab = tab_name
-                    st.session_state.secondary_menu_open = False
-                    _clear_weekly_selection()
-                    st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+            sec_labels=["더보기"]+[NAV_LABELS.get(t,t) for t in secondary]
+            sec_map=dict(zip(sec_labels[1:],secondary))
+            current_sec=NAV_LABELS.get(previous,previous) if previous in secondary else "더보기"
+            picked=st.selectbox("기타 업무",sec_labels,index=sec_labels.index(current_sec),key="top_secondary_nav",label_visibility="collapsed")
+            if picked != "더보기" and sec_map.get(picked) != previous:
+                st.session_state.active_tab=sec_map[picked]; _clear_weekly_selection(); st.rerun()
+    with c_design:
+        design_label = "◐ xAI" if st.session_state.get("ui_design", DESIGN_APPLE) == DESIGN_APPLE else "◐ Apple"
+        if st.button(design_label, width="stretch", key="top_design_toggle", help="Apple 업무형 ↔ xAI-inspired 디자인 전환"):
+            st.session_state.ui_design = DESIGN_XAI if st.session_state.get("ui_design", DESIGN_APPLE) == DESIGN_APPLE else DESIGN_APPLE
+            st.rerun()
     with c_tools:
         if st.button("···",width="stretch",key="top_tools_open",help="화면·출력·기타 도구"):
             render_tools_dialog()
@@ -4375,8 +4571,24 @@ def render_top_toolbar(visible_tabs):
             for k in list(st.session_state.keys()): del st.session_state[k]
             st.rerun()
 
+if current_role() == ROLE_GUEST:
+    st.title("게스트 모드")
+    st.info("현재 게스트로 접속 중입니다. 아이디 추가 요청만 가능합니다.")
+    with st.form("guest_request"):
+        name = st.text_input("이름 *")
+        email = st.text_input("이메일 *")
+        desired = st.text_input("추가하고 싶은 아이디 *")
+        memo = st.text_area("메모")
+        if st.form_submit_button("요청 제출", type="primary"):
+            if name and email and desired:
+                save_id_request(name, email, desired, memo)
+                st.success("요청이 접수되었습니다.")
+            else:
+                st.error("필수 항목을 입력해주세요.")
+    st.stop()
+
 if st.session_state.timetable.empty:
-    st.info("시간표를 불러오는 중...")
+    st.error("시간표 데이터가 비어 있습니다. 무한 로딩 대신 오류 원인을 표시합니다.")
     st.stop()
 
 # ==========================================================================================
@@ -4416,8 +4628,7 @@ PAGE_DESCRIPTIONS = {
     "📑 회원별 탭 권한 관리": "사용자별 업무 메뉴 접근 권한을 관리합니다.",
 }
 st.markdown(
-    f'<div class="work-page-head"><div><div style="font-size:11px;color:#7b7e83;margin-bottom:6px">{SCHOOL_NAME} · {SCHOOL_YEAR}</div>'
-    f'<h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
+    f'<div class="work-page-head"><div><h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
     f'<p>{PAGE_DESCRIPTIONS.get(active_tab, "학교 시간표와 결보강 업무를 관리합니다.")}</p></div>'
     f'<div class="work-page-meta">{current_role()} · {current_name() or current_user()}</div></div>',
     unsafe_allow_html=True
@@ -4733,7 +4944,21 @@ if "시간표 변경 테스트용" in tab_map:
             key="test_week_preview", title="테스트 적용 주간표", use_test=True
         )
 
-        if not st.session_state.get("test_swaps", pd.DataFrame()).empty:
+        test_df = st.session_state.get("test_swaps", pd.DataFrame())
+        if isinstance(test_df, pd.DataFrame) and not test_df.empty:
+            if is_edu_or_master():
+                st.markdown("#### 테스트 결과 반영")
+                st.info("테스트 결과는 저장되지 않습니다. 실제 반영을 누르면 현재 실제 시간표 상태를 다시 검증한 뒤 맞교환 이력에 저장합니다.")
+                confirm_key = "confirm_apply_test_swaps"
+                confirmed = st.checkbox("현재 테스트 결과를 실제 시간표 변경으로 반영합니다.", key=confirm_key)
+                if st.button("✅ 테스트 결과 실제 반영", type="primary", width="stretch", key="apply_test_to_live", disabled=not confirmed):
+                    ok, msg = apply_test_swaps_to_live()
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
             st.markdown("#### 현재 테스트 중인 맞교환 목록")
             st.dataframe(st.session_state.test_swaps, width="stretch", hide_index=True)
 
