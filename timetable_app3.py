@@ -52,9 +52,35 @@ st.markdown("""
 }
 html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"]{background:var(--ui-bg)!important;color:var(--ui-text)!important}
 body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-/* 텍스트에만 앱 폰트 적용. Streamlit 아이콘 폰트는 건드리지 않는다. */
-p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"]{font-family:var(--app-font,"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif)!important}
-[class*="material-symbols"],[data-testid="stIconMaterial"]{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-style:normal!important}
+/* 선택한 글꼴을 앱 전역에 일관되게 적용한다. Streamlit 아이콘 글꼴은 마지막에 명시적으로 복원한다. */
+html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{font-family:var(--app-font,"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif)!important}
+body,body *{font-synthesis:auto}
+
+/* 일반 HTML 표 / 사용자 정의 표 / Markdown 표 */
+table,thead,tbody,tfoot,tr,th,td,caption{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}
+
+/* Streamlit / BaseWeb 입력·메뉴·팝오버 */
+[data-baseweb] *,[data-testid="stPopover"] *,[data-testid="stDialog"] *,[data-testid="stExpander"] *,[data-testid="stSidebar"] *,[role="menu"] *,[role="option"] *,[role="listbox"] *,[role="tooltip"] *{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}
+
+/* Glide Data Grid 기반 st.dataframe / st.data_editor.
+   실제 셀 텍스트가 canvas로 그려지는 경우에도 grid가 읽는 --gdg-font-family를 덮어쓴다. */
+[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] *{
+  --gdg-font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;
+}
+[data-testid="stDataFrame"],[data-testid="stDataEditor"]{
+  font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;
+}
+[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataEditor"] [role="gridcell"],[data-testid="stDataEditor"] [role="columnheader"]{
+  font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important
+}
+
+/* 차트·SVG 텍스트도 가능한 범위에서 동일한 앱 글꼴 사용 */
+[data-testid="stAppViewContainer"] svg text,.js-plotly-plot text,.plotly .legendtext,.plotly .gtitle,.plotly .xtick text,.plotly .ytick text{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}
+
+/* Streamlit 아이콘 폰트는 앱 글꼴을 적용하지 않는다. */
+[class*="material-symbols"],[data-testid="stIconMaterial"],[class*="MaterialSymbols"],
+[data-testid="stIconMaterial"] *,[aria-label="More options"] span{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-style:normal!important}
 [data-testid="stHeader"]{background:rgba(255,255,255,.88)!important;border-bottom:1px solid var(--ui-line-soft)!important;backdrop-filter:saturate(150%) blur(16px)}
 [data-testid="stDecoration"]{display:none!important}
 .block-container{width:100%!important;max-width:none!important;padding:0 clamp(16px,2.2vw,42px) 36px!important}
@@ -309,7 +335,8 @@ def render_font_runtime_css(selected_font: str):
   src: url('{bold_url}') format('truetype'), url('{bold_raw}') format('truetype'); }}
 :root {{ --app-font: '{GITHUB_FONT_FAMILY}', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }}
 p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-baseweb="select"],[data-baseweb="input"] input,[data-baseweb="textarea"] textarea {{ font-family: var(--app-font) !important; }}
-[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"] {{ font-family: var(--app-font) !important; }}
+[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] * {{ --gdg-font-family: var(--app-font) !important; font-family: var(--app-font) !important; }}
+table,thead,tbody,tfoot,tr,th,td,caption {{ font-family: var(--app-font) !important; }}
 </style>
 """,
             unsafe_allow_html=True,
@@ -326,7 +353,8 @@ p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLab
   src: url('{hakyo_url}') format('truetype'), url('{hakyo_raw}') format('truetype'); }}
 :root {{ --app-font: '{HAKYO_FONT_FAMILY}', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif; }}
 p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-baseweb="select"],[data-baseweb="input"] input,[data-baseweb="textarea"] textarea {{ font-family: var(--app-font) !important; }}
-[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"] {{ font-family: var(--app-font) !important; }}
+[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] * {{ --gdg-font-family: var(--app-font) !important; font-family: var(--app-font) !important; }}
+table,thead,tbody,tfoot,tr,th,td,caption {{ font-family: var(--app-font) !important; }}
 </style>
 """,
             unsafe_allow_html=True,
@@ -334,7 +362,12 @@ p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLab
         return
 
     st.markdown(
-        f"<style>:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}</style>",
+        f"""<style id="runtime-app-font-global">
+:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}
+html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{{font-family:var(--app-font)!important}}
+body table,body table *,[data-testid="stDataFrame"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"],[data-testid="stDataEditor"] *{{font-family:var(--app-font)!important;--gdg-font-family:var(--app-font)!important}}
+[class*="material-symbols"],[data-testid="stIconMaterial"],[data-testid="stIconMaterial"] *{{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important}}
+</style>""",
         unsafe_allow_html=True,
     )
 
@@ -5350,7 +5383,12 @@ if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_
 
 # 현재 선택된 폰트를 CSS 변수로 주입한다. 폰트 선택은 앱 전체에 즉시 적용된다.
 st.markdown(
-    f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}</style>""",
+    f"""<style id="dialog-font-state">
+:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}
+html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{{font-family:var(--app-font)!important}}
+body table,body table *,[data-testid="stDataFrame"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"],[data-testid="stDataEditor"] *{{font-family:var(--app-font)!important;--gdg-font-family:var(--app-font)!important}}
+[class*="material-symbols"],[data-testid="stIconMaterial"],[data-testid="stIconMaterial"] *{{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important}}
+</style>""",
     unsafe_allow_html=True,
 )
 
