@@ -5435,14 +5435,14 @@ def render_top_toolbar(visible_tabs):
             if st.button("① 새로고침", width="stretch", key="top_quick_refresh", help="앱 화면과 캐시를 새로고침합니다."):
                 _clear_gsheet_runtime_cache()
                 _invalidate_all_caches()
-                st.toast("화면을 새로고침했습니다.", icon="↻")
+                st.toast("화면을 새로고침했습니다.", icon="🔄")
                 st.rerun()
         with q2:
             if st.button("② 불러오기", width="stretch", key="top_quick_load", help="Google Sheets의 최신 시간표와 업무 데이터를 불러옵니다."):
                 try:
                     with st.spinner("최신 데이터를 불러오는 중..."):
                         _load_all_runtime_data_from_gsheet()
-                    st.toast("최신 데이터를 불러왔습니다.", icon="↓")
+                    st.toast("최신 데이터를 불러왔습니다.", icon="⬇️")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"데이터를 불러오지 못했습니다: {exc}")
@@ -5451,7 +5451,7 @@ def render_top_toolbar(visible_tabs):
                 try:
                     ok = save_work_data_to_gsheet()
                     if ok is not False:
-                        st.toast("현재 작업을 저장했습니다.", icon="✓")
+                        st.toast("현재 작업을 저장했습니다.", icon="✅")
                 except Exception as exc:
                     st.error(f"현재 작업 저장 중 오류가 발생했습니다: {exc}")
 
