@@ -102,6 +102,17 @@ input::placeholder,textarea::placeholder{color:var(--ui-muted-2)!important}
 [data-testid="stDataFrame"]{border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-md)!important;overflow:hidden!important;background:var(--ui-surface)!important;box-shadow:none!important}
 [data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important;font-size:12px!important;font-weight:600!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
 [data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-size:13px!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
+/* ---------- changed teacher weekly overview ---------- */
+.changed-teacher-block{margin:18px 0 6px}
+.changed-teacher-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 2px 8px;border-bottom:1px solid var(--ui-line-soft)}
+.changed-teacher-name{font-size:16px;font-weight:650;color:var(--ui-text);letter-spacing:-.02em}
+.changed-teacher-index{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin-right:7px;border-radius:8px;background:var(--ui-soft);color:var(--ui-muted);font-size:11px;font-weight:650}
+.changed-teacher-subject{margin-left:7px;color:var(--ui-muted);font-size:12px}
+.changed-teacher-status{font-size:11px;color:var(--ui-muted);white-space:nowrap}
+.changed-teacher-badge{display:inline-flex;align-items:center;margin-left:8px;padding:3px 7px;border-radius:999px;background:#fff3cd;color:#7a5b00;font-size:10px;font-weight:650;border:1px solid #f0d98a}
+.changed-teacher-divider{height:1px;background:var(--ui-line-soft);margin:24px 0 8px}
+/* Streamlit's fixed header can overlap custom top navigation when block-container padding is reset. */
+.streamlit-header-safe-space{height:10px;width:100%;display:block}
 /* ---------- changed teachers ---------- */
 .changed-teacher-selector{display:flex;align-items:center;gap:8px;margin:0 0 10px}.changed-teacher-chip{display:inline-flex;align-items:center;padding:7px 10px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft-2);color:var(--ui-text);font-size:12px}
 /* ---------- notes / states ---------- */
@@ -136,8 +147,8 @@ st.markdown(r"""
  --ui-line:#d2d2d7;--ui-line-soft:#e8e8ed;--ui-accent:#0066cc;--ui-accent-hover:#0077ed;
 }
 /* 01. App shell: 상단은 "제품 내비게이션", 본문은 "업무 캔버스"로 분리 */
-.block-container{padding-top:0!important;padding-bottom:56px!important}
-.app-top-safe-space{height:30px!important}
+.block-container{padding-top:4.25rem!important;padding-bottom:56px!important}
+.app-top-safe-space{height:10px!important}
 .app-topbar{min-height:58px!important;padding:0 0 10px!important;margin-bottom:26px!important;gap:18px!important;border-bottom:1px solid #e8e8ed!important}
 .app-identity{font-size:11px!important;color:#86868b!important;letter-spacing:-.01em!important}
 .app-identity strong{font-size:13px!important;color:#1d1d1f!important}
@@ -5230,6 +5241,7 @@ st.markdown(
 # ==========================================================================================
 # 상단 가로 업무 Toolbar
 # ==========================================================================================
+st.markdown('<div class="streamlit-header-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
 @st.dialog("도구", width="small")
 def render_tools_dialog():
     """상단 도구 창.
@@ -5800,26 +5812,40 @@ if "시간표 변경 테스트용" in tab_map:
 # ------------------------------------------------------------------ 변경된 교사 주간표
 if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
-        ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
+        ref = calendar_picker("주간 기준일", _today_kst(), key="chg_ref")
 
-        # 기존에는 변경 교사를 한 명씩 선택해서 봐야 했지만,
-        # 이제는 전체 교사를 한 화면의 주간 매트릭스로 표시한다.
+        # 업로드된 원본 파일의 "교사 1인 주간표" 형식:
+        # 1~7교시 × 월~금(날짜 포함) 형태를 그대로 사용하되,
+        # 특정 교사 1명만 선택하는 방식은 제거하고 전체 교사를 차례대로 표시한다.
         changed = set(get_changed_teachers_for_week(ref))
+
         teacher_df = st.session_state.get("teachers", pd.DataFrame())
-        if teacher_df is not None and not teacher_df.empty and "교사명" in teacher_df.columns:
-            all_teachers = sorted({str(v).strip() for v in teacher_df["교사명"].dropna().tolist() if str(v).strip()})
+        if isinstance(teacher_df, pd.DataFrame) and not teacher_df.empty and "교사명" in teacher_df.columns:
+            all_teachers = sorted({
+                str(v).strip()
+                for v in teacher_df["교사명"].dropna().tolist()
+                if str(v).strip()
+            })
         else:
-            all_teachers = sorted({str(v).strip() for v in st.session_state.timetable.get("교사명", pd.Series(dtype=str)).dropna().tolist() if str(v).strip()})
+            tt = st.session_state.get("timetable", pd.DataFrame())
+            all_teachers = sorted({
+                str(v).strip()
+                for v in (tt["교사명"] if isinstance(tt, pd.DataFrame) and "교사명" in tt.columns else pd.Series(dtype=str))
+                .dropna().tolist()
+                if str(v).strip()
+            })
 
         st.markdown(
-            f'<div class="work-section-title">전체 교사 주간표 '
-            f'<span style="color:var(--ui-muted);font-weight:400">전체 {len(all_teachers)}명 · 이번 주 변경 {len(changed)}명</span></div>',
+            f'<div class="work-section-title">변경 교사 주간표 '
+            f'<span style="color:var(--ui-muted);font-weight:400">'
+            f'전체 {len(all_teachers)}명 · 변경 이력 {len(changed)}명</span></div>',
             unsafe_allow_html=True,
         )
         st.markdown(
-            '<div class="work-note"><strong>전체 교사를 한 번에 표시합니다.</strong> '
-            '변경이 있는 교사는 이름 앞에 🔄 표시가 붙으며, 각 셀에는 교환·보강·시간강사 등 현재 적용 상태가 표시됩니다. '
-            '조회 전용 화면이라 셀을 눌러도 작업 창은 열리지 않습니다.</div>',
+            '<div class="work-note"><strong>전체 교사의 주간표를 한 번에 확인합니다.</strong> '
+            '원본 파일과 같은 <b>1~7교시 × 월~금</b> 형식으로 표시합니다. '
+            '변경이 있는 교사는 이름 옆에 <b>🔄</b>가 표시되고, 각 셀에는 실제 적용된 교환·보강·시간강사·결강 상태가 반영됩니다. '
+            '조회 전용 화면입니다.</div>',
             unsafe_allow_html=True,
         )
 
@@ -5830,82 +5856,100 @@ if "변경된 교사 주간표" in tab_map:
             week_dates = [monday + timedelta(days=i) for i in range(5)]
             ver = st.session_state.get("_data_version", 0)
 
-            # 하루 단위 effective timetable은 날짜별로 한 번씩만 조회한다.
-            # 교사 수 × 35회 호출을 피해서 전체 교사 표시 속도를 유지한다.
-            daily_effective = {}
+            # 날짜별 effective timetable을 5회만 읽고 모든 교사/교시에 재사용한다.
+            daily_indexes = {}
             for d in week_dates:
                 ds = d.strftime("%Y-%m-%d")
                 e = get_effective_timetable_for_date(ds, ver, use_test=False)
-                daily_effective[ds] = e if isinstance(e, pd.DataFrame) else pd.DataFrame()
+                if isinstance(e, pd.DataFrame) and not e.empty:
+                    daily_indexes[ds] = {
+                        (str(r.교사명).strip(), safe_int(r.교시)): r
+                        for r in e.itertuples(index=False)
+                    }
+                else:
+                    daily_indexes[ds] = {}
 
-            rows = []
-            for teacher in all_teachers:
-                display_teacher = f"🔄 {teacher}" if teacher in changed else teacher
-                row = {"교사명": display_teacher}
-                for day_idx, d in enumerate(week_dates):
-                    ds = d.strftime("%Y-%m-%d")
-                    e = daily_effective[ds]
-                    if e.empty:
-                        for p in range(1, MAX_PERIOD + 1):
-                            row[f"{DAYS[day_idx]}{p}"] = ""
-                        continue
+            abs_df = st.session_state.get("absences", pd.DataFrame())
+            abs_lookup = set()
+            if isinstance(abs_df, pd.DataFrame) and not abs_df.empty and {"일자", "교사명", "교시"}.issubset(abs_df.columns):
+                for _, ar in abs_df.iterrows():
+                    abs_lookup.add((
+                        str(ar.get("일자", "")).strip(),
+                        str(ar.get("교사명", "")).strip(),
+                        safe_int(ar.get("교시"))
+                    ))
 
-                    sub = e[e["교사명"].astype(str).str.strip() == teacher].copy()
-                    if not sub.empty and "교시" in sub.columns:
-                        sub["_period"] = sub["교시"].apply(safe_int)
-                    else:
-                        sub = pd.DataFrame()
+            for idx, teacher in enumerate(all_teachers, 1):
+                is_changed = teacher in changed
+                teacher_title = f"🔄 {teacher}" if is_changed else teacher
 
-                    for p in range(1, MAX_PERIOD + 1):
-                        m = sub[sub["_period"] == p] if not sub.empty else pd.DataFrame()
+                # 원본 파일과 같은 교사별 주간 매트릭스 생성
+                rows = []
+                for pno in range(1, MAX_PERIOD + 1):
+                    row = {"교사명": teacher, "교시": pno}
+                    for day_idx, d in enumerate(week_dates):
+                        ds = d.strftime("%Y-%m-%d")
+                        r = daily_indexes[ds].get((teacher, pno))
                         cell = ""
-                        if not m.empty:
-                            r = m.iloc[0]
-                            cell = f"{str(r.get('학급','')).strip()} {str(r.get('과목','')).strip()}".strip()
-                            typ = str(r.get("변경유형", "원본") or "원본").strip()
+                        if r is not None:
+                            class_name = str(getattr(r, "학급", "")).strip()
+                            subject = str(getattr(r, "과목", "")).strip()
+                            cell = f"{class_name} {subject}".strip()
+
+                            typ = str(getattr(r, "변경유형", "원본") or "원본").strip()
+                            source = str(getattr(r, "변경출처", "") or "").strip()
+
                             if typ == "교환":
-                                cell += f" 🔄 {str(r.get('변경출처','교환')).strip()}"
+                                cell += f" 🔄 {source or '교환'}"
                             elif typ == "테스트교환":
-                                cell += f" 🧪 {str(r.get('변경출처','테스트교환')).strip()}"
+                                cell += f" 🧪 {source or '테스트교환'}"
                             elif typ == "보강":
-                                cell += f" 🟢 {str(r.get('변경출처','보강')).strip()}"
+                                cell += f" 🟢 {source or '보강'}"
                             elif typ == "시간강사":
-                                cell += f" 🟡 {str(r.get('원본교사','')).strip()}→시간강사"
+                                original_teacher = str(getattr(r, "원본교사", "") or "").strip()
+                                cell += f" 🟡 {original_teacher}→시간강사" if original_teacher else " 🟡 시간강사"
 
-                            abs_df = st.session_state.get("absences", pd.DataFrame())
-                            if (
-                                isinstance(abs_df, pd.DataFrame)
-                                and not abs_df.empty
-                                and {"일자", "교사명", "교시"}.issubset(abs_df.columns)
-                            ):
-                                abs_match = (
-                                    (abs_df["일자"].astype(str).str.strip() == ds)
-                                    & (abs_df["교사명"].astype(str).str.strip() == teacher)
-                                    & (abs_df["교시"].apply(safe_int) == p)
-                                )
-                                if abs_match.any():
-                                    cell = f"[결강] {cell}"
-                        row[f"{DAYS[day_idx]}{p}"] = cell
-                rows.append(row)
+                            if (ds, teacher, pno) in abs_lookup:
+                                cell = f"[결강] {cell}"
 
-            all_teacher_grid = pd.DataFrame(rows)
-            st.markdown(
-                '<div class="matrix-toolbar"><div>'
-                '<div class="matrix-title">전체 교사 · 월~금 주간 시간표</div>'
-                '<div class="matrix-subtitle">변경된 교사는 🔄 표시 · 실제 적용된 교환/보강 상태를 반영</div>'
-                '</div></div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                '<div class="matrix-legend"><span>🔄 변경 교사/교환</span>'
-                '<span>🟢 보강</span><span>🟡 시간강사</span><span>🧪 테스트교환</span><span>[결강] 결강</span></div>',
-                unsafe_allow_html=True,
-            )
-            render_standard_weekly_matrix(
-                all_teacher_grid, ref, row_label="교사명", key="changed_teacher_week_all",
-                title=None, use_test=False, height=min(900, max(420, 120 + len(all_teachers) * 28)),
-                open_dialog=False,
-            )
+                        row[DAYS[day_idx]] = cell
+                    rows.append(row)
+
+                teacher_grid = pd.DataFrame(
+                    rows,
+                    columns=["교사명", "교시"] + DAYS,
+                )
+
+                # 교사별 구분을 명확히 하되 카드 남발은 피하고 얇은 업무 구획만 사용
+                marker = " <span class='changed-teacher-badge'>변경 있음</span>" if is_changed else ""
+                subject_name = get_teacher_subject(teacher)
+                subject_text = f" · {subject_name}" if subject_name else ""
+
+                st.markdown(
+                    f'<div class="changed-teacher-block">'
+                    f'<div class="changed-teacher-head">'
+                    f'<div><span class="changed-teacher-index">{idx:02d}</span> '
+                    f'<span class="changed-teacher-name">{teacher_title}</span>{marker}'
+                    f'<span class="changed-teacher-subject">{subject_text}</span></div>'
+                    f'<div class="changed-teacher-status">주간 조회 전용</div>'
+                    f'</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+                render_standard_weekly_matrix(
+                    teacher_grid,
+                    ref,
+                    row_label="교시",
+                    key=f"changed_teacher_week_{idx}_{re.sub(r'[^0-9A-Za-z가-힣]+', '_', teacher)}",
+                    title=None,
+                    use_test=False,
+                    height=335,
+                    open_dialog=False,
+                )
+
+                if idx != len(all_teachers):
+                    st.markdown('<div class="changed-teacher-divider"></div>', unsafe_allow_html=True)
+
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
     with tab_map["📋 복무 관리 & 판단"]:
