@@ -32,25 +32,16 @@ st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", l
 
 st.markdown("""
 <style>
-/* =====================================================================================
-   SCHOOL OPS UI — Apple Workbench (5.1 통합본)
-   -------------------------------------------------------------------------------------
-   이전 버전은 "기본 Apple 스타일" 블록과, 그 위에 덧붙인 "5.0 WEB DESIGN RENEWAL" 블록이
-   따로 존재했다. 두 블록이 :root 변수를 서로 다른 값으로 각각 정의하면서 겹치는 부분만
-   덮어써, 다크 모드에서는 배경만 강제로 흰색으로 되돌아가고 헤더만 어두운 색으로 남는 등
-   "일부만 적용된" 상태가 됐다. 이 블록이 유일한 스타일 소스다.
-
-   원칙: 업무 우선 / 정보 밀도는 유지 / 장식은 최소화 / 한 화면 한 목적.
-   버튼·입력·상단 메뉴는 완전한 pill(999px) 대신 9~10px의 절제된 라운드를 쓴다
-   (Apple Notes/Reminders류 생산성 앱에 더 가까운 결) — 이 결정 하나가 --ui-pill /
-   --ui-radius-* 변수 값에만 반영되고, 그 변수를 쓰는 모든 곳에 자동으로 퍼진다.
-   ===================================================================================== */
+/* =====================================================================
+   SCHOOL OPS UI — Apple Workbench
+   원칙: 업무 우선 / 정보 밀도는 유지 / 장식은 최소화 / 한 화면 한 목적
+   ===================================================================== */
 :root{
- --ui-bg:#ffffff;--ui-surface:#ffffff;--ui-soft:#f5f5f7;--ui-soft-2:#fafafa;
- --ui-text:#1d1d1f;--ui-text-2:#424245;--ui-muted:#6e6e73;--ui-muted-2:#86868b;
- --ui-line:#d2d2d7;--ui-line-soft:#e8e8ed;--ui-accent:#0066cc;--ui-accent-hover:#0077ed;
+ --ui-bg:#ffffff;--ui-surface:#ffffff;--ui-soft:#f5f5f7;--ui-soft-2:#fafafc;
+ --ui-text:#1d1d1f;--ui-text-2:#3a3a3c;--ui-muted:#6e6e73;--ui-muted-2:#86868b;
+ --ui-line:#d2d2d7;--ui-line-soft:#e5e5ea;--ui-accent:#0066cc;--ui-accent-hover:#0071e3;
  --ui-focus:rgba(0,102,204,.20);--ui-success:#1b7f3a;--ui-danger:#c62828;
- --ui-radius-sm:9px;--ui-radius-md:10px;--ui-radius-lg:16px;--ui-pill:10px;
+ --ui-radius-sm:8px;--ui-radius-md:12px;--ui-radius-lg:16px;--ui-pill:999px;
 }
 html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"]{background:var(--ui-bg)!important;color:var(--ui-text)!important}
 body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
@@ -59,133 +50,159 @@ p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLab
 [class*="material-symbols"],[data-testid="stIconMaterial"]{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-style:normal!important}
 [data-testid="stHeader"]{background:rgba(255,255,255,.88)!important;border-bottom:1px solid var(--ui-line-soft)!important;backdrop-filter:saturate(150%) blur(16px)}
 [data-testid="stDecoration"]{display:none!important}
-.block-container{width:100%!important;max-width:none!important;padding:0 clamp(16px,2.2vw,42px) 56px!important}
+.block-container{width:100%!important;max-width:none!important;padding:0 clamp(16px,2.2vw,42px) 36px!important}
 .app-top-safe-space{height:30px;width:100%}
-
-/* ---------- app shell: 상단은 "제품 내비게이션", 본문은 "업무 캔버스" ---------- */
-.app-topbar{position:relative;z-index:3;display:flex;align-items:center;gap:18px;min-height:58px;padding:0 0 10px;margin:0 0 26px;border-bottom:1px solid var(--ui-line-soft)}
-.app-identity{white-space:nowrap;color:var(--ui-muted);font-size:11px;line-height:1.25;letter-spacing:-.01em}.app-identity strong{color:var(--ui-text);font-size:13px;font-weight:600}
-.app-topbar .stButton>button{height:36px!important;min-height:36px!important;padding:5px 12px!important;border-radius:var(--ui-pill)!important;font-size:12px!important}
-.app-topbar [data-testid="stRadio"] [role="radiogroup"]{display:flex!important;align-items:center!important;gap:4px!important;width:100%!important;padding:2px!important;background:var(--ui-soft)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-pill)!important;overflow-x:auto!important;scrollbar-width:none}
+/* ---------- app shell ---------- */
+.app-topbar{position:relative;z-index:3;display:flex;align-items:center;gap:14px;min-height:54px;padding:4px 0 8px;margin:0 0 14px;border-bottom:1px solid var(--ui-line-soft)}
+.app-identity{white-space:nowrap;color:var(--ui-muted);font-size:12px;line-height:1.25}.app-identity strong{color:var(--ui-text);font-weight:600}
+.app-topbar .stButton>button{min-height:34px!important;padding:6px 13px!important;border-radius:var(--ui-pill)!important;font-size:12px!important}
+.app-topbar [data-testid="stRadio"] [role="radiogroup"]{display:flex!important;align-items:center!important;gap:2px!important;width:100%!important;padding:2px!important;background:var(--ui-soft)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-pill)!important;overflow-x:auto!important;scrollbar-width:none}
 .app-topbar [data-testid="stRadio"] [role="radiogroup"]::-webkit-scrollbar{display:none}
-.app-topbar [data-testid="stRadio"] [role="radio"]{flex:0 0 auto!important;height:36px!important;min-height:36px!important;padding:0 13px!important;border-radius:9px!important;color:var(--ui-muted)!important;font-size:12px!important;font-weight:500!important;background:transparent!important;border:0!important}
+.app-topbar [data-testid="stRadio"] [role="radio"]{flex:0 0 auto!important;min-height:34px!important;padding:0 14px!important;border-radius:var(--ui-pill)!important;color:var(--ui-muted)!important;font-size:13px!important;font-weight:500!important;background:transparent!important;border:0!important}
 .app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-weight:600!important;box-shadow:0 1px 3px rgba(0,0,0,.08)!important}
 .app-topbar [data-testid="stRadio"] [role="radio"]>div:first-child{display:none!important}
 .app-topbar [data-testid="stSelectbox"]>div>div{min-height:34px!important;border-radius:var(--ui-pill)!important;background:var(--ui-soft)!important;border-color:var(--ui-line-soft)!important}
-
-/* ---------- page header: 제목은 크게, 설명은 작게, 소속/연도는 위에 조용히 ---------- */
-.work-page-head{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:0 2px 20px;margin:0 0 22px;border-bottom:0}
-.work-page-kicker{font-size:11px;color:var(--ui-muted);letter-spacing:.01em;margin:0 0 6px}
-.work-page-head h1{margin:0!important;font-size:32px!important;line-height:1.1!important;font-weight:600!important;letter-spacing:-.045em!important;color:var(--ui-text)!important}
-.work-page-head p{margin:7px 0 0!important;font-size:13px!important;line-height:1.45!important;color:var(--ui-muted)!important}
-.work-page-meta{font-size:11px;color:var(--ui-muted);white-space:nowrap;padding:7px 10px;border:1px solid var(--ui-line-soft);border-radius:999px;background:var(--ui-soft-2)}
-
-/* ---------- sections / cards: 카드 남발 대신 얇은 구획선과 여백 ---------- */
-.work-section{margin:0 0 30px}.work-section-title{font-size:15px;font-weight:600;color:var(--ui-text);margin:0 0 5px 2px}.work-section-note{font-size:12px;color:var(--ui-muted);margin:-3px 0 10px 2px}
+/* ---------- page header ---------- */
+.work-page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:8px 2px 16px;margin:0 0 18px;border-bottom:1px solid var(--ui-line-soft)}
+.work-page-head h1{margin:0!important;font-size:30px!important;line-height:1.12!important;font-weight:600!important;letter-spacing:-.04em!important;color:var(--ui-text)!important}
+.work-page-head p{margin:6px 0 0!important;font-size:13px!important;line-height:1.45!important;color:var(--ui-muted)!important}
+.work-page-meta{font-size:12px;color:var(--ui-muted);white-space:nowrap;padding-bottom:3px}
+/* ---------- sections / cards ---------- */
+.work-section{margin:0 0 24px}.work-section-title{font-size:14px;font-weight:600;color:var(--ui-text);margin:0 0 8px 2px}.work-section-note{font-size:12px;color:var(--ui-muted);margin:-3px 0 10px 2px}
 [data-testid="stVerticalBlockBorderWrapper"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-lg)!important;box-shadow:none!important}
 [data-testid="stExpander"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-md)!important;box-shadow:none!important;overflow:hidden!important}
 [data-testid="stExpander"] summary{min-height:42px!important;padding:6px 12px!important;color:var(--ui-text)!important;font-size:13px!important;font-weight:600!important}
 [data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}
-
-/* ---------- login hero (이전 버전에서 정의가 누락되어 스타일이 전혀 먹지 않던 클래스들) ---------- */
-.login-shell{max-width:420px;margin:6vh auto 0}
-.login-mark{background:var(--ui-soft);border:1px solid var(--ui-line-soft);border-radius:var(--ui-radius-lg);padding:20px;text-align:center;margin:0 0 22px}
-.ai-hero-kicker{color:var(--ui-muted);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
-.ai-hero-title{margin:.5rem 0 .5rem;font-size:clamp(1.6rem,3vw,2.3rem);line-height:1.2;font-weight:600;letter-spacing:-.03em;color:var(--ui-text)}
-.ai-hero-sub{color:var(--ui-muted);font-size:14px;line-height:1.55;margin:0 0 1.3rem}
-.ai-prompt-glow{position:relative;margin:0 auto;max-width:420px}
-
 /* ---------- typography ---------- */
 h1,h2,h3,h4,h5,h6{color:var(--ui-text)!important}h2{font-size:22px!important;font-weight:600!important;letter-spacing:-.025em!important}h3{font-size:18px!important;font-weight:600!important;letter-spacing:-.02em!important}h4{font-size:15px!important;font-weight:600!important}
 [data-testid="stCaptionContainer"],.stCaption{color:var(--ui-muted)!important;font-size:12px!important;line-height:1.45!important}
-
-/* ---------- controls: label은 조용히, 실제 값이 먼저 보이게 ---------- */
-[data-testid="stDateInput"] label,[data-testid="stSelectbox"] label,[data-testid="stRadio"] label,[data-testid="stTextInput"] label,[data-testid="stTextArea"] label,[data-testid="stNumberInput"] label{font-size:11px!important;color:var(--ui-muted)!important;font-weight:500!important;margin-bottom:5px!important}
-.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:38px!important;padding:6px 14px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-md)!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;box-shadow:none!important;transform:none!important;transition:background .12s ease,border-color .12s ease!important;font-size:12px!important;font-weight:500!important}
+/* ---------- controls ---------- */
+.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:40px!important;padding:7px 16px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;box-shadow:none!important;transform:none!important;transition:background .12s ease,border-color .12s ease!important;font-size:13px!important;font-weight:500!important}
 .stButton>button:hover,.stDownloadButton>button:hover,.stFormSubmitButton>button:hover{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;box-shadow:none!important}
 .stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{background:var(--ui-accent)!important;border-color:var(--ui-accent)!important;color:#fff!important;font-weight:600!important}
 .stButton>button[kind="primary"]:hover,.stFormSubmitButton>button[kind="primary"]:hover{background:var(--ui-accent-hover)!important;border-color:var(--ui-accent-hover)!important}
 .stButton>button:focus-visible,.stDownloadButton>button:focus-visible,.stFormSubmitButton>button:focus-visible{outline:3px solid var(--ui-focus)!important;outline-offset:1px}
-[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{min-height:38px!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-sm)!important;box-shadow:none!important}
+[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{min-height:40px!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-sm)!important;box-shadow:none!important}
 [data-baseweb="input"] input,[data-baseweb="textarea"] textarea,[data-baseweb="select"] input{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-text)!important;background:transparent!important;font-size:13px!important}
 input::placeholder,textarea::placeholder{color:var(--ui-muted-2)!important}
 [data-baseweb="input"]:focus-within,[data-baseweb="textarea"]:focus-within,[data-baseweb="select"]:focus-within{border-color:var(--ui-accent)!important;box-shadow:0 0 0 3px var(--ui-focus)!important}
-[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{display:flex!important;gap:5px!important;padding:0!important;background:transparent!important;border:0!important;overflow:visible!important;flex-wrap:wrap}
-[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;padding:5px 12px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-md)!important;background:var(--ui-surface)!important;color:var(--ui-text-2)!important;font-size:13px!important;font-weight:500!important}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{display:flex!important;gap:6px!important;padding:0!important;background:transparent!important;border:0!important;overflow:visible!important;flex-wrap:wrap}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;padding:6px 13px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text-2)!important;font-size:13px!important;font-weight:500!important}
 [data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"]{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;color:var(--ui-text)!important;font-weight:600!important}
-
-/* ---------- timetable: 이 앱의 핵심 제품 UI. 셀은 크고, 헤더는 조용하게 ---------- */
-.swap-result-summary{margin:12px 0;padding:10px 13px;border:1px solid var(--ui-line-soft);border-radius:var(--ui-radius-md);background:var(--ui-soft);font-size:12px;color:var(--ui-muted)}.swap-result-summary strong{color:var(--ui-text);font-weight:600}
-.matrix-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 8px}.matrix-title{font-size:15px;font-weight:600;letter-spacing:-.02em;color:var(--ui-text)}.matrix-subtitle{font-size:11px;color:var(--ui-muted)}
-.matrix-legend{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 9px 2px}
-.matrix-legend span{white-space:nowrap;display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;background:var(--ui-soft);color:var(--ui-muted);font-size:11px;font-weight:500}
+/* ---------- timetable ---------- */
+.swap-result-summary{margin:8px 0 10px;padding:8px 12px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft);font-size:12px;color:var(--ui-muted)}.swap-result-summary strong{color:var(--ui-text);font-weight:600}
+.matrix-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 9px}.matrix-title{font-size:14px;font-weight:600;color:var(--ui-text)}.matrix-subtitle{font-size:12px;color:var(--ui-muted)}
+.matrix-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--ui-muted);margin:0 0 8px 2px}.matrix-legend span{white-space:nowrap}
 [data-testid="stDataFrame"]{border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-md)!important;overflow:hidden!important;background:var(--ui-surface)!important;box-shadow:none!important}
-[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important;font-size:11px!important;font-weight:600!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
-[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-size:12px!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
-
+[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important;font-size:12px!important;font-weight:600!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
+[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-size:13px!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
 /* ---------- changed teachers ---------- */
-.changed-teacher-selector{display:flex;align-items:center;gap:8px;margin:0 0 10px}.changed-teacher-chip{display:inline-flex;align-items:center;padding:7px 10px;border:1px solid var(--ui-line-soft);border-radius:var(--ui-radius-md);background:var(--ui-soft-2);color:var(--ui-text);font-size:12px}
-
-/* ---------- notes / states: 색을 면적으로 쓰지 않고 얇게 사용 ---------- */
-.apple-note,.work-note{padding:10px 12px;margin:0 0 12px;background:var(--ui-soft-2);border:1px solid var(--ui-line-soft);border-radius:var(--ui-radius-md);color:var(--ui-muted);font-size:12px;line-height:1.5}.apple-note strong,.work-note strong{color:var(--ui-text)}
-.sandbox-title{margin:0 0 7px!important;font-size:26px!important;line-height:1.2!important;font-weight:600!important;letter-spacing:-.045em!important;color:var(--ui-text)!important}
-[data-testid="stAlert"]{border-radius:var(--ui-radius-md)!important;font-size:12px!important}
-.swap-group-head{display:flex;align-items:center;justify-content:space-between;margin:20px 0 6px;padding-top:4px}.swap-group-title{font-size:13px;font-weight:600;color:var(--ui-text)}.swap-group-count{font-size:11px;color:var(--ui-muted);padding:3px 7px;border:0;border-radius:999px;background:var(--ui-soft)}
-
-/* ---------- dialog: 작업창은 좁고 선명하게. 제목/내용/행동의 3단 구조 ---------- */
-[data-testid="stDialog"]>div>div{max-height:calc(100vh - 5rem)!important;overflow-y:auto!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:16px!important;box-shadow:0 16px 50px rgba(0,0,0,.12)!important}
+.changed-teacher-selector{display:flex;align-items:center;gap:8px;margin:0 0 10px}.changed-teacher-chip{display:inline-flex;align-items:center;padding:7px 10px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft-2);color:var(--ui-text);font-size:12px}
+/* ---------- notes / states ---------- */
+.apple-note,.work-note{padding:10px 12px;margin:0 0 12px;background:var(--ui-soft-2);border:1px solid var(--ui-line-soft);border-radius:10px;color:var(--ui-muted);font-size:12px;line-height:1.5}.apple-note strong,.work-note strong{color:var(--ui-text)}
+.sandbox-title{margin:0 0 4px!important;font-size:24px!important;line-height:1.2!important;font-weight:600!important;letter-spacing:-.045em!important;color:var(--ui-text)!important}
+.swap-group-head{display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px;padding-top:4px}.swap-group-title{font-size:13px;font-weight:600;color:var(--ui-text)}.swap-group-count{font-size:11px;color:var(--ui-muted);padding:3px 7px;border:1px solid var(--ui-line-soft);border-radius:999px;background:var(--ui-soft)}
+/* ---------- dialog ---------- */
+[data-testid="stDialog"]>div>div{max-height:calc(100vh - 5rem)!important;overflow-y:auto!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:18px!important;box-shadow:0 18px 48px rgba(0,0,0,.14)!important}
 [data-testid="stDialog"] [data-testid="stVerticalBlockBorderWrapper"]{border:0!important;background:transparent!important}
-[data-testid="stDialog"] h1,[data-testid="stDialog"] h2,[data-testid="stDialog"] h3{letter-spacing:-.03em!important}
-[data-testid="stDialog"] .stButton>button{min-height:40px!important}
 [data-testid="stDialog"] [data-testid="stSlider"]{margin:0!important;padding:3px 0!important}[data-testid="stDialog"] [data-testid="stSlider"]>label{display:none!important}
 [data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"]{min-height:34px!important;margin:0!important}
-
 /* ---------- tabs / links ---------- */
 [data-baseweb="tab-list"]{gap:4px!important;border-bottom:1px solid var(--ui-line-soft)!important}[data-baseweb="tab"]{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-muted)!important}[data-baseweb="tab"][aria-selected="true"]{color:var(--ui-text)!important}
 a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var(--ui-line-soft)!important}
-
 /* ---------- utility ---------- */
-[data-testid="stMetric"]{padding:8px 0!important}.ui-kpi-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px}.ui-kpi{padding:13px 15px;border:1px solid var(--ui-line-soft);border-radius:var(--ui-radius-lg);background:var(--ui-surface)}.ui-kpi-label{font-size:11px;color:var(--ui-muted)}.ui-kpi-value{margin-top:4px;font-size:21px;font-weight:600;color:var(--ui-text)}
+[data-testid="stMetric"]{padding:8px 0!important}.ui-kpi-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px}.ui-kpi{padding:13px 15px;border:1px solid var(--ui-line-soft);border-radius:12px;background:var(--ui-surface)}.ui-kpi-label{font-size:11px;color:var(--ui-muted)}.ui-kpi-value{margin-top:4px;font-size:21px;font-weight:600;color:var(--ui-text)}
+@media(max-width:900px){.block-container{padding-left:12px!important;padding-right:12px!important}.app-top-safe-space{height:24px}.work-page-head{display:block}.work-page-meta{margin-top:8px}.ui-kpi-row{grid-template-columns:1fr}.app-topbar{overflow:hidden}}
+@media(prefers-color-scheme:dark){:root{--ui-bg:#000;--ui-surface:#1c1c1e;--ui-soft:#2c2c2e;--ui-soft-2:#232326;--ui-text:#f5f5f7;--ui-text-2:#e5e5ea;--ui-muted:#a1a1a6;--ui-muted-2:#8e8e93;--ui-line:#48484a;--ui-line-soft:#38383a;--ui-accent:#2997ff;--ui-accent-hover:#47a6ff;--ui-focus:rgba(41,151,255,.30)}[data-testid="stHeader"]{background:rgba(0,0,0,.76)!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button,[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"]{background:var(--ui-surface)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important}[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important}[data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}[data-testid="stDialog"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}.ui-kpi{background:var(--ui-surface)!important;border-color:var(--ui-line-soft)!important}}
+</style>
+""", unsafe_allow_html=True)
 
-/* ---------- 반응형: 1366px 노트북에서도 매트릭스가 답답하지 않게 ---------- */
+# ==========================================================================================
+# 5.0 WEB DESIGN RENEWAL — 업무용 제품처럼 보이게 만드는 최종 레이어
+# - 기존 업무 로직은 건드리지 않고 시각적 위계/밀도/상호작용만 재정렬한다.
+# - 목표: "표를 읽는 시간"과 "다음 행동을 찾는 시간"을 줄인다.
+# ==========================================================================================
+st.markdown(r"""
+<style>
+:root{
+ --ui-bg:#fff;--ui-surface:#fff;--ui-soft:#f5f5f7;--ui-soft-2:#fafafa;
+ --ui-text:#1d1d1f;--ui-text-2:#424245;--ui-muted:#6e6e73;--ui-muted-2:#86868b;
+ --ui-line:#d2d2d7;--ui-line-soft:#e8e8ed;--ui-accent:#0066cc;--ui-accent-hover:#0077ed;
+}
+/* 01. App shell: 상단은 "제품 내비게이션", 본문은 "업무 캔버스"로 분리 */
+.block-container{padding-top:0!important;padding-bottom:56px!important}
+.app-top-safe-space{height:30px!important}
+.app-topbar{min-height:58px!important;padding:0 0 10px!important;margin-bottom:26px!important;gap:18px!important;border-bottom:1px solid #e8e8ed!important}
+.app-identity{font-size:11px!important;color:#86868b!important;letter-spacing:-.01em!important}
+.app-identity strong{font-size:13px!important;color:#1d1d1f!important}
+.app-topbar .stButton>button{height:36px!important;min-height:36px!important;border-radius:10px!important;padding:5px 12px!important}
+.app-topbar [data-testid="stRadio"] [role="radiogroup"]{background:transparent!important;border:0!important;padding:0!important;gap:4px!important}
+.app-topbar [data-testid="stRadio"] [role="radio"]{height:36px!important;min-height:36px!important;padding:0 13px!important;border-radius:9px!important;font-size:12px!important;color:#6e6e73!important}
+.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:#f5f5f7!important;color:#1d1d1f!important;box-shadow:none!important}
+
+/* 02. Page header: 제목은 크고, 설명은 작게. 업무 메타는 오른쪽으로 고정 */
+.work-page-head{padding:0 2px 20px!important;margin-bottom:22px!important;border-bottom:0!important;align-items:center!important}
+.work-page-head h1{font-size:32px!important;line-height:1.1!important;letter-spacing:-.045em!important}
+.work-page-head p{font-size:13px!important;margin-top:7px!important;color:#86868b!important}
+.work-page-meta{font-size:11px!important;color:#86868b!important;padding:7px 10px!important;border:1px solid #e8e8ed!important;border-radius:999px!important;background:#fafafa!important}
+
+/* 03. 업무 섹션: 카드 남발 대신 얇은 구획선과 여백 */
+.work-section{margin-bottom:30px!important}
+.work-section-title{font-size:15px!important;margin-bottom:5px!important}
+.work-section-note{font-size:12px!important;color:#86868b!important}
+
+/* 04. 컨트롤: label보다 실제 선택값이 먼저 보이게 */
+[data-testid="stDateInput"] label,[data-testid="stSelectbox"] label,[data-testid="stRadio"] label,[data-testid="stTextInput"] label,[data-testid="stNumberInput"] label{font-size:11px!important;color:#6e6e73!important;font-weight:500!important;margin-bottom:5px!important}
+[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{border-color:#d2d2d7!important;border-radius:9px!important;min-height:38px!important}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{gap:5px!important}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;border-radius:9px!important;padding:5px 12px!important}
+
+/* 05. Primary / secondary action hierarchy */
+.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:38px!important;border-radius:9px!important;font-size:12px!important;padding:6px 14px!important}
+.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{border-radius:9px!important}
+
+/* 06. Matrix: 이 앱의 핵심 제품 UI. 셀은 크고, 헤더는 조용하게 */
+.matrix-toolbar{margin:0 0 8px!important}
+.matrix-title{font-size:15px!important;font-weight:600!important;letter-spacing:-.02em!important}
+.matrix-subtitle{font-size:11px!important;color:#86868b!important}
+.matrix-legend{gap:14px!important;margin:0 0 9px 2px!important;font-size:11px!important;color:#86868b!important}
+[data-testid="stDataFrame"]{border:1px solid #d2d2d7!important;border-radius:10px!important;box-shadow:none!important}
+[data-testid="stDataFrame"] [role="columnheader"]{background:#f5f5f7!important;color:#424245!important;font-size:11px!important;font-weight:600!important;border-color:#e8e8ed!important}
+[data-testid="stDataFrame"] [role="gridcell"]{font-size:12px!important;border-color:#eeeeef!important}
+
+/* 07. Search/result table: 정보의 덩어리를 "구간 → 결과"로 읽히게 */
+.swap-result-summary{margin:12px 0!important;padding:10px 13px!important;border-radius:9px!important;background:#f5f5f7!important;border-color:#e8e8ed!important}
+.swap-group-head{margin:20px 0 6px!important;padding:0!important}
+.swap-group-title{font-size:13px!important}
+.swap-group-count{border:0!important;background:#f5f5f7!important;border-radius:999px!important}
+
+/* 08. Dialog: 작업창은 좁고 선명하게. 제목/내용/행동의 3단 구조 */
+[data-testid="stDialog"]>div>div{border:1px solid #d2d2d7!important;border-radius:16px!important;box-shadow:0 16px 50px rgba(0,0,0,.12)!important}
+[data-testid="stDialog"] h1,[data-testid="stDialog"] h2,[data-testid="stDialog"] h3{letter-spacing:-.03em!important}
+[data-testid="stDialog"] .stButton>button{min-height:40px!important}
+
+/* 09. 상태 메시지: 컬러를 면적으로 쓰지 않고 얇게 사용 */
+[data-testid="stAlert"]{border-radius:9px!important;font-size:12px!important}
+.apple-note,.work-note{padding:10px 12px!important;border-radius:9px!important;background:#fafafa!important}
+.sandbox-title{font-size:28px!important;letter-spacing:-.045em!important;margin-bottom:7px!important}
+
+/* 10. 모바일/노트북: 1366px에서도 매트릭스가 답답하지 않게 */
 @media(max-width:1400px){
  .block-container{padding-left:22px!important;padding-right:22px!important}
- .app-topbar{gap:10px}
+ .app-topbar{gap:10px!important}
  .app-topbar [data-testid="stRadio"] [role="radio"]{padding:0 10px!important}
 }
 @media(max-width:900px){
  .block-container{padding-left:14px!important;padding-right:14px!important}
- .app-top-safe-space{height:24px}
- .work-page-head{display:block}
+ .work-page-head{display:block!important}
  .work-page-meta{display:inline-block;margin-top:10px}
- .ui-kpi-row{grid-template-columns:1fr}
- .app-topbar{overflow:hidden}
- .login-shell{margin-top:3vh;padding:0 .5rem}
-}
-
-/* ---------- 다크 모드: 위 선택자들은 그대로 두고 변수 값만 뒤집는다 (분리된 블록 없음) ---------- */
-@media(prefers-color-scheme:dark){
- :root{
-  --ui-bg:#000;--ui-surface:#1c1c1e;--ui-soft:#2c2c2e;--ui-soft-2:#232326;
-  --ui-text:#f5f5f7;--ui-text-2:#e5e5ea;--ui-muted:#a1a1a6;--ui-muted-2:#8e8e93;
-  --ui-line:#48484a;--ui-line-soft:#38383a;--ui-accent:#2997ff;--ui-accent-hover:#47a6ff;
-  --ui-focus:rgba(41,151,255,.30);
- }
- [data-testid="stHeader"]{background:rgba(0,0,0,.76)!important}
- .stButton>button,.stDownloadButton>button,.stFormSubmitButton>button,[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}
- [data-testid="stDataFrame"]{background:var(--ui-surface)!important;border-color:var(--ui-line)!important}
- [data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important}
- [data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important}
- [data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}
- [data-testid="stDialog"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}
- .ui-kpi{background:var(--ui-surface)!important;border-color:var(--ui-line-soft)!important}
 }
 </style>
 """, unsafe_allow_html=True)
 
 SCHOOL_NAME = "서라벌여자중학교"
 SCHOOL_YEAR = "2026"
-APP_VERSION = "5.1-Apple-ProductUX-Unified"
+APP_VERSION = "5.0-Apple-ProductUX-Renewal"
 
 # ==========================================================================================
 # UI 폰트 설정
@@ -3364,7 +3381,7 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         return None
     monday = ref_date - timedelta(days=ref_date.weekday())
     if title:
-        st.markdown(f"<div style='font-size:.86rem;font-weight:600;color:var(--ui-muted);margin:0 0 .12rem .1rem'>{title}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size:.86rem;font-weight:600;color:#6b7280;margin:0 0 .12rem .1rem'>{title}</div>", unsafe_allow_html=True)
     if show_week_dates:
         dates = [monday + timedelta(days=i) for i in range(5)]
         st.markdown("<div class='compact-nav'>" + "　".join(f"{DAYS[i]} {dates[i]:%m.%d}" for i in range(5)) + "</div>", unsafe_allow_html=True)
@@ -4233,23 +4250,17 @@ def show_login_page():
     if "login_locked" not in st.session_state:
         st.session_state.login_locked = False
 
-    st.markdown("<div class='login-shell'>", unsafe_allow_html=True)
-
     # ===== 구글 드라이브 이미지 =====
     IMAGE_URL = "https://i.imgur.com/Gl0YDO3.jpeg"
     st.markdown(
         f"""
-        <div class="login-mark">
+        <div style="background:rgba(255,255,255,.035); padding:20px; border:1px solid rgba(255,255,255,.08); border-radius: 18px; text-align: center; margin-bottom: 20px;">
             <img src="{IMAGE_URL}" width="150" style="object-fit: contain;">
         </div>
-        """,
+        """, 
         unsafe_allow_html=True
     )
     # ==============================
-    # 이전 버전은 이 카드에 반투명 흰색(rgba(255,255,255,.035))을 썼는데, 페이지 배경 자체가
-    # 흰색이라 카드 배경/테두리가 거의 보이지 않는 상태였다(다크 히어로 배경을 가정한 값이
-    # 흰 배경에 그대로 남아있던 실제 버그). login-mark 클래스는 테마 변수(var(--ui-soft) 등)를
-    # 쓰므로 라이트/다크 모드 모두에서 항상 올바르게 보인다.
 
     st.markdown(f"<div class='ai-hero-kicker'>{SCHOOL_YEAR} · SCHOOL OPERATIONS</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='ai-hero-title'>{SCHOOL_NAME}</div>", unsafe_allow_html=True)
@@ -4304,8 +4315,6 @@ def show_login_page():
 
     if st.session_state.login_attempts > 0:
         st.warning(f"현재 로그인 실패 횟수: {st.session_state.login_attempts} / {MAX_LOGIN_ATTEMPTS}")
-
-    st.markdown("</div>", unsafe_allow_html=True)  # /.login-shell
 
     st.divider()
     st.markdown("#### 📝 아이디 추가 요청 (게스트용)")
@@ -4550,7 +4559,7 @@ PAGE_DESCRIPTIONS = {
 }
 st.markdown(
     f'<div class="work-page-head"><div>'
-    f'<div class="work-page-kicker">{SCHOOL_NAME} · {SCHOOL_YEAR}</div>'
+    f'<div style="font-size:11px;color:#86868b;margin-bottom:6px;letter-spacing:.01em">{SCHOOL_NAME} · {SCHOOL_YEAR}</div>'
     f'<h1>{NAV_LABELS.get(active_tab, active_tab)}</h1>'
     f'<p>{PAGE_DESCRIPTIONS.get(active_tab, "학교 시간표와 결보강 업무를 관리합니다.")}</p></div>'
     f'<div class="work-page-meta">{current_role()} · {current_name() or current_user()}</div></div>',
