@@ -682,7 +682,7 @@ def daily_schedule_picker(ref_date=None, key="daily_schedule", *, teacher_filter
     teacher_key = str(teacher_filter or "all").strip().replace(" ", "_")
     matrix_key = f"{key}_matrix_{picked_date:%Y%m%d}_{teacher_key}_{'test' if use_test else 'live'}"
     state_key = f"_{key}_selected_cells_{picked_date:%Y%m%d}_{teacher_key}_{'test' if use_test else 'live'}"
-    event=st.dataframe(matrix, hide_index=True, width="stretch", height=height,
+    event=st.dataframe(_daily_styled_matrix(matrix), hide_index=True, width="stretch", height=height,
                        key=matrix_key, on_select="rerun",
                        selection_mode="multi-cell" if multi else "single-cell")
     cells=getattr(getattr(event,"selection",None),"cells",[]) or []
@@ -2643,6 +2643,23 @@ def _weekly_display_matrix(matrix: pd.DataFrame) -> pd.DataFrame:
                 vals.append(text)
         out[col] = vals
     return out
+_CHANGED_LESSON_MARKERS = ("🔄", "🧪", "🟢", "🟡")
+
+def _is_changed_lesson_cell(value) -> bool:
+    text = "" if value is None else str(value)
+    return any(marker in text for marker in _CHANGED_LESSON_MARKERS)
+
+def _daily_styled_matrix(matrix: pd.DataFrame):
+    if matrix is None or matrix.empty:
+        return matrix
+    styler = matrix.style
+    data_cols = [c for c in matrix.columns if str(c) != "교사명"]
+    if data_cols:
+        def _changed_text_style(v):
+            return "color:#c62828;font-weight:700;" if _is_changed_lesson_cell(v) else ""
+        styler = styler.map(_changed_text_style, subset=data_cols) if hasattr(styler, "map") else styler.applymap(_changed_text_style, subset=data_cols)
+    return styler
+
 def _weekly_styled_matrix(matrix: pd.DataFrame, *, drop_teacher_name: bool = False):
     display = _weekly_display_matrix(matrix)
     if display is None or display.empty:
@@ -2680,13 +2697,13 @@ def _weekly_styled_matrix(matrix: pd.DataFrame, *, drop_teacher_name: bool = Fal
     def _status_style(v):
         s = "" if v is None else str(v)
         if "🔄" in s:
-            return "box-shadow: inset 0 0 0 2px rgba(239,68,68,.82); font-weight:700;"
+            return "color:#c62828; box-shadow: inset 0 0 0 2px rgba(239,68,68,.82); font-weight:700;"
         if "🧪" in s:
-            return "box-shadow: inset 0 0 0 2px rgba(124,58,237,.82); font-weight:700;"
+            return "color:#c62828; box-shadow: inset 0 0 0 2px rgba(124,58,237,.82); font-weight:700;"
         if "🟢" in s:
-            return "box-shadow: inset 0 0 0 2px rgba(22,163,74,.82); font-weight:700;"
+            return "color:#c62828; box-shadow: inset 0 0 0 2px rgba(22,163,74,.82); font-weight:700;"
         if "🟡" in s:
-            return "box-shadow: inset 0 0 0 2px rgba(217,119,6,.82); font-weight:700;"
+            return "color:#c62828; box-shadow: inset 0 0 0 2px rgba(217,119,6,.82); font-weight:700;"
         return ""
     data_cols = [c for c in display.columns if str(c) not in ("교사명", "학급")]
     if data_cols:
@@ -2700,6 +2717,7 @@ def _clear_weekly_selection():
     st.session_state.pop("weekly_dialog_open", None)
     st.session_state.pop("weekly_swap_candidates", None)
     st.session_state.pop("weekly_swap_candidates_key", None)
+    st.session_state.pop("weekly_dialog_swap_selected_row", None)
     st.session_state.pop("weekly_cycle_candidates", None)
     st.session_state.pop("weekly_cycle_candidates_msg", None)
     st.session_state.pop("weekly_cycle_candidates_key", None)
@@ -2869,6 +2887,7 @@ def _weekly_action_dialog():
         )
         stored_key = st.session_state.get("weekly_swap_candidates_key")
         if stored_key != cache_key:
+            st.session_state.pop("weekly_dialog_swap_selected_row", None)
             with _weekly_dialog_loading("1:1 교환 후보 검색 중"):
                 df_swap = get_single_lesson_1to1_candidates(
                     lesson["교사명"], lesson["일자"], safe_int(lesson["교시"]),
@@ -2885,7 +2904,7 @@ def _weekly_action_dialog():
         if df_swap.empty:
             st.info("현재 같은 학급 조건에서 가능한 1:1 맞교환 위치가 없습니다.")
         else:
-            same_df = df_swap.copy()
+            same_df = df_swap.reset_index(drop=True).copy()
             st.markdown(
                 f'<div class="swap-result-summary"><strong>{len(same_df)}개</strong> 동일 학급 1:1 교환 가능</div>',
                 unsafe_allow_html=True,
@@ -2899,46 +2918,50 @@ def _weekly_action_dialog():
                     "교환가능사유": "교환 가능 사유",
                 })
                 return view[["날짜", "교시", "상대교사", "상대학급", "상대과목", "교환 가능 사유"]]
-            def _render_swap_group(title, src, note):
-                st.markdown(
-                    f'<div class="swap-group-head"><span class="swap-group-title">{title}</span><span class="swap-group-count">{len(src)}개</span></div>',
-                    unsafe_allow_html=True,
-                )
-                st.caption(note)
-                if src.empty:
-                    st.info("해당 범주의 교환 가능 수업이 없습니다.")
-                    return
-                view = _swap_result_view(src)
-                st.dataframe(
-                    view, width="stretch", hide_index=True, height=min(520, 44 + max(1, len(view)) * 35),
-                    column_config={
-                        "날짜": st.column_config.TextColumn("날짜", width="small"),
-                        "교시": st.column_config.TextColumn("교시", width="small"),
-                        "상대교사": st.column_config.TextColumn("상대 교사", width="small"),
-                        "상대학급": st.column_config.TextColumn("상대 학급", width="small"),
-                        "상대과목": st.column_config.TextColumn("상대 과목", width="small"),
-                        "교환 가능 사유": st.column_config.TextColumn("교환 가능 사유", width="large"),
-                    },
-                )
-            _render_swap_group("동일 학급", same_df, "같은 학급의 다른 날짜·교시 수업과 교환 가능한 후보입니다.")
-            labels = [
-                f"{row['이동희망일']} ({row['이동요일']}) · {safe_int(row['이동희망교시'])}교시 · {row['상대교사']} · {row['상대학급']} {row['상대과목']}"
-                for _, row in df_swap.iterrows()
-            ]
+            st.markdown("#### 교환할 수업 선택")
+            st.caption("아래 표에서 교환할 수업의 행을 클릭하면 바로 선택됩니다. 별도의 선택 목록은 없습니다.")
+            table_view = _swap_result_view(same_df)
             dialog_instance = int(st.session_state.get("weekly_dialog_instance", 0) or 0)
-            pick_label = st.selectbox("교환할 수업 선택", labels, key=f"weekly_dialog_swap_pick_{dialog_instance}")
-            picked = df_swap.iloc[labels.index(pick_label)]
-            st.caption(
-                f"상대 수업: **{picked['상대교사']} · {picked['이동희망일']} · "
-                f"{safe_int(picked.get('이동희망교시', picked['원본교시']))}교시 · {picked['상대학급']} · {picked['상대과목']}**"
+            table_key = f"weekly_dialog_swap_table_{dialog_instance}"
+            selected_row_key = "weekly_dialog_swap_selected_row"
+            table_event = st.dataframe(
+                table_view, width="stretch", hide_index=True,
+                height=min(520, 44 + max(1, len(table_view)) * 35), key=table_key,
+                on_select="rerun", selection_mode="single-row",
+                column_config={
+                    "날짜": st.column_config.TextColumn("날짜", width="small"),
+                    "교시": st.column_config.TextColumn("교시", width="small"),
+                    "상대교사": st.column_config.TextColumn("상대 교사", width="small"),
+                    "상대학급": st.column_config.TextColumn("상대 학급", width="small"),
+                    "상대과목": st.column_config.TextColumn("상대 과목", width="small"),
+                    "교환 가능 사유": st.column_config.TextColumn("교환 가능 사유", width="large"),
+                },
             )
-            b_info = {
-                "교사명": str(picked["상대교사"]), "일자": str(picked["이동희망일"]),
-                "요일": str(picked["이동요일"]), "교시": safe_int(picked.get("이동희망교시", picked["원본교시"])),
-                "학급": str(picked["상대학급"]), "과목": str(picked["상대과목"]),
-            }
+            selected_rows = list(getattr(getattr(table_event, "selection", None), "rows", []) or [])
+            if selected_rows:
+                row_idx = int(selected_rows[0])
+                if 0 <= row_idx < len(same_df):
+                    st.session_state[selected_row_key] = row_idx
+            selected_row = st.session_state.get(selected_row_key)
+            if selected_row is not None and not (0 <= int(selected_row) < len(same_df)):
+                selected_row = None
+                st.session_state.pop(selected_row_key, None)
+            picked = same_df.iloc[int(selected_row)] if selected_row is not None else None
+            if picked is None:
+                st.info("교환하려는 수업을 위 표에서 클릭해 주세요.")
+            else:
+                st.success(
+                    f"선택됨: **{picked['상대교사']} · {picked['이동희망일']} · "
+                    f"{safe_int(picked.get('이동희망교시', picked['원본교시']))}교시 · "
+                    f"{picked['상대학급']} · {picked['상대과목']}**"
+                )
+                b_info = {
+                    "교사명": str(picked["상대교사"]), "일자": str(picked["이동희망일"]),
+                    "요일": str(picked["이동요일"]), "교시": safe_int(picked.get("이동희망교시", picked["원본교시"])),
+                    "학급": str(picked["상대학급"]), "과목": str(picked["상대과목"]),
+                }
             button_label = "🧪 1:1 맞교환 테스트" if use_test else "✅ 1:1 맞교환 실행"
-            if st.button(button_label, type="primary", key="dlg_direct_swap", width="stretch"):
+            if st.button(button_label, type="primary", key="dlg_direct_swap", width="stretch", disabled=picked is None):
                 try:
                     with _weekly_dialog_loading("1:1 맞교환 처리 중"):
                         ok = do_swap(lesson, b_info, lesson["일자"], b_info["일자"], is_test=use_test)
