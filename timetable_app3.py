@@ -131,8 +131,9 @@ NEIS_SCHOOL_CODE_FALLBACKS = {
     "서라벌여자중학교": {"ATPT_OFCDC_SC_CODE": "R10", "SD_SCHUL_CODE": "8771121"},
 }
 NEIS_NON_INSTRUCTIONAL_TYPES = (
-    "공휴일", "휴업일", "휴일", "방학", "재량휴업일", "개교기념일", "대체공휴일",
-    "토요휴업일", "일요일", "토요일", "선거일", "임시공휴일", "근로자의날",
+    "공휴일", "휴업일", "휴일", "방학", "재량휴업일", "임시휴업일", "학교장재량휴업일",
+    "개교기념일", "대체공휴일", "대체휴일", "토요휴업일", "일요일", "토요일", "선거일",
+    "임시공휴일", "근로자의날",
 )
 NEIS_SCHEDULE_CACHE_TTL = 900
 NEIS_SCHOOL_CACHE_TTL = 86400
@@ -223,8 +224,10 @@ def _neis_schedule_row_is_non_instructional(row: dict) -> bool:
     combined = " ".join(x for x in (sbtr, event, content) if x)
     if any(token in combined for token in NEIS_NON_INSTRUCTIONAL_TYPES):
         return True
-    # NEIS의 수업공제일명이 공휴일/휴업일로 들어오는 경우를 최우선으로 인정.
-    return sbtr in {"공휴일", "휴업일", "휴일", "방학"}
+    # 수업공제일 구분명이 휴업/휴일/방학 계열이면 행사명과 관계없이 등교하지 않는 날로 판정.
+    if any(token in sbtr for token in ("공휴일", "휴업", "휴일", "방학")):
+        return True
+    return False
 
 def _neis_event_label(row: dict) -> str:
     sbtr = str(row.get("SBTR_DD_SC_NM", "") or "").strip()
@@ -2619,7 +2622,7 @@ def teacher_matrix(version=0):
         rows.append(row)
     return pd.DataFrame(rows)
 @st.cache_data(show_spinner=False, ttl=180)
-def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = False) -> pd.DataFrame:
+def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = False, neis_cache_key: str = "") -> pd.DataFrame:
     monday = ref_date - timedelta(days=ref_date.weekday())
     daily_timetables={}; teacher_names=set()
     base_tt=st.session_state.get("timetable",pd.DataFrame())
@@ -2651,7 +2654,7 @@ def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = 
         rows.append(row)
     return apply_neis_non_instructional_display(pd.DataFrame(rows), ref_date, "교사명")
 @st.cache_data(show_spinner=False)
-def class_matrix(version=0, ref_date=None, use_test=False):
+def class_matrix(version=0, ref_date=None, use_test=False, neis_cache_key: str = ""):
     ref=ref_date or _today_kst(); monday=ref-timedelta(days=ref.weekday())
     daily={}
     classes=set()
@@ -5527,20 +5530,20 @@ if "시간표 조회" in tab_map:
         elif view == "교사별 주간":
             ref=week_picker("주간 선택",_today_kst(),key="view_week_ref")
             st.markdown('<div class="matrix-legend"><span>↻ 교환</span><span>+ 보강</span><span>• 시간강사</span></div>', unsafe_allow_html=True)
-            render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False, open_dialog=False)
+            render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False,neis_cache_key=get_neis_api_key()), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
         elif view == "학급별 주간":
             ref=week_picker("주간 선택",_today_kst(),key="view_class_ref")
             st.markdown('<div class="matrix-legend"><span>과목명 기준 · 조회 전용</span><span>↻ 교환</span><span>+ 보강</span></div>', unsafe_allow_html=True)
-            render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False, open_dialog=False)
+            render_standard_weekly_matrix(class_matrix(ver, ref_date=ref, neis_cache_key=get_neis_api_key()), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_class_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체학급_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_class')
         else:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
             ref=week_picker("주간 선택",_today_kst(),key="view_ref")
-            teacher_week = effective_teacher_matrix(ref, ver, use_test=False)
+            teacher_week = effective_teacher_matrix(ref, ver, use_test=False, neis_cache_key=get_neis_api_key())
             if not teacher_week.empty and t:
                 teacher_week = teacher_week[teacher_week["교사명"].astype(str).str.strip() == str(t).strip()].reset_index(drop=True)
             render_standard_weekly_matrix(teacher_week, ref, row_label="교사명", key="view_single_teacher_week_matrix", title=f"{t} 주간 시간표", use_test=False, open_dialog=False)
@@ -5751,7 +5754,7 @@ if "시간표 맞교환 & 변경 추천" in tab_map:
             help_text="주차 버튼을 선택하면 해당 주의 월요일을 기준으로 주간 시간표를 표시합니다."
         )
         ver = st.session_state.get("_data_version", 0)
-        lesson_matrix = effective_teacher_matrix(week_anchor, ver, use_test=False)
+        lesson_matrix = effective_teacher_matrix(week_anchor, ver, use_test=False, neis_cache_key=get_neis_api_key())
         render_standard_weekly_matrix(
             lesson_matrix, week_anchor, row_label="교사명",
             key="exchange_weekly_matrix",
@@ -5801,7 +5804,7 @@ if "시간표 변경 테스트용" in tab_map:
         st.caption("실제 변경과 현재까지의 테스트 변경을 모두 반영합니다. 선택한 현재 상태를 기준으로 다음 1:1 가능 위치를 계산합니다.")
         test_week_anchor = week_picker("테스트 검색 주차", _today_kst(), key="test_week_anchor", help_text="주차 버튼을 선택하면 해당 주를 테스트 기준으로 사용합니다.")
         ver = st.session_state.get("_data_version", 0)
-        test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
+        test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True, neis_cache_key=get_neis_api_key())
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
         render_standard_weekly_matrix(
             test_matrix, test_week_anchor, row_label="교사명",
