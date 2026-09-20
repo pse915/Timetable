@@ -311,6 +311,24 @@ def _month_calendar_df(month_anchor: date, selected_dates=None, range_start=None
         rows.append(row)
         cur += timedelta(days=7)
     return pd.DataFrame(rows, columns=weekdays)
+def _calendar_set_day(state_key, picked):
+    st.session_state[state_key] = picked
+
+def _calendar_prev_month(month_key):
+    m = st.session_state[month_key]
+    st.session_state[month_key] = (m.replace(day=1) - timedelta(days=1)).replace(day=1)
+
+def _calendar_next_month(month_key):
+    m = st.session_state[month_key]
+    st.session_state[month_key] = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+def _calendar_today(month_key, selected_key):
+    today = _today_kst()
+    if today.weekday() >= 5:
+        today = today - timedelta(days=today.weekday() - 4)
+    st.session_state[month_key] = today.replace(day=1)
+    st.session_state[selected_key] = today
+
 def calendar_picker(label, value=None, key="calendar", help_text=None, rerun_scope=None):
     value = value or _today_kst()
     if value.weekday() >= 5:
@@ -327,52 +345,55 @@ def calendar_picker(label, value=None, key="calendar", help_text=None, rerun_sco
     st.markdown(f"**{label}**")
     nav1, nav2, nav3 = st.columns([1, 4, 1])
     with nav1:
-        if st.button("◀", key=f"{key}_prev", width="stretch"):
-            m = st.session_state[month_key]
-            st.session_state[month_key] = (m.replace(day=1) - timedelta(days=1)).replace(day=1)
-            (st.rerun(scope=rerun_scope) if rerun_scope else st.rerun())
+        st.button("◀", key=f"{key}_prev", width="stretch", on_click=_calendar_prev_month, args=(month_key,))
     with nav2:
         st.markdown(f"<div style='text-align:center;font-weight:700;font-size:1.05rem'>{st.session_state[month_key].year}년 {st.session_state[month_key].month}월</div>", unsafe_allow_html=True)
     with nav3:
-        if st.button("▶", key=f"{key}_next", width="stretch"):
-            m = st.session_state[month_key]
-            nm = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
-            st.session_state[month_key] = nm
-            (st.rerun(scope=rerun_scope) if rerun_scope else st.rerun())
+        st.button("▶", key=f"{key}_next", width="stretch", on_click=_calendar_next_month, args=(month_key,))
     quick1, quick2 = st.columns([1, 5])
     with quick1:
-        if st.button("오늘", key=f"{key}_today", width="stretch"):
-            today = _today_kst()
-            if today.weekday() >= 5:
-                today = today - timedelta(days=today.weekday() - 4)
-            st.session_state[month_key] = today.replace(day=1)
-            st.session_state[selected_key] = today
-            (st.rerun(scope=rerun_scope) if rerun_scope else st.rerun())
+        st.button("오늘", key=f"{key}_today", width="stretch", on_click=_calendar_today, args=(month_key, selected_key))
     with quick2:
         st.caption(f"선택: **{st.session_state[selected_key]:%Y-%m-%d}** · 평일(월~금)만 표시됩니다. 날짜 셀을 클릭하세요.")
-    cal = _month_calendar_df(st.session_state[month_key], selected_dates={st.session_state[selected_key]})
-    event = st.dataframe(
-        cal,
-        hide_index=True,
-        width="stretch",
-        height=235,
-        key=f"{key}_grid",
-        on_select="rerun",
-        selection_mode="single-cell",
-        column_config={c: st.column_config.TextColumn(c, width="small") for c in cal.columns},
-    )
-    cells = getattr(getattr(event, "selection", None), "cells", []) or []
-    if cells:
-        row_idx, col_name = cells[0]
-        text = str(cal.iloc[row_idx][col_name]).strip()
-        import re
-        m = re.search(r"(\d{1,2})$", text)
-        if m:
-            try:
-                picked = date(st.session_state[month_key].year, st.session_state[month_key].month, int(m.group(1)))
-                st.session_state[selected_key] = picked
-            except ValueError:
-                pass
+    weekdays = ["월", "화", "수", "목", "금"]
+    month_anchor = st.session_state[month_key]
+    first = month_anchor.replace(day=1)
+    next_month = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+    last = next_month - timedelta(days=1)
+    grid_start = first - timedelta(days=first.weekday())
+    grid_end = last + timedelta(days=6 - last.weekday())
+    style_id = re.sub(r"[^A-Za-z0-9_-]", "_", str(key))
+    st.markdown(f"""<style id="calendar-grid-{style_id}">
+[data-testid^="st-key-{key}_cell_"] button{{min-height:34px!important;height:34px!important;padding:3px 6px!important;border:1px solid #e5e5ea!important;border-radius:7px!important;background:#fff!important;color:#1d1d1f!important;font-size:12px!important;font-weight:500!important;box-shadow:none!important}}
+[data-testid^="st-key-{key}_cell_"] button:hover{{background:#f5f5f7!important;border-color:#d2d2d7!important}}
+[data-testid^="st-key-{key}_cell_"] button[kind="primary"]{{background:#f5f5f7!important;border-color:#d2d2d7!important;color:#1d1d1f!important;font-weight:700!important}}
+[data-testid^="st-key-{key}_blank_"] button{{visibility:hidden!important;height:34px!important;min-height:34px!important;padding:0!important;border:0!important;background:transparent!important;pointer-events:none!important}}
+.calendar-weekday-{style_id}{{text-align:center;font-size:11px;font-weight:600;color:#6e6e73;padding:2px 0 6px}}
+</style>""", unsafe_allow_html=True)
+    header_cols = st.columns(5)
+    for i, wd in enumerate(weekdays):
+        with header_cols[i]:
+            st.markdown(f'<div class="calendar-weekday-{style_id}">{wd}</div>', unsafe_allow_html=True)
+    cur = grid_start
+    selected = st.session_state[selected_key]
+    while cur <= grid_end:
+        row_cols = st.columns(5)
+        for i in range(5):
+            d = cur + timedelta(days=i)
+            with row_cols[i]:
+                if d.month != first.month:
+                    st.button(" ", key=f"{key}_blank_{d:%Y%m%d}", disabled=True, width="stretch")
+                    continue
+                active = d == selected
+                st.button(
+                    f"✓ {d.day:02d}" if active else f"{d.day:02d}",
+                    key=f"{key}_cell_{d:%Y%m%d}",
+                    width="stretch",
+                    type="primary" if active else "secondary",
+                    on_click=_calendar_set_day,
+                    args=(selected_key, d),
+                )
+        cur += timedelta(days=7)
     if help_text:
         st.caption(help_text)
     return st.session_state[selected_key]
