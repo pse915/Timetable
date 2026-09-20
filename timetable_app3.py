@@ -610,16 +610,24 @@ def calendar_range_picker(start_value=None, end_value=None, key="calendar_range"
     if help_text:
         st.caption(help_text)
     return start_date, end_date
-def period_matrix_picker(label, key, selected=None, allow_all=True, rerun_scope=None):
-    selected = set(safe_int(x) for x in (selected or []))
+def period_matrix_picker(label, key, selected=None, allow_all=True, rerun_scope=None, single=False, state_key=None):
+    initial = set(safe_int(x) for x in (selected or []))
+    if state_key:
+        saved = safe_int(st.session_state.get(state_key, 0))
+        if single and saved > 0:
+            initial = {saved}
+    selected = initial
     st.markdown(f"**{label}**")
     cols = st.columns(7)
-    picked = []
     for p, col in enumerate(cols, 1):
         with col:
             active = p in selected
             if st.button(f"{'✓ ' if active else ''}{p}교시", key=f"{key}_{p}", width="stretch", type="primary" if active else "secondary"):
-                if active:
+                if single:
+                    selected = {p}
+                    if state_key:
+                        st.session_state[state_key] = p
+                elif active:
                     selected.remove(p)
                 else:
                     selected.add(p)
@@ -629,9 +637,16 @@ def period_matrix_picker(label, key, selected=None, allow_all=True, rerun_scope=
         if st.button(f"{'✓ ' if all_active else ''}하루 전체", key=f"{key}_all", width="stretch", type="primary" if all_active else "secondary"):
             if all_active:
                 selected.clear()
+                if state_key:
+                    st.session_state[state_key] = 0
             else:
                 selected = {0}
+                if state_key:
+                    st.session_state[state_key] = 0
             (st.rerun(scope=rerun_scope) if rerun_scope else st.rerun())
+    if single and state_key:
+        saved = safe_int(st.session_state.get(state_key, 0))
+        return [saved] if 1 <= saved <= 7 else []
     if 0 in selected:
         return [0]
     return sorted(p for p in selected if 1 <= p <= 7)
@@ -2026,6 +2041,8 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
     day_a=WEEKDAY_KR[datetime.strptime(norm_a, "%Y-%m-%d").weekday()] if norm_a else ""
     if not is_free(teacher_b, day_b, period_b, norm_b, e_b):
         return False
+    if not is_test and _actual_direct_slot_is_affected(norm_b, teacher_b, period_b):
+        return False
     if not teacher_slot_is_available(str(a.get("교사명", "")), day_b, period_b, ver):
         return False
     if not teacher_slot_is_available(teacher_b, day_a, safe_int(a.get("교시", 0)), ver):
@@ -2118,6 +2135,8 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
     class_slots = {}
     teacher_occupied = defaultdict(set)
     affected_test_slots = get_test_affected_slots() if use_test else set()
+    affected_actual_slots = get_actual_direct_swap_affected_slots() if not use_test else set()
+    occupied_exclusions = affected_test_slots | affected_actual_slots
     weekday_cache = {d: WEEKDAY_KR[datetime.strptime(d, "%Y-%m-%d").weekday()] for d in candidates}
     for d in candidates:
         e = e_cache.get(d)
@@ -2129,7 +2148,7 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
             p = safe_int(getattr(r, "교시", 0))
             teacher_occupied[t].add((d, p))
             if str(getattr(r, "학급", "")).strip() == class_a:
-                if use_test and (d, t, p) in affected_test_slots:
+                if (d, t, p) in occupied_exclusions:
                     continue
                 class_slots[(d, p)] = {
                     "teacher": t,
@@ -2156,6 +2175,8 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
             max_p = PERIODS_PER_DAY.get(day_kr, 7)
             for p in range(1, max_p + 1):
                 slot = (d, p)
+                if (d, t, p) in occupied_exclusions:
+                    continue
                 if slot not in occupied and not has_duty(t, d, p) and teacher_slot_is_available(t, day_kr, p, version):
                     free_set.add(slot)
         free_of_teacher[t] = free_set
@@ -2170,6 +2191,9 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
     max_found = 6
     def dfs(current, path, visited):
         if len(cycles) >= max_found:
+            return
+        # 순환 경로에는 실제/테스트에서 이미 사용된 슬롯을 다시 넣지 않는다.
+        if current != original_slot and (current[0], class_slots.get(current, {}).get("teacher", ""), current[1]) in occupied_exclusions:
             return
         if len(path) > max_cycle:
             return
@@ -2395,13 +2419,10 @@ def get_single_lesson_1to1_candidates(
         except Exception:
             parsed_target = None
     if parsed_target is not None:
-        window_start = min(monday, parsed_target)
-        window_end = max(friday + timedelta(days=max(0, int(future_days))), parsed_target)
-        search_dates = [
-            window_start + timedelta(days=i)
-            for i in range((window_end - window_start).days + 1)
-            if (window_start + timedelta(days=i)).weekday() < 5
-        ]
+        # 지정 시간이 있으면 그 날짜·교시만 검사한다.
+        # 이전에는 넓은 기간을 전부 탐색한 뒤 마지막에 지정 시간만 필터링해
+        # 날짜 클릭 때마다 불필요한 계산이 발생했다.
+        search_dates = [parsed_target]
     else:
         end_date = friday + timedelta(days=max(0, int(future_days)))
         search_dates = [
@@ -2483,7 +2504,10 @@ def get_single_lesson_1to1_candidates(
         target_class_s = norm_series(target_tt, "학급")
         target_subject_s = norm_series(target_tt, "과목")
         max_period = PERIODS_PER_DAY.get(target_day, MAX_PERIOD)
-        for target_period in range(1, max_period + 1):
+        period_iter = [safe_int(target_period)] if parsed_target is not None and target_period is not None else range(1, max_period + 1)
+        for target_period in period_iter:
+            if target_period <= 0 or target_period > max_period:
+                continue
             if target_str == source_str and target_period == source_period:
                 continue
             if (teacher, target_period) in target_busy or (teacher, 0) in target_duty or (teacher, target_period) in target_duty:
@@ -3153,17 +3177,26 @@ def _weekly_action_dialog():
                 default_target = _today_kst()
         if default_target.weekday() >= 5:
             default_target -= timedelta(days=default_target.weekday() - 4)
+        previous_target_date = st.session_state.get(target_date_key)
         target_date = calendar_picker("교환 희망일", default_target, key="weekly_dialog_target_calendar", rerun_scope="fragment")
         st.session_state[target_date_key] = target_date
-        saved_period = safe_int(st.session_state.get(target_period_key, 1))
-        if saved_period <= 0:
-            saved_period = 1
+        if previous_target_date and normalize_date_str(previous_target_date) != target_date.strftime("%Y-%m-%d"):
+            st.session_state.weekly_target_search_requested = False
+            st.session_state.weekly_target_search_dirty_key = None
+            st.session_state.weekly_target_candidates_key = None
+            st.session_state.weekly_target_swap_candidates = pd.DataFrame()
+            st.session_state.weekly_target_cycle_candidates = None
+            st.session_state.weekly_target_cycle_msg = ""
+            st.session_state.pop("weekly_target_swap_selected_row", None)
+        saved_period = safe_int(st.session_state.get(target_period_key, 0))
         max_target_period = PERIODS_PER_DAY.get(WEEKDAY_KR[target_date.weekday()], MAX_PERIOD)
         if saved_period > max_target_period:
-            saved_period = max_target_period
+            saved_period = 0
+            st.session_state[target_period_key] = 0
         selected_periods = period_matrix_picker(
             "교환 희망 교시", "weekly_dialog_target_period_picker",
-            selected=[saved_period] if saved_period else [], allow_all=False, rerun_scope="fragment"
+            selected=[saved_period] if saved_period else [], allow_all=False, rerun_scope="fragment",
+            single=True, state_key=target_period_key
         )
         target_period = safe_int(selected_periods[0]) if selected_periods else 0
         st.session_state[target_period_key] = target_period
@@ -3185,13 +3218,37 @@ def _weekly_action_dialog():
                     str(lesson.get("학급", "")), str(lesson.get("과목", "")), target_date_str, target_period, int(ver), bool(use_test)
                 )
                 stored_target_key = st.session_state.get("weekly_target_candidates_key")
+                search_requested = bool(st.session_state.get("weekly_target_search_requested", False))
+                search_dirty_key = st.session_state.get("weekly_target_search_dirty_key")
+                if search_dirty_key != target_cache_key:
+                    st.session_state.weekly_target_search_dirty_key = target_cache_key
+                    st.session_state.weekly_target_search_requested = False
+                    st.session_state.pop("weekly_target_swap_selected_row", None)
+                    st.session_state.pop("weekly_target_candidates_key", None)
+                    st.session_state.weekly_target_swap_candidates = pd.DataFrame()
+                    st.session_state.weekly_target_cycle_candidates = None
+                    st.session_state.weekly_target_cycle_msg = ""
+                    search_requested = False
+                search_button_label = "🔎 이 날짜·교시로 교환 찾기"
+                if st.button(search_button_label, type="primary", key="dlg_target_search", width="stretch"):
+                    st.session_state.weekly_target_search_requested = True
+                    search_requested = True
+                    st.session_state.pop("weekly_target_swap_selected_row", None)
+                    st.session_state.weekly_target_candidates_key = None
+                    st.session_state.weekly_target_cycle_candidates = None
+                    st.session_state.weekly_target_cycle_msg = ""
+                    st.rerun(scope="fragment")
+                if not search_requested:
+                    st.caption("날짜와 교시를 선택한 뒤 위 버튼을 누르면 해당 시간의 1:1 교환을 먼저 확인합니다. 없으면 연계 순환을 자동으로 탐색합니다.")
+                    return
+                stored_target_key = st.session_state.get("weekly_target_candidates_key")
                 if stored_target_key != target_cache_key:
                     st.session_state.pop("weekly_target_swap_selected_row", None)
                     with _weekly_dialog_loading("지정 시간의 1:1 교환 가능 여부 확인 중"):
                         df_target = get_single_lesson_1to1_candidates(
                             lesson["교사명"], lesson["일자"], source_period,
                             str(lesson["학급"]), str(lesson["과목"]),
-                            future_days=max(0, extra_days), version=ver, use_test=use_test,
+                            future_days=0, version=ver, use_test=use_test,
                             target_date_str=target_date_str, target_period=target_period,
                         )
                     if not df_target.empty:
