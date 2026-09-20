@@ -5504,6 +5504,22 @@ if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_
 # 도구 다이얼로그의 글꼴 변경도 동일한 단일 런타임 함수로 처리한다.
 render_font_runtime_css(st.session_state.ui_font)
 st.markdown('<div class="streamlit-header-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
+def _apply_ui_font_from_dialog():
+    """도구 다이얼로그의 글꼴 선택을 앱 전체에 즉시 반영한다.
+
+    st.dialog 내부는 fragment rerun으로 실행되므로 다이얼로그 안에서만 CSS를
+    주입하면 X로 닫는 순간 그 CSS가 DOM에서 사라져 원래 폰트처럼 보일 수 있다.
+    선택 변경 시 앱 전체를 rerun하여 메인 앱 상단의 전역 CSS가 새 글꼴로
+    다시 렌더링되게 한다.
+    """
+    selected = st.session_state.get("ui_font_selector", UI_FONT_DEFAULT)
+    if selected not in UI_FONT_OPTIONS:
+        selected = UI_FONT_DEFAULT
+    st.session_state.ui_font = selected
+    # dialog(fragment) 범위를 벗어나 전체 앱을 다시 렌더링해야 한다.
+    st.rerun(scope="app")
+
+
 @st.dialog("도구", width="small")
 def render_tools_dialog():
     if current_role() == ROLE_GUEST:
@@ -5515,10 +5531,14 @@ def render_tools_dialog():
         list(UI_FONT_OPTIONS.keys()),
         index=list(UI_FONT_OPTIONS.keys()).index(st.session_state.get("ui_font", UI_FONT_DEFAULT)),
         key="ui_font_selector",
-        help="이 브라우저에서 사용할 수 있는 글꼴을 우선 적용합니다. 학교 PC에 해당 글꼴이 설치되어 있지 않으면 다음 대체 글꼴이 사용됩니다.",
+        on_change=_apply_ui_font_from_dialog,
+        help="글꼴을 선택하면 다이얼로그를 닫은 뒤에도 유지되도록 앱 전체에 즉시 적용합니다.",
     )
-    st.session_state.ui_font = selected_font
-    render_font_runtime_css(selected_font)
+    # 첫 렌더링 시에도 현재 선택값을 동기화한다. 변경 시에는 callback이
+    # 전체 앱 rerun을 수행하므로 이 fragment 안에서만 CSS를 주입하지 않는다.
+    if selected_font in UI_FONT_OPTIONS and st.session_state.get("ui_font") != selected_font:
+        st.session_state.ui_font = selected_font
+    render_font_runtime_css(st.session_state.get("ui_font", UI_FONT_DEFAULT))
     if selected_font == "Noto Sans KR · GitHub (Light + Bold)":
         st.caption("GitHub의 NotoSansKR-Light.ttf(일반체)와 NotoSansKR-Bold.ttf(볼드체)를 사용합니다.")
         st.markdown(
