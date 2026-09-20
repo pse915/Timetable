@@ -412,17 +412,27 @@ def calendar_range_picker(start_value=None, end_value=None, key="calendar_range"
     if help_text:
         st.caption(help_text)
     return start_date, end_date
-def period_matrix_picker(label, key, selected=None, allow_all=True, rerun_scope=None, single=False, state_key=None):
+def period_matrix_picker(label, key, selected=None, allow_all=True, rerun_scope=None, single=False, state_key=None, allowed_periods=None):
+    allowed = None if allowed_periods is None else {safe_int(x) for x in allowed_periods if 1 <= safe_int(x) <= 7}
     initial = set(safe_int(x) for x in (selected or []))
+    if allowed is not None:
+        initial.intersection_update(allowed)
     if state_key:
         saved = safe_int(st.session_state.get(state_key, 0))
         if single and saved > 0:
-            initial = {saved}
+            initial = {saved} if allowed is None or saved in allowed else set()
+            if saved > 0 and not initial:
+                st.session_state[state_key] = 0
     selected = initial
     st.markdown(f"**{label}**")
+    if allowed is not None:
+        st.caption("선택한 교사가 해당 날짜에 수업이 없는 교시만 표시됩니다.")
     cols = st.columns(7)
     for p, col in enumerate(cols, 1):
         with col:
+            if allowed is not None and p not in allowed:
+                st.empty()
+                continue
             active = p in selected
             if st.button(f"{'✓ ' if active else ''}{p}교시", key=f"{key}_{p}", width="stretch", type="primary" if active else "secondary"):
                 if single:
@@ -448,10 +458,30 @@ def period_matrix_picker(label, key, selected=None, allow_all=True, rerun_scope=
             (st.rerun(scope=rerun_scope) if rerun_scope else st.rerun())
     if single and state_key:
         saved = safe_int(st.session_state.get(state_key, 0))
-        return [saved] if 1 <= saved <= 7 else []
+        return [saved] if 1 <= saved <= 7 and (allowed is None or saved in allowed) else []
     if 0 in selected:
         return [0]
-    return sorted(p for p in selected if 1 <= p <= 7)
+    return sorted(p for p in selected if 1 <= p <= 7 and (allowed is None or p in allowed))
+
+def _teacher_empty_periods_on_date(teacher, on_date, version=0, use_test=False):
+    teacher = str(teacher or '').strip()
+    norm = normalize_date_str(on_date)
+    if not teacher or not norm:
+        return []
+    try:
+        d = date.fromisoformat(norm)
+    except ValueError:
+        return []
+    max_period = PERIODS_PER_DAY.get(WEEKDAY_KR[d.weekday()], MAX_PERIOD)
+    tt = get_effective_timetable_for_date(norm, version, use_test=use_test)
+    occupied = set()
+    if isinstance(tt, pd.DataFrame) and not tt.empty:
+        for r in tt.itertuples(index=False):
+            if str(getattr(r, '교사명', '')).strip() == teacher:
+                p = safe_int(getattr(r, '교시', 0))
+                if 1 <= p <= max_period:
+                    occupied.add(p)
+    return [p for p in range(1, max_period + 1) if p not in occupied]
 def _daily_schedule_matrix(ref_date: date, *, teacher_filter=None, use_test=False, version=0):
     norm = ref_date.strftime("%Y-%m-%d") if isinstance(ref_date, date) else normalize_date_str(ref_date)
     e = get_effective_timetable_for_date(norm, version, use_test=use_test)
@@ -2770,14 +2800,22 @@ def _weekly_action_dialog():
         if saved_period > max_target_period:
             saved_period = 0
             st.session_state[target_period_key] = 0
+        target_free_periods = _teacher_empty_periods_on_date(
+            lesson.get("교사명", ""), target_date, version=ver, use_test=use_test
+        )
+        if saved_period and saved_period not in target_free_periods:
+            saved_period = 0
+            st.session_state[target_period_key] = 0
         selected_periods = period_matrix_picker(
             "교환 희망 교시", "weekly_dialog_target_period_picker",
             selected=[saved_period] if saved_period else [], allow_all=False, rerun_scope="fragment",
-            single=True, state_key=target_period_key
+            single=True, state_key=target_period_key, allowed_periods=target_free_periods
         )
         target_period = safe_int(selected_periods[0]) if selected_periods else 0
         st.session_state[target_period_key] = target_period
-        if target_period <= 0:
+        if not target_free_periods:
+            st.warning("선택한 교사가 이 날짜에는 모든 교시에 수업이 있어 교환 가능한 공강 교시가 없습니다.")
+        elif target_period <= 0:
             st.info("교환 희망 교시를 선택해 주세요.")
         else:
             target_date_str = target_date.strftime("%Y-%m-%d")
