@@ -54,6 +54,13 @@ UI_FONT_OPTIONS = {
 }
 UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
 
+UI_THEME_OPTIONS = {
+    "Apple Light": "light",
+    "Black": "black",
+    "X.AI": "xai",
+}
+UI_THEME_DEFAULT = "Apple Light"
+
 def render_font_runtime_css(selected_font: str):
     """선택 글꼴을 실제로 로드하고 Streamlit/AG Grid/HTML에 일관되게 적용한다.
 
@@ -168,6 +175,129 @@ table, thead, tbody, tfoot, tr, th, td, caption {{
         unsafe_allow_html=True,
     )
 
+def render_theme_runtime_css(selected_theme: str):
+    """명시적 디자인 테마를 앱 전체에 적용한다.
+
+    OS의 prefers-color-scheme에 의존하지 않고 session_state 값으로 테마를
+    결정한다. 따라서 Streamlit의 기본 버튼/입력 스타일이 일부만 어두워지는
+    혼합 상태를 방지한다.
+    """
+    theme = selected_theme if selected_theme in {"light", "black", "xai"} else "light"
+    if theme == "black":
+        css = """
+:root {
+  --ui-bg:#090a0c; --ui-surface:#111318; --ui-soft:#181b21; --ui-soft-2:#14171c;
+  --ui-text:#f5f7fa; --ui-text-2:#e5e7eb; --ui-muted:#a3a7b0; --ui-muted-2:#858a94;
+  --ui-line:#2a2f38; --ui-line-soft:#20242c; --ui-accent:#ff4b55; --ui-accent-hover:#ff646d;
+  --ui-focus:rgba(255,75,85,.25); --ui-success:#42d392; --ui-danger:#ff5c68;
+}
+html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"], [data-testid="stMain"],
+[data-testid="stAppViewContainer"] > section, [data-testid="stMainBlockContainer"] {
+  background:var(--ui-bg)!important; color:var(--ui-text)!important;
+}
+[data-testid="stHeader"] { background:rgba(9,10,12,.86)!important; border-bottom:1px solid var(--ui-line-soft)!important; }
+[data-testid="stToolbar"] { background:transparent!important; }
+[data-testid="stVerticalBlockBorderWrapper"], [data-testid="stExpander"],
+[data-testid="stDialog"]>div>div, .ui-kpi {
+  background:var(--ui-surface)!important; color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+.app-topbar { border-bottom-color:var(--ui-line-soft)!important; }
+.app-identity, .app-identity strong, .work-page-head h1, .work-page-head p,
+.work-page-meta, .work-section-title, .work-section-note, .matrix-title, .matrix-subtitle,
+.matrix-legend, .changed-teacher-name, .changed-teacher-status, .swap-group-title,
+h1,h2,h3,h4,h5,h6, [data-testid="stCaptionContainer"], .stCaption { color:var(--ui-text)!important; }
+.app-identity, .work-page-head p, .work-page-meta, .work-section-note, .matrix-subtitle,
+.matrix-legend, .changed-teacher-status, [data-testid="stCaptionContainer"], .stCaption { color:var(--ui-muted)!important; }
+.stButton>button, .stDownloadButton>button, .stFormSubmitButton>button,
+[data-baseweb="input"], [data-baseweb="textarea"], [data-baseweb="select"]>div,
+[data-testid="stDateInput"]>div>div {
+  background:#15181e!important; color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+.stButton>button:hover, .stDownloadButton>button:hover, .stFormSubmitButton>button:hover {
+  background:#1d2128!important; border-color:#3a404b!important; color:#fff!important;
+}
+.stButton>button[kind="primary"], .stFormSubmitButton>button[kind="primary"] {
+  background:var(--ui-accent)!important; border-color:var(--ui-accent)!important; color:#fff!important;
+}
+.app-topbar [data-testid="stRadio"] [role="radiogroup"] { background:#111318!important; border-color:var(--ui-line)!important; }
+.app-topbar [data-testid="stRadio"] [role="radio"] { color:var(--ui-muted)!important; }
+.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
+  background:#252a32!important; color:#fff!important; box-shadow:none!important;
+}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"] {
+  background:#15181e!important; color:var(--ui-text-2)!important; border-color:var(--ui-line)!important;
+}
+[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"] {
+  background:#252a32!important; color:#fff!important; border-color:#3a404b!important;
+}
+[data-baseweb="input"] input, [data-baseweb="textarea"] textarea, [data-baseweb="select"] input {
+  color:var(--ui-text)!important; background:transparent!important;
+}
+input::placeholder, textarea::placeholder { color:var(--ui-muted-2)!important; }
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+  background:#111318!important; border-color:var(--ui-line)!important;
+}
+[data-testid="stDataFrame"] [role="columnheader"], [data-testid="stDataEditor"] [role="columnheader"] {
+  background:#181b21!important; color:var(--ui-text-2)!important; border-color:var(--ui-line-soft)!important;
+}
+[data-testid="stDataFrame"] [role="gridcell"], [data-testid="stDataEditor"] [role="gridcell"] {
+  background:#111318!important; color:var(--ui-text)!important; border-color:var(--ui-line-soft)!important;
+}
+[data-testid="stDialog"] { color:var(--ui-text)!important; }
+[data-testid="stDialog"] [data-testid="stVerticalBlockBorderWrapper"] { background:transparent!important; border-color:transparent!important; }
+[data-testid="stDialog"] hr, [data-testid="stDivider"], hr { border-color:var(--ui-line-soft)!important; }
+[data-testid="stAlert"] { background:#171a20!important; color:var(--ui-text)!important; border-color:var(--ui-line)!important; }
+.apple-note, .work-note, .swap-result-summary { background:#15181e!important; color:var(--ui-muted)!important; border-color:var(--ui-line)!important; }
+.apple-note strong, .work-note strong, .swap-result-summary strong { color:var(--ui-text)!important; }
+.changed-teacher-chip, .swap-group-count, .work-page-meta { background:#15181e!important; border-color:var(--ui-line)!important; color:var(--ui-text)!important; }
+html body [data-testid^="st-key-"] button, html body [class*="st-key-top_quick_"] button {
+  background:#15181e!important; color:var(--ui-text)!important; border-color:var(--ui-line)!important;
+}
+html body [data-testid^="st-key-"] button:hover, html body [class*="st-key-top_quick_"] button:hover {
+  background:#1d2128!important; color:#fff!important; border-color:#3a404b!important;
+}
+html body [data-testid^="st-key-"] button[kind="primary"], html body [class*="st-key-top_quick_save"] button {
+  background:var(--ui-accent)!important; border-color:var(--ui-accent)!important; color:#fff!important;
+}
+.sandbox-title { color:var(--ui-text)!important; }
+a { color:#70a7ff!important; }
+/* Streamlit의 기본 light/dark 자동 테마보다 명시적 Black 테마를 우선한다. */
+@media (prefers-color-scheme: light), (prefers-color-scheme: dark) {
+  :root { --ui-bg:#090a0c; --ui-surface:#111318; --ui-soft:#181b21; --ui-soft-2:#14171c; --ui-text:#f5f7fa; --ui-text-2:#e5e7eb; --ui-muted:#a3a7b0; --ui-line:#2a2f38; --ui-line-soft:#20242c; }
+}
+"""
+    elif theme == "xai":
+        css = """
+:root { --ui-bg:#07080b; --ui-surface:#0d1016; --ui-soft:#151922; --ui-soft-2:#10131a; --ui-text:#f4f7fb; --ui-text-2:#d9e0ea; --ui-muted:#9199a8; --ui-line:#252c38; --ui-line-soft:#1b212b; --ui-accent:#3b82f6; --ui-accent-hover:#60a5fa; }
+html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"] { background:var(--ui-bg)!important;color:var(--ui-text)!important; }
+[data-testid="stHeader"] { background:rgba(7,8,11,.88)!important;border-bottom:1px solid var(--ui-line-soft)!important; }
+[data-testid="stVerticalBlockBorderWrapper"],[data-testid="stExpander"],[data-testid="stDialog"]>div>div,.ui-kpi { background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
+.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button,[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div { background:#11151d!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
+.stButton>button:hover,.stDownloadButton>button:hover,.stFormSubmitButton>button:hover { background:#19202b!important;color:#fff!important; }
+.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"] { background:var(--ui-accent)!important;border-color:var(--ui-accent)!important;color:#fff!important; }
+[data-testid="stDataFrame"],[data-testid="stDataEditor"] { background:var(--ui-surface)!important;border-color:var(--ui-line)!important; }
+[data-testid="stDataFrame"] [role="columnheader"],[data-testid="stDataEditor"] [role="columnheader"] { background:#151a23!important;color:var(--ui-text-2)!important; }
+[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataEditor"] [role="gridcell"] { background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line-soft)!important; }
+[data-testid^="st-key-"] button,[class*="st-key-top_quick_"] button { background:#11151d!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
+html body [data-testid^="st-key-"] button[kind="primary"],html body [class*="st-key-top_quick_save"] button { background:var(--ui-accent)!important;color:#fff!important;border-color:var(--ui-accent)!important; }
+.apple-note,.work-note,.swap-result-summary { background:#11151d!important;color:var(--ui-muted)!important;border-color:var(--ui-line)!important; }
+"""
+    else:
+        css = """
+:root { --ui-bg:#fff; --ui-surface:#fff; --ui-soft:#f5f5f7; --ui-soft-2:#fafafc; --ui-text:#1d1d1f; --ui-text-2:#3a3a3c; --ui-muted:#6e6e73; --ui-muted-2:#86868b; --ui-line:#d2d2d7; --ui-line-soft:#e5e5ea; --ui-accent:#0066cc; --ui-accent-hover:#0071e3; }
+html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"] { background:var(--ui-bg)!important;color:var(--ui-text)!important; }
+[data-testid="stHeader"] { background:rgba(255,255,255,.88)!important;border-bottom:1px solid var(--ui-line-soft)!important; }
+.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button,[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div { background:#fff!important;color:#1d1d1f!important;border-color:#d2d2d7!important; }
+[data-testid^="st-key-"] button,[class*="st-key-top_quick_"] button { background:#fff!important;color:#242426!important;border-color:#dedee3!important; }
+html body [data-testid^="st-key-top_quick_save"] button,html body [class*="st-key-top_quick_save"] button,html body [data-testid^="st-key-"] button[kind="primary"] { background:#1d1d1f!important;color:#fff!important;border-color:#1d1d1f!important; }
+"""
+    st.markdown(f"<style id=\"runtime-app-theme\">{css}</style>", unsafe_allow_html=True)
+
+if "ui_theme" not in st.session_state or st.session_state.ui_theme not in {"light", "black", "xai"}:
+    st.session_state.ui_theme = UI_THEME_OPTIONS[UI_THEME_DEFAULT]
+render_theme_runtime_css(st.session_state.ui_theme)
 render_font_runtime_css(st.session_state.get("ui_font", UI_FONT_DEFAULT))
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
@@ -5504,6 +5634,14 @@ if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_
 # 도구 다이얼로그의 글꼴 변경도 동일한 단일 런타임 함수로 처리한다.
 render_font_runtime_css(st.session_state.ui_font)
 st.markdown('<div class="streamlit-header-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
+def _apply_ui_theme_from_dialog():
+    selected = st.session_state.get("ui_theme_selector", UI_THEME_OPTIONS[UI_THEME_DEFAULT])
+    if selected not in {"light", "black", "xai"}:
+        selected = UI_THEME_OPTIONS[UI_THEME_DEFAULT]
+    st.session_state.ui_theme = selected
+    st.rerun(scope="app")
+
+
 def _apply_ui_font_from_dialog():
     """도구 다이얼로그의 글꼴 선택을 앱 전체에 즉시 반영한다.
 
@@ -5526,6 +5664,14 @@ def render_tools_dialog():
         st.caption("게스트 모드에서는 사용할 수 있는 도구가 없습니다.")
         return
     st.markdown('<div class="tool-section-title">화면</div>', unsafe_allow_html=True)
+    selected_theme = st.selectbox(
+        "디자인",
+        list(UI_THEME_OPTIONS.keys()),
+        index=list(UI_THEME_OPTIONS.values()).index(st.session_state.get("ui_theme", UI_THEME_OPTIONS[UI_THEME_DEFAULT])),
+        key="ui_theme_selector",
+        on_change=_apply_ui_theme_from_dialog,
+        help="Apple Light / Black / X.AI 디자인을 앱 전체에 적용합니다.",
+    )
     selected_font = st.selectbox(
         "글꼴",
         list(UI_FONT_OPTIONS.keys()),
@@ -5538,6 +5684,7 @@ def render_tools_dialog():
     # 전체 앱 rerun을 수행하므로 이 fragment 안에서만 CSS를 주입하지 않는다.
     if selected_font in UI_FONT_OPTIONS and st.session_state.get("ui_font") != selected_font:
         st.session_state.ui_font = selected_font
+    render_theme_runtime_css(st.session_state.get("ui_theme", UI_THEME_OPTIONS[UI_THEME_DEFAULT]))
     render_font_runtime_css(st.session_state.get("ui_font", UI_FONT_DEFAULT))
     if selected_font == "Noto Sans KR · GitHub (Light + Bold)":
         st.caption("GitHub의 NotoSansKR-Light.ttf(일반체)와 NotoSansKR-Bold.ttf(볼드체)를 사용합니다.")
