@@ -5,6 +5,7 @@ import math
 import os
 import html as html_lib
 from contextlib import contextmanager
+from pathlib import Path
 from functools import lru_cache
 import uuid
 import threading
@@ -287,13 +288,18 @@ def _neis_schedule_request(api_key, school, *, ymd=None, from_ymd=None, to_ymd=N
         "SD_SCHUL_CODE": school["SD_SCHUL_CODE"],
     }
     if ymd:
-        params["AA_YMD"] = ymd
+        # SchoolSchedule API의 공식 기간 조회 필드를 사용해 단일 날짜를
+        # AA_FROM_YMD=AA_TO_YMD로 조회합니다. AA_YMD는 일부 환경에서
+        # INFO-200을 유발할 수 있어 fallback에서도 동일한 공식 필드를 사용합니다.
+        params["AA_FROM_YMD"] = ymd
+        params["AA_TO_YMD"] = ymd
     else:
         params["AA_FROM_YMD"] = from_ymd
         params["AA_TO_YMD"] = to_ymd
     return _neis_api_get(NEIS_SCHEDULE_ENDPOINT, params)
 
 
+@st.cache_data(show_spinner=False, ttl=NEIS_SCHEDULE_CACHE_TTL)
 def neis_fetch_schedule(api_key: str, school_name: str, from_ymd: str, to_ymd: str):
     """NEIS 학사일정 조회.
 
@@ -5667,7 +5673,7 @@ if _neis_configured_key:
             # 캐시를 사용하지 않으며, NEIS API 데이터 캐시는 키가 바뀌면 무효화합니다.
             try:
                 neis_find_school.clear()
-                get_neis_schedule_for_range.clear()
+                neis_fetch_schedule.clear()
             except Exception:
                 pass
         except Exception:
