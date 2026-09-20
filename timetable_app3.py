@@ -139,14 +139,11 @@ NEIS_SCHEDULE_CACHE_TTL = 900
 NEIS_SCHOOL_CACHE_TTL = 86400
 
 def _neis_secret_key() -> str:
-    for key_name in ("NEIS_API_KEY", "NEIS_KEY", "neis_api_key"):
-        try:
-            value = str(st.secrets.get(key_name, "") or "").strip()
-        except Exception:
-            value = ""
-        if value:
-            return value
-    return str(os.getenv("NEIS_API_KEY", "") or "").strip()
+    """NEIS API 키는 Streamlit Secrets에서만 읽습니다."""
+    try:
+        return str(st.secrets.get("NEIS_API_KEY", "") or "").strip()
+    except Exception:
+        return ""
 
 def _neis_api_get(endpoint: str, params: dict, timeout: int = 12):
     response = requests.get(endpoint, params=params, timeout=timeout)
@@ -5471,36 +5468,13 @@ PAGE_DESCRIPTIONS = {
     "📑 회원별 탭 권한 관리": "사용자별 업무 메뉴 접근 권한을 관리합니다.",
     "교무호봉획정": "기간제교원 호봉(재)획정과 조서 출력을 처리합니다.",
 }
-# NEIS API 키는 세션에만 보관하며 코드/Google Sheets에 저장하지 않습니다.
-if "neis_api_key" not in st.session_state:
-    st.session_state.neis_api_key = _neis_secret_key()
-with st.expander("⚙️ NEIS 학사일정", expanded=False):
-    neis_col1, neis_col2 = st.columns([4, 2])
-    with neis_col1:
-        st.session_state.neis_api_key = st.text_input(
-            "NEIS Open API 인증키",
-            value=st.session_state.get("neis_api_key", ""),
-            type="password", key="neis_api_key_input",
-            help="NEIS Open API 인증키만 입력하면 학교명으로 학교코드를 자동 찾고 학사일정을 불러옵니다."
-        ).strip()
-    with neis_col2:
-        if st.button("학사일정 새로고침", key="neis_refresh"):
-            neis_find_school.clear(); neis_fetch_schedule.clear()
-            st.session_state.pop("_neis_last_error", None)
-            _invalidate_all_caches()
-            st.rerun()
-    if st.session_state.get("neis_api_key"):
-        today = _today_kst()
-        neis_test = get_neis_schedule_for_range(today.replace(month=1, day=1), today.replace(month=12, day=31))
-        if neis_test.empty and st.session_state.get("_neis_last_error"):
-            st.warning(f"NEIS 학사일정을 불러오지 못했습니다: {st.session_state['_neis_last_error']}")
-        elif not neis_test.empty:
-            non_count = int(neis_test["비수업일"].sum())
-            st.caption(f"NEIS 연결됨 · {SCHOOL_NAME} · 비수업일 {non_count}일 확인")
-        else:
-            st.caption("NEIS 연결은 되었지만 조회된 학사일정이 없습니다.")
-    else:
-        st.caption("인증키를 입력하면 주간 시간표에 NEIS 공휴일·휴업일·방학 등이 자동 표시됩니다.")
+# NEIS API 키는 Streamlit Secrets에서만 읽습니다.
+# 홈페이지에는 API 키 입력창을 노출하지 않습니다.
+_neis_configured_key = _neis_secret_key()
+if _neis_configured_key:
+    st.session_state.neis_api_key = _neis_configured_key
+else:
+    st.session_state.pop("neis_api_key", None)
 
 st.markdown(
     f'<div class="work-page-head"><div>'
