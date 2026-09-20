@@ -149,7 +149,8 @@ def _neis_api_get(endpoint: str, params: dict, timeout: int = 12):
     response = requests.get(endpoint, params=params, timeout=timeout)
     response.raise_for_status()
     data = response.json()
-    # NEIS는 정상 데이터가 없을 때도 SchoolSchedule 키 대신 ERROR를 줄 수 있습니다.
+    # INFO-200은 호출부(neis_fetch_schedule)에서 '정상적인 빈 결과'로
+    # 구분하여 날짜별 fallback을 수행합니다. 그 밖의 오류는 예외로 유지합니다.
     if isinstance(data, dict) and "RESULT" in data:
         result = data.get("RESULT") or {}
         code = str(result.get("CODE", "")).strip()
@@ -242,23 +243,15 @@ def _neis_event_label(row: dict) -> str:
         return f"{event} · {sbtr}"
     return event or sbtr or content or "학사일정"
 
-def neis_fetch_schedule(api_key: str, school_name: str, from_ymd: str, to_ymd: str):
-    api_key = str(api_key or "").strip()
-    start = normalize_date_str(from_ymd).replace("-", "")
-    end = normalize_date_str(to_ymd).replace("-", "")
-    if not api_key or not start or not end or start > end:
-        return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
-    school = neis_find_school(api_key, school_name)
-    if not school or not school.get("ATPT_OFCDC_SC_CODE") or not school.get("SD_SCHUL_CODE"):
-        return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
-    data = _neis_api_get(NEIS_SCHEDULE_ENDPOINT, {
-        "KEY": api_key, "Type": "json", "pIndex": 1, "pSize": 100,
-        "ATPT_OFCDC_SC_CODE": school["ATPT_OFCDC_SC_CODE"],
-        "SD_SCHUL_CODE": school["SD_SCHUL_CODE"],
-        "AA_FROM_YMD": start, "AA_TO_YMD": end,
-    })
+def _neis_schedule_empty_df():
+    return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
+
+
+def _neis_schedule_rows_to_df(raw_rows):
     rows = []
-    for raw in _neis_rows(data, "SchoolSchedule"):
+    for raw in raw_rows or []:
+        if not isinstance(raw, dict):
+            continue
         ds = normalize_date_str(raw.get("AA_YMD", ""))
         if not ds:
             continue
@@ -270,11 +263,85 @@ def neis_fetch_schedule(api_key: str, school_name: str, from_ymd: str, to_ymd: s
             "비수업일": bool(_neis_schedule_row_is_non_instructional(raw)),
         })
     if not rows:
-        return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
-    df = pd.DataFrame(rows).drop_duplicates(subset=["일자", "명칭", "구분", "내용"]).sort_values(["일자", "명칭"])
-    # 같은 날짜에 여러 학사행사가 있어도 비수업일 하나라도 있으면 해당 날짜를 비수업일로 처리.
+        return _neis_schedule_empty_df()
+    df = pd.DataFrame(rows).drop_duplicates(
+        subset=["일자", "명칭", "구분", "내용"]
+    ).sort_values(["일자", "명칭"])
+    # 같은 날짜에 여러 학사행사가 있어도 하나라도 비수업일이면 그 날짜 전체를 비수업일로 판정.
     df["비수업일"] = df.groupby("일자")["비수업일"].transform("any")
     return df.reset_index(drop=True)
+
+
+def _neis_is_info_200(exc) -> bool:
+    """NEIS의 '해당하는 데이터가 없습니다' 응답만 정상적인 빈 결과로 식별."""
+    return "INFO-200" in str(exc or "").upper()
+
+
+def _neis_schedule_request(api_key, school, *, ymd=None, from_ymd=None, to_ymd=None):
+    params = {
+        "KEY": api_key,
+        "Type": "json",
+        "pIndex": 1,
+        "pSize": 100,
+        "ATPT_OFCDC_SC_CODE": school["ATPT_OFCDC_SC_CODE"],
+        "SD_SCHUL_CODE": school["SD_SCHUL_CODE"],
+    }
+    if ymd:
+        params["AA_YMD"] = ymd
+    else:
+        params["AA_FROM_YMD"] = from_ymd
+        params["AA_TO_YMD"] = to_ymd
+    return _neis_api_get(NEIS_SCHEDULE_ENDPOINT, params)
+
+
+def neis_fetch_schedule(api_key: str, school_name: str, from_ymd: str, to_ymd: str):
+    """NEIS 학사일정 조회.
+
+    주간 범위 조회가 INFO-200을 반환하는 경우를 API 장애로 취급하지 않고,
+    월~금 각 날짜를 개별 조회하여 실제 학사일정을 다시 확인한다.
+    인증 실패/HTTP 오류/네트워크 오류 등 INFO-200이 아닌 예외는 그대로 전파한다.
+    """
+    api_key = str(api_key or "").strip()
+    start = normalize_date_str(from_ymd).replace("-", "")
+    end = normalize_date_str(to_ymd).replace("-", "")
+    if not api_key or not start or not end or start > end:
+        return _neis_schedule_empty_df()
+
+    school = neis_find_school(api_key, school_name)
+    if not school or not school.get("ATPT_OFCDC_SC_CODE") or not school.get("SD_SCHUL_CODE"):
+        return _neis_schedule_empty_df()
+
+    # 1차: 기존처럼 한 번에 범위를 조회한다.
+    try:
+        data = _neis_schedule_request(
+            api_key, school, from_ymd=start, to_ymd=end
+        )
+        return _neis_schedule_rows_to_df(_neis_rows(data, "SchoolSchedule"))
+    except Exception as exc:
+        # INFO-200은 '해당 범위에 결과가 없다'는 의미일 수 있으므로
+        # 각 날짜를 다시 조회한다. 그 외 오류는 실제 조회 실패이므로 숨기지 않는다.
+        if not _neis_is_info_200(exc):
+            raise
+
+    # 2차 fallback: 범위 조회가 INFO-200이면 날짜별로 재조회.
+    start_date = date.fromisoformat(f"{start[:4]}-{start[4:6]}-{start[6:8]}")
+    end_date = date.fromisoformat(f"{end[:4]}-{end[4:6]}-{end[6:8]}")
+    all_rows = []
+    cur = start_date
+    while cur <= end_date:
+        ymd = cur.strftime("%Y%m%d")
+        try:
+            data = _neis_schedule_request(api_key, school, ymd=ymd)
+            all_rows.extend(_neis_rows(data, "SchoolSchedule"))
+        except Exception as exc:
+            if _neis_is_info_200(exc):
+                # 해당 날짜에 등록된 학사일정이 없다는 정상적인 빈 결과.
+                pass
+            else:
+                raise
+        cur += timedelta(days=1)
+
+    return _neis_schedule_rows_to_df(all_rows)
 
 def get_neis_api_key() -> str:
     return str(st.session_state.get("neis_api_key", "") or _neis_secret_key()).strip()
