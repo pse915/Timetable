@@ -530,7 +530,7 @@ def _month_calendar_df(month_anchor: date, selected_dates=None, range_start=None
         rows.append(row)
         cur += timedelta(days=7)
     return pd.DataFrame(rows, columns=weekdays)
-def calendar_picker(label, value=None, key="calendar", help_text=None):
+def calendar_picker(label, value=None, key="calendar", help_text=None, rerun_scope=None):
     value = value or _today_kst()
     if value.weekday() >= 5:
         value = value - timedelta(days=value.weekday() - 4)
@@ -549,7 +549,7 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
         if st.button("◀", key=f"{key}_prev", width="stretch"):
             m = st.session_state[month_key]
             st.session_state[month_key] = (m.replace(day=1) - timedelta(days=1)).replace(day=1)
-            st.rerun()
+            (st.rerun(scope=rerun_scope) if rerun_scope else st.rerun())
     with nav2:
         st.markdown(f"<div style='text-align:center;font-weight:700;font-size:1.05rem'>{st.session_state[month_key].year}년 {st.session_state[month_key].month}월</div>", unsafe_allow_html=True)
     with nav3:
@@ -557,7 +557,7 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
             m = st.session_state[month_key]
             nm = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
             st.session_state[month_key] = nm
-            st.rerun()
+            (st.rerun(scope=rerun_scope) if rerun_scope else st.rerun())
     quick1, quick2 = st.columns([1, 5])
     with quick1:
         if st.button("오늘", key=f"{key}_today", width="stretch"):
@@ -566,7 +566,7 @@ def calendar_picker(label, value=None, key="calendar", help_text=None):
                 today = today - timedelta(days=today.weekday() - 4)
             st.session_state[month_key] = today.replace(day=1)
             st.session_state[selected_key] = today
-            st.rerun()
+            (st.rerun(scope=rerun_scope) if rerun_scope else st.rerun())
     with quick2:
         st.caption(f"선택: **{st.session_state[selected_key]:%Y-%m-%d}** · 평일(월~금)만 표시됩니다. 날짜 셀을 클릭하세요.")
     cal = _month_calendar_df(st.session_state[month_key], selected_dates={st.session_state[selected_key]})
@@ -610,7 +610,7 @@ def calendar_range_picker(start_value=None, end_value=None, key="calendar_range"
     if help_text:
         st.caption(help_text)
     return start_date, end_date
-def period_matrix_picker(label, key, selected=None, allow_all=True):
+def period_matrix_picker(label, key, selected=None, allow_all=True, rerun_scope=None):
     selected = set(safe_int(x) for x in (selected or []))
     st.markdown(f"**{label}**")
     cols = st.columns(7)
@@ -623,7 +623,7 @@ def period_matrix_picker(label, key, selected=None, allow_all=True):
                     selected.remove(p)
                 else:
                     selected.add(p)
-                st.rerun()
+                (st.rerun(scope=rerun_scope) if rerun_scope else st.rerun())
     if allow_all:
         all_active = 0 in selected
         if st.button(f"{'✓ ' if all_active else ''}하루 전체", key=f"{key}_all", width="stretch", type="primary" if all_active else "secondary"):
@@ -631,7 +631,7 @@ def period_matrix_picker(label, key, selected=None, allow_all=True):
                 selected.clear()
             else:
                 selected = {0}
-            st.rerun()
+            (st.rerun(scope=rerun_scope) if rerun_scope else st.rerun())
     if 0 in selected:
         return [0]
     return sorted(p for p in selected if 1 <= p <= 7)
@@ -3130,12 +3130,13 @@ def _weekly_action_dialog():
                         "테스트 맞교환이 적용되었습니다." if use_test else "1:1 맞교환이 반영되었습니다."
                     )
                     if use_test:
-                        st.rerun()
+                        st.rerun(scope="fragment")
                     else:
                         _weekly_fragment_rerun()
                 else:
                     st.error("현재 상태에서는 이 1:1 맞교환을 적용할 수 없습니다. 최신 시간표 상태를 다시 확인해 주세요.")
     elif action_mode == "target":
+        st.session_state["weekly_dialog_open"] = True
         target_date_key = "weekly_dialog_target_date"
         target_period_key = "weekly_dialog_target_period"
         default_target = st.session_state.get(target_date_key)
@@ -3152,7 +3153,7 @@ def _weekly_action_dialog():
                 default_target = _today_kst()
         if default_target.weekday() >= 5:
             default_target -= timedelta(days=default_target.weekday() - 4)
-        target_date = calendar_picker("교환 희망일", default_target, key="weekly_dialog_target_calendar")
+        target_date = calendar_picker("교환 희망일", default_target, key="weekly_dialog_target_calendar", rerun_scope="fragment")
         st.session_state[target_date_key] = target_date
         saved_period = safe_int(st.session_state.get(target_period_key, 1))
         if saved_period <= 0:
@@ -3162,7 +3163,7 @@ def _weekly_action_dialog():
             saved_period = max_target_period
         selected_periods = period_matrix_picker(
             "교환 희망 교시", "weekly_dialog_target_period_picker",
-            selected=[saved_period] if saved_period else [], allow_all=False
+            selected=[saved_period] if saved_period else [], allow_all=False, rerun_scope="fragment"
         )
         target_period = safe_int(selected_periods[0]) if selected_periods else 0
         st.session_state[target_period_key] = target_period
@@ -3258,7 +3259,7 @@ def _weekly_action_dialog():
                                 ok = False
                             if ok:
                                 st.session_state.weekly_dialog_result = "테스트 맞교환이 적용되었습니다." if use_test else "1:1 맞교환이 반영되었습니다."
-                                st.rerun()
+                                st.rerun(scope="fragment")
                     else:
                         st.info("교환하려는 수업을 위 표에서 클릭해 주세요.")
                 else:
@@ -3306,7 +3307,7 @@ def _weekly_action_dialog():
                                             f"{cyc.get('length','')}인 연계 순환이 적용되었습니다."
                                         )
                                         if use_test:
-                                            st.rerun()
+                                            st.rerun(scope="fragment")
                                         else:
                                             _weekly_fragment_rerun()
     elif action_mode == "absence":
