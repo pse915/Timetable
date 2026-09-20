@@ -234,7 +234,6 @@ def _neis_event_label(row: dict) -> str:
         return f"{event} · {sbtr}"
     return event or sbtr or content or "학사일정"
 
-@st.cache_data(show_spinner=False, ttl=NEIS_SCHEDULE_CACHE_TTL)
 def neis_fetch_schedule(api_key: str, school_name: str, from_ymd: str, to_ymd: str):
     api_key = str(api_key or "").strip()
     start = normalize_date_str(from_ymd).replace("-", "")
@@ -245,7 +244,7 @@ def neis_fetch_schedule(api_key: str, school_name: str, from_ymd: str, to_ymd: s
     if not school or not school.get("ATPT_OFCDC_SC_CODE") or not school.get("SD_SCHUL_CODE"):
         return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
     data = _neis_api_get(NEIS_SCHEDULE_ENDPOINT, {
-        "KEY": api_key, "Type": "json", "pIndex": 1, "pSize": 1000,
+        "KEY": api_key, "Type": "json", "pIndex": 1, "pSize": 100,
         "ATPT_OFCDC_SC_CODE": school["ATPT_OFCDC_SC_CODE"],
         "SD_SCHUL_CODE": school["SD_SCHUL_CODE"],
         "AA_FROM_YMD": start, "AA_TO_YMD": end,
@@ -287,8 +286,65 @@ def get_neis_schedule_for_range(start_date: date, end_date: date) -> pd.DataFram
         st.session_state["_neis_last_error"] = str(exc)
         return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
 
+def ensure_neis_week_loaded(ref_date: date, force_refresh: bool = False) -> pd.DataFrame:
+    """선택한 주의 NEIS 학사일정을 매트릭스 생성보다 먼저 확보합니다.
+
+    주간표는 반드시 이 함수를 먼저 호출한 뒤 매트릭스를 생성해야 합니다.
+    session_state에 저장된 주간 데이터는 같은 rerun 안에서 재사용하되,
+    API 키/주간 범위가 달라지면 다시 조회합니다.
+    """
+    key = get_neis_api_key()
+    if not key:
+        raise RuntimeError("Streamlit Secrets에 NEIS_API_KEY가 없습니다.")
+    monday = ref_date - timedelta(days=ref_date.weekday())
+    friday = monday + timedelta(days=4)
+    cache_token = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    cache_id = f"{cache_token}:{monday.isoformat()}:{friday.isoformat()}"
+    state_key = "_neis_week_schedule"
+    existing = st.session_state.get(state_key)
+    if (not force_refresh and isinstance(existing, dict) and
+            existing.get("cache_id") == cache_id and isinstance(existing.get("data"), pd.DataFrame)):
+        return existing["data"].copy(deep=True)
+    try:
+        df = neis_fetch_schedule(key, SCHOOL_NAME, monday.strftime("%Y-%m-%d"), friday.strftime("%Y-%m-%d"))
+    except Exception as exc:
+        st.session_state["_neis_last_error"] = str(exc)
+        raise RuntimeError(f"NEIS 학사일정 조회 실패: {exc}") from exc
+    # API가 빈 결과를 반환해도 정상적인 '학사일정 없음'과 조회 실패를 구분할 수 있도록
+    # 성공적으로 응답한 결과 자체를 저장합니다.
+    st.session_state[state_key] = {
+        "cache_id": cache_id,
+        "start_date": monday.isoformat(),
+        "end_date": friday.isoformat(),
+        "data": df.copy(deep=True),
+        "loaded_at": datetime.now(KST).isoformat(),
+    }
+    st.session_state["_neis_last_error"] = ""
+    return df.copy(deep=True)
+
+def require_neis_week(ref_date: date) -> pd.DataFrame:
+    """주간표 렌더링 전에 NEIS 데이터 확보를 강제합니다."""
+    return ensure_neis_week_loaded(ref_date, force_refresh=False)
+
 def get_neis_non_instructional_days(start_date: date, end_date: date):
-    df = get_neis_schedule_for_range(start_date, end_date)
+    # 주간표에서 ensure_neis_week_loaded()가 먼저 호출된 경우에는
+    # 요청 범위가 그 주간 범위 안에 있으면 저장된 NEIS 결과를 직접 사용합니다.
+    # 특히 get_effective_timetable_for_date(하루 단위 호출)도 이 캐시를 사용해야
+    # NEIS 확인 전에 만들어진 원본 시간표가 다시 살아나는 일이 없습니다.
+    cached = st.session_state.get("_neis_week_schedule")
+    df = None
+    if isinstance(cached, dict) and isinstance(cached.get("data"), pd.DataFrame):
+        try:
+            c_start = date.fromisoformat(str(cached.get("start_date")))
+            c_end = date.fromisoformat(str(cached.get("end_date")))
+            if c_start <= start_date and end_date <= c_end:
+                df = cached["data"].copy(deep=True)
+                if not df.empty:
+                    df = df[(df["일자"] >= start_date.isoformat()) & (df["일자"] <= end_date.isoformat())]
+        except Exception:
+            df = None
+    if df is None:
+        df = get_neis_schedule_for_range(start_date, end_date)
     if df.empty:
         return {}
     return {
@@ -2628,7 +2684,6 @@ def teacher_matrix(version=0):
             for p in range(1, PERIODS_PER_DAY.get(d,7)+1): row[f"{d}{p}"]=idx.get((t,d,p),"")
         rows.append(row)
     return pd.DataFrame(rows)
-@st.cache_data(show_spinner=False, ttl=180)
 def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = False, neis_cache_key: str = "") -> pd.DataFrame:
     neis_cache_key = neis_cache_key or get_neis_cache_token()
     monday = ref_date - timedelta(days=ref_date.weekday())
@@ -2661,7 +2716,6 @@ def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = 
                 row[f"{d}{p}"]=cell
         rows.append(row)
     return apply_neis_non_instructional_display(pd.DataFrame(rows), ref_date, "교사명")
-@st.cache_data(show_spinner=False)
 def class_matrix(version=0, ref_date=None, use_test=False, neis_cache_key: str = ""):
     neis_cache_key = neis_cache_key or get_neis_cache_token()
     ref=ref_date or _today_kst(); monday=ref-timedelta(days=ref.weekday())
@@ -5495,17 +5549,26 @@ if _neis_configured_key:
     # API 키가 없던 시점에 캐시된 "원본 시간표"를 즉시 폐기합니다.
     if _previous_neis_runtime_key != _neis_configured_token:
         try:
-            get_effective_timetable_for_date.clear()
-            effective_teacher_matrix.clear()
-            class_matrix.clear()
-            get_neis_schedule_for_range.clear()
-            get_neis_non_instructional_days.clear()
+            st.session_state.pop("_neis_week_schedule", None)
+            # 매트릭스 함수는 현재 session_state/NEIS 데이터에 의존하므로
+            # 캐시를 사용하지 않으며, NEIS API 데이터 캐시는 키가 바뀌면 무효화합니다.
+            try:
+                neis_find_school.clear()
+                get_neis_schedule_for_range.clear()
+            except Exception:
+                pass
         except Exception:
             pass
     st.session_state["_neis_runtime_key"] = _neis_configured_token
 else:
     st.session_state.pop("neis_api_key", None)
+    st.session_state.pop("_neis_week_schedule", None)
     st.session_state["_neis_runtime_key"] = ""
+
+if _neis_configured_key:
+    _neis_err = str(st.session_state.get("_neis_last_error", "") or "").strip()
+    if _neis_err:
+        st.warning("NEIS 학사일정 연결 오류가 있습니다. 주간 시간표는 NEIS 확인 후 표시됩니다.")
 
 st.markdown(
     f'<div class="work-page-head"><div>'
@@ -5534,12 +5597,22 @@ if "시간표 조회" in tab_map:
                 st.dataframe(pd.DataFrame(details),width="stretch",hide_index=True)
         elif view == "교사별 주간":
             ref=week_picker("주간 선택",_today_kst(),key="view_week_ref")
+            try:
+                require_neis_week(ref)
+            except Exception as exc:
+                st.error(f"NEIS 학사일정을 불러오지 못했습니다. 시간표를 표시하지 않습니다.\n\n{exc}")
+                st.stop()
             st.markdown('<div class="matrix-legend"><span>↻ 교환</span><span>+ 보강</span><span>• 시간강사</span></div>', unsafe_allow_html=True)
             render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False,neis_cache_key=get_neis_cache_token()), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
         elif view == "학급별 주간":
             ref=week_picker("주간 선택",_today_kst(),key="view_class_ref")
+            try:
+                require_neis_week(ref)
+            except Exception as exc:
+                st.error(f"NEIS 학사일정을 불러오지 못했습니다. 시간표를 표시하지 않습니다.\n\n{exc}")
+                st.stop()
             st.markdown('<div class="matrix-legend"><span>과목명 기준 · 조회 전용</span><span>↻ 교환</span><span>+ 보강</span></div>', unsafe_allow_html=True)
             render_standard_weekly_matrix(class_matrix(ver, ref_date=ref, neis_cache_key=get_neis_cache_token()), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_class_schedule_excel_bytes(ref, use_test=False)
@@ -5548,6 +5621,11 @@ if "시간표 조회" in tab_map:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
             ref=week_picker("주간 선택",_today_kst(),key="view_ref")
+            try:
+                require_neis_week(ref)
+            except Exception as exc:
+                st.error(f"NEIS 학사일정을 불러오지 못했습니다. 시간표를 표시하지 않습니다.\n\n{exc}")
+                st.stop()
             teacher_week = effective_teacher_matrix(ref, ver, use_test=False, neis_cache_key=get_neis_cache_token())
             if not teacher_week.empty and t:
                 teacher_week = teacher_week[teacher_week["교사명"].astype(str).str.strip() == str(t).strip()].reset_index(drop=True)
@@ -5809,6 +5887,11 @@ if "시간표 변경 테스트용" in tab_map:
         st.caption("실제 변경과 현재까지의 테스트 변경을 모두 반영합니다. 선택한 현재 상태를 기준으로 다음 1:1 가능 위치를 계산합니다.")
         test_week_anchor = week_picker("테스트 검색 주차", _today_kst(), key="test_week_anchor", help_text="주차 버튼을 선택하면 해당 주를 테스트 기준으로 사용합니다.")
         ver = st.session_state.get("_data_version", 0)
+        try:
+            require_neis_week(test_week_anchor)
+        except Exception as exc:
+            st.error(f"NEIS 학사일정을 불러오지 못했습니다. 테스트 주간표를 표시하지 않습니다.\n\n{exc}")
+            st.stop()
         test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True, neis_cache_key=get_neis_cache_token())
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
         render_standard_weekly_matrix(
