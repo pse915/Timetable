@@ -45,63 +45,129 @@ GITHUB_FONT_RAW_BASE = "https://raw.githubusercontent.com/pse915/Timetable/main"
 GITHUB_FONT_FAMILY = "Pse Noto Sans KR"
 HAKYO_FONT_FAMILY = "Hakgyoansim Wooju R"
 UI_FONT_OPTIONS = {
-    "시스템 기본 (Apple / Windows)": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif',
-    "Pretendard": '"Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif',
+    "시스템 기본 (Apple / Windows)": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif',
+    "Pretendard": '"Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "Segoe UI", sans-serif',
     "Noto Sans KR": '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif',
     "Noto Sans KR · GitHub (Light + Bold)": f'"{GITHUB_FONT_FAMILY}", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
     "학교안심 우주체 · GitHub": f'"{HAKYO_FONT_FAMILY}", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif',
     "Inter": '"Inter", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif',
 }
 UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
+
 def render_font_runtime_css(selected_font: str):
+    """선택 글꼴을 실제로 로드하고 Streamlit/AG Grid/HTML에 일관되게 적용한다.
+
+    기존 구현은 Pretendard/Noto/Inter를 'font-family'만 지정해 두었기 때문에
+    학교 PC에 폰트가 설치되어 있지 않으면 선택해도 실제 글꼴이 바뀌지 않았다.
+    또한 GitHub Noto는 300/700만 선언되어 400 일반체가 브라우저 합성에 의존했다.
+    여기서는 선택된 외부 폰트만 로드하고, 일반체/중간체/볼드체를 명시한다.
+    """
     selected_font = selected_font if selected_font in UI_FONT_OPTIONS else UI_FONT_DEFAULT
-    if selected_font == "Noto Sans KR · GitHub (Light + Bold)":
+
+    family = UI_FONT_OPTIONS[selected_font]
+    font_loader = ""
+
+    if selected_font == "Pretendard":
+        font_loader = """
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<style>
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css");
+</style>
+"""
+    elif selected_font == "Noto Sans KR":
+        font_loader = """
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap");
+</style>
+"""
+    elif selected_font == "Inter":
+        font_loader = """
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+</style>
+"""
+    elif selected_font == "Noto Sans KR · GitHub (Light + Bold)":
         light_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Light.ttf"
+        regular_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Regular.ttf"
         bold_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Bold.ttf"
         light_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Light.ttf"
+        regular_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Regular.ttf"
         bold_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Bold.ttf"
-        st.markdown(
-            f"""
-<style id="github-noto-sans-kr-runtime-font">
-@font-face {{ font-family: '{GITHUB_FONT_FAMILY}'; font-style: normal; font-weight: 300; font-display: swap;
-  src: url('{light_url}') format('truetype'), url('{light_raw}') format('truetype'); }}
-@font-face {{ font-family: '{GITHUB_FONT_FAMILY}'; font-style: normal; font-weight: 700; font-display: swap;
-  src: url('{bold_url}') format('truetype'), url('{bold_raw}') format('truetype'); }}
-:root {{ --app-font: '{GITHUB_FONT_FAMILY}', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }}
-p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-baseweb="select"],[data-baseweb="input"] input,[data-baseweb="textarea"] textarea {{ font-family: var(--app-font) !important; }}
-[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] * {{ --gdg-font-family: var(--app-font) !important; font-family: var(--app-font) !important; }}
-table,thead,tbody,tfoot,tr,th,td,caption {{ font-family: var(--app-font) !important; }}
+        font_loader = f"""
+<style>
+@font-face {{
+  font-family: '{GITHUB_FONT_FAMILY}';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('{light_url}') format('truetype'), url('{light_raw}') format('truetype');
+}}
+@font-face {{
+  font-family: '{GITHUB_FONT_FAMILY}';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('{regular_url}') format('truetype'), url('{regular_raw}') format('truetype');
+}}
+@font-face {{
+  font-family: '{GITHUB_FONT_FAMILY}';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('{bold_url}') format('truetype'), url('{bold_raw}') format('truetype');
+}}
 </style>
-""",
-            unsafe_allow_html=True,
-        )
-        return
-    if selected_font == "학교안심 우주체 · GitHub":
+"""
+    elif selected_font == "학교안심 우주체 · GitHub":
         hakyo_url = f"{GITHUB_FONT_BASE}/HakgyoansimWoojuR.ttf"
         hakyo_raw = f"{GITHUB_FONT_RAW_BASE}/HakgyoansimWoojuR.ttf"
-        st.markdown(
-            f"""
-<style id="github-hakgyoansim-wooju-runtime-font">
-@font-face {{ font-family: '{HAKYO_FONT_FAMILY}'; font-style: normal; font-weight: 400; font-display: swap;
-  src: url('{hakyo_url}') format('truetype'), url('{hakyo_raw}') format('truetype'); }}
-:root {{ --app-font: '{HAKYO_FONT_FAMILY}', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif; }}
-p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-baseweb="select"],[data-baseweb="input"] input,[data-baseweb="textarea"] textarea {{ font-family: var(--app-font) !important; }}
-[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] * {{ --gdg-font-family: var(--app-font) !important; font-family: var(--app-font) !important; }}
-table,thead,tbody,tfoot,tr,th,td,caption {{ font-family: var(--app-font) !important; }}
+        font_loader = f"""
+<style>
+@font-face {{
+  font-family: '{HAKYO_FONT_FAMILY}';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('{hakyo_url}') format('truetype'), url('{hakyo_raw}') format('truetype');
+}}
+</style>
+"""
+
+    st.markdown(
+        f"""
+{font_loader}
+<style id="runtime-app-font-global">
+:root {{ --app-font: {family}; }}
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] * {{
+    font-family: var(--app-font) !important;
+}}
+[data-testid="stDataFrame"],
+[data-testid="stDataEditor"],
+[data-testid="stDataFrame"] *,
+[data-testid="stDataEditor"] * {{
+    --gdg-font-family: var(--app-font) !important;
+    font-family: var(--app-font) !important;
+}}
+table, thead, tbody, tfoot, tr, th, td, caption {{
+    font-family: var(--app-font) !important;
+}}
+/* 아이콘 폰트는 전역 폰트보다 우선해야 아이콘이 사각형/문자로 깨지지 않는다. */
+[class*="material-symbols"],
+[data-testid="stIconMaterial"],
+[data-testid="stIconMaterial"] * {{
+    font-family: "Material Symbols Rounded", "Material Symbols Outlined", sans-serif !important;
+}}
 </style>
 """,
-            unsafe_allow_html=True,
-        )
-        return
-    st.markdown(
-        f"""<style id="runtime-app-font-global">
-:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}
-html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{{font-family:var(--app-font)!important}}
-body table,body table *,[data-testid="stDataFrame"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"],[data-testid="stDataEditor"] *{{font-family:var(--app-font)!important;--gdg-font-family:var(--app-font)!important}}
-[class*="material-symbols"],[data-testid="stIconMaterial"],[data-testid="stIconMaterial"] *{{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important}}
-</style>""",
         unsafe_allow_html=True,
     )
+
 render_font_runtime_css(st.session_state.get("ui_font", UI_FONT_DEFAULT))
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
@@ -1438,6 +1504,7 @@ def redo():
     return True
 def _invalidate_all_caches():
     st.session_state._data_version = st.session_state.get("_data_version", 0) + 1
+    st.session_state.pop("_effective_day_cache", None)
     st.session_state.pop("_effective_week_cache", None)
     get_effective_timetable_for_date.clear()
     get_single_lesson_1to1_candidates.clear()
@@ -2081,14 +2148,25 @@ def _build_effective_timetable_for_date(on_date: str, version: int = 0, use_test
     for c in columns:
         if c not in df.columns: df[c] = ""
     return df[columns].reset_index(drop=True)
-@st.cache_data(show_spinner=False, ttl=300)
 def _get_effective_timetable_cached(norm: str, version: int, use_test: bool, neis_cache_key: str) -> pd.DataFrame:
-    """날짜별 유효 시간표 계산 결과를 캐시한다.
+    """세션 로컬 날짜 캐시.
 
-    캐시 키에 날짜/데이터 버전/테스트 여부/NEIS 키 해시를 포함해
-    과거 시간표나 NEIS 비수업일이 새 화면에 섞이지 않도록 한다.
+    유효 시간표는 st.session_state의 swaps/subs/part_time에 의존한다.
+    st.cache_data는 세션 간 공유될 수 있으므로 이 데이터에는 사용하지 않는다.
+    대신 주간 캐시와 동일한 세션 로컬 dict를 사용해 중복 계산만 제거한다.
     """
-    return _build_effective_timetable_for_date(norm, version, use_test)
+    cache = st.session_state.setdefault("_effective_day_cache", {})
+    cache_id = f"{norm}:{int(version or 0)}:{int(bool(use_test))}:{neis_cache_key}"
+    item = cache.get(cache_id)
+    if isinstance(item, pd.DataFrame):
+        return item
+    result = _build_effective_timetable_for_date(norm, version, use_test)
+    # 과도한 메모리 증가를 막기 위해 최근 20개 날짜 계산만 유지한다.
+    cache[cache_id] = result
+    if len(cache) > 20:
+        for key in list(cache.keys())[:-20]:
+            cache.pop(key, None)
+    return result
 
 def get_effective_timetable_for_date(
     on_date: str, version: int = 0, use_test: bool = False, neis_cache_key: str = ""
@@ -2101,7 +2179,7 @@ def get_effective_timetable_for_date(
 
 # 기존 코드의 invalidate 호출과 호환되도록 clear를 공개 함수에 연결한다.
 def _clear_effective_timetable_cache():
-    _get_effective_timetable_cached.clear()
+    st.session_state.pop("_effective_day_cache", None)
     st.session_state.pop("_effective_week_cache", None)
 get_effective_timetable_for_date.clear = _clear_effective_timetable_cache
 
@@ -2955,7 +3033,9 @@ def _register_absence_from_weekly(lesson, reason, detail=""):
 def _weekly_display_matrix(matrix: pd.DataFrame) -> pd.DataFrame:
     if matrix is None or matrix.empty:
         return matrix.copy(deep=True) if isinstance(matrix, pd.DataFrame) else pd.DataFrame()
-    out = matrix.copy(deep=True)
+    out = matrix.copy(deep=False)
+    # 이후 컬럼 대입 시 pandas가 필요한 컬럼만 copy-on-write 하므로
+    # 대형 교사 매트릭스의 불필요한 deep copy 비용을 줄인다.
     for col in out.columns:
         if str(col) in ("교사명", "학급", "교시"):
             continue
@@ -5421,15 +5501,8 @@ if st.session_state.get("active_tab") in ALL_TABS and not init_state():
     st.stop()
 if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_OPTIONS:
     st.session_state.ui_font = UI_FONT_DEFAULT
-st.markdown(
-    f"""<style id="dialog-font-state">
-:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}
-html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{{font-family:var(--app-font)!important}}
-body table,body table *,[data-testid="stDataFrame"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"],[data-testid="stDataEditor"] *{{font-family:var(--app-font)!important;--gdg-font-family:var(--app-font)!important}}
-[class*="material-symbols"],[data-testid="stIconMaterial"],[data-testid="stIconMaterial"] *{{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important}}
-</style>""",
-    unsafe_allow_html=True,
-)
+# 도구 다이얼로그의 글꼴 변경도 동일한 단일 런타임 함수로 처리한다.
+render_font_runtime_css(st.session_state.ui_font)
 st.markdown('<div class="streamlit-header-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
 @st.dialog("도구", width="small")
 def render_tools_dialog():
