@@ -124,6 +124,12 @@ NEIS_EDU_OFFICE_CODES = (
     "B10", "C10", "D10", "E10", "F10", "G10", "H10", "I10", "J10",
     "K10", "M10", "N10", "P10", "Q10", "R10", "S10", "T10",
 )
+# 이 앱의 기본 학교(서라벌여자중학교)는 NEIS 표준 학교코드가 고정되어 있습니다.
+# 학교기본정보 API 검색이 일시적으로 누락되더라도 인증키만으로 학사일정 조회가 가능하도록
+# 공식 NEIS 코드(R10 / 8771121)를 fallback으로 사용합니다. 다른 학교로 바꾸면 자동 검색을 먼저 시도합니다.
+NEIS_SCHOOL_CODE_FALLBACKS = {
+    "서라벌여자중학교": {"ATPT_OFCDC_SC_CODE": "R10", "SD_SCHUL_CODE": "8771121"},
+}
 NEIS_NON_INSTRUCTIONAL_TYPES = (
     "공휴일", "휴업일", "휴일", "방학", "재량휴업일", "개교기념일", "대체공휴일",
     "토요휴업일", "일요일", "토요일", "선거일", "임시공휴일", "근로자의날",
@@ -190,6 +196,14 @@ def neis_find_school(api_key: str, school_name: str):
         except Exception:
             continue
     if not exact:
+        fallback = NEIS_SCHOOL_CODE_FALLBACKS.get(str(school_name).strip())
+        if fallback:
+            return {
+                "ATPT_OFCDC_SC_CODE": fallback["ATPT_OFCDC_SC_CODE"],
+                "SD_SCHUL_CODE": fallback["SD_SCHUL_CODE"],
+                "SCHUL_NM": str(school_name).strip(),
+                "ATPT_OFCDC_SC_NM": "경상북도교육청",
+            }
         return None
     # 같은 학교명이 여러 교육청에 있을 경우 현재 코드의 주소/학교명과 가장 잘 맞는 첫 결과를 사용.
     row = exact[0]
