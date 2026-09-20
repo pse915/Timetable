@@ -1125,6 +1125,7 @@ def _invalidate_all_caches():
     cumulative_sub_count.clear()
     weekly_load.clear()
     _duty_slot_index.clear()
+    get_teacher_availability_index.clear()
 DUTY_COLS = ["교사명", "일자", "교시", "사유", "상세사유", "등록시각", "입력자"]
 PART_TIME_EXTRA_COLS = ["시작일", "종료일", "대체교사"]
 def ensure_duty_columns(df):
@@ -1293,6 +1294,115 @@ def _truthy_availability(value):
 def _part_time_available(prow, day, period):
     col = f"{day}{safe_int(period)}"
     return col in prow.index and _truthy_availability(prow.get(col, ""))
+
+_TEACHER_SLOT_COL_RE = re.compile(r"^(월|화|수|목|금)\s*(?:요일)?\s*[-_/]?\s*(\d{1,2})\s*(?:교시)?$")
+_TEACHER_DAY_COL_RE = re.compile(r"^(월|화|수|목|금)(?:요일)?(?:\s|_|-|/)*(?:가능|가능시간|가능시간대|교시|시간)?$")
+_TEACHER_AVAIL_TEXT_KEYS = (
+    "가능시간", "가능 시간", "가능시간대", "가능 시간대", "가능교시", "가능 교시",
+    "교사 가능시간", "교사 가능 시간", "가용시간", "가용 시간", "가용교시", "가용 교시"
+)
+
+def _normalize_teacher_col(value):
+    return re.sub(r"\s+", "", str(value or "").strip())
+
+def _parse_period_tokens(text):
+    result=set()
+    for m in re.finditer(r"(\d{1,2})\s*(?:~|\-|–|—)\s*(\d{1,2})", str(text)):
+        a,b=safe_int(m.group(1)),safe_int(m.group(2))
+        if 1 <= a <= 7 and 1 <= b <= 7:
+            lo,hi=sorted((a,b)); result.update(range(lo,hi+1))
+    for m in re.finditer(r"(?<!\d)([1-7])(?!\d)", str(text)):
+        result.add(safe_int(m.group(1)))
+    return result
+
+def _parse_teacher_availability_text(text):
+    text=str(text or "").strip()
+    if not text:
+        return set()
+    if text.lower() in {"전체", "모두", "전부", "매일", "전일", "all"}:
+        return {(d,p) for d in DAYS for p in range(1, PERIODS_PER_DAY.get(d, MAX_PERIOD)+1)}
+    result=set()
+    day_pattern=r"(월|화|수|목|금)(?:요일)?"
+    matches=list(re.finditer(day_pattern, text))
+    if matches:
+        for i,m in enumerate(matches):
+            day=m.group(1)
+            body=text[m.end():matches[i+1].start() if i+1<len(matches) else len(text)]
+            periods=_parse_period_tokens(body)
+            for p in periods:
+                if p <= PERIODS_PER_DAY.get(day, MAX_PERIOD):
+                    result.add((day,p))
+        return result
+    # 요일 정보가 없는 단독 숫자 표기는 호출하는 쪽의 요일 문맥에서 해석한다.
+    return set()
+
+@st.cache_data(show_spinner=False, ttl=300)
+def get_teacher_availability_index(version=0):
+    ti=st.session_state.get("teachers", pd.DataFrame())
+    if not isinstance(ti, pd.DataFrame) or ti.empty or "교사명" not in ti.columns:
+        return {}
+    columns={_normalize_teacher_col(c): c for c in ti.columns}
+    slot_cols={}
+    day_cols={}
+    for norm_col, original_col in columns.items():
+        m=_TEACHER_SLOT_COL_RE.fullmatch(norm_col)
+        if m:
+            day,p=m.group(1), safe_int(m.group(2))
+            if 1 <= p <= MAX_PERIOD:
+                slot_cols[(day,p)]=original_col
+            continue
+        m=_TEACHER_DAY_COL_RE.fullmatch(norm_col)
+        if m and norm_col[:1] in DAYS:
+            day_cols[m.group(1)]=original_col
+    text_cols=[]
+    for key in _TEACHER_AVAIL_TEXT_KEYS:
+        nk=_normalize_teacher_col(key)
+        if nk in columns:
+            text_cols.append(columns[nk])
+    # '가능시간'을 포함한 비표준 열 이름도 지원
+    for original_col in ti.columns:
+        norm_col=_normalize_teacher_col(original_col)
+        if any(k.replace(" ","") in norm_col for k in ("가능시간","가용시간")) and original_col not in text_cols:
+            text_cols.append(original_col)
+    index={}
+    for row in ti.to_dict("records"):
+        teacher=str(row.get("교사명", "")).strip()
+        if not teacher:
+            continue
+        configured=False
+        allowed=set()
+        if slot_cols:
+            configured=True
+            for slot,col in slot_cols.items():
+                if _truthy_availability(row.get(col, "")):
+                    allowed.add(slot)
+        else:
+            # 요일별 열: '월=1,2,4' / '화=3~5' 같은 입력을 지원
+            for day,col in day_cols.items():
+                raw=row.get(col, "")
+                if str(raw).strip():
+                    configured=True
+                    for p in _parse_period_tokens(raw):
+                        if p <= PERIODS_PER_DAY.get(day, MAX_PERIOD):
+                            allowed.add((day,p))
+            # 통합 가능시간 열: '월 1,2 / 화 4~6' 지원
+            for col in text_cols:
+                raw=row.get(col, "")
+                if str(raw).strip():
+                    configured=True
+                    allowed.update(_parse_teacher_availability_text(raw))
+        index[teacher]=(configured, frozenset(allowed))
+    return index
+
+def teacher_slot_is_available(teacher: str, day: str, period: int, version=0):
+    teacher=str(teacher or "").strip(); day=str(day or "").strip(); p=safe_int(period)
+    if not teacher or day not in DAYS or p <= 0:
+        return False
+    item=get_teacher_availability_index(version).get(teacher)
+    if item is None:
+        return True
+    configured, allowed=item
+    return (day,p) in allowed if configured else True
 def validate_part_time_table(df):
     if df is None or df.empty: return True, ""
     seen = {}
@@ -1357,6 +1467,12 @@ def validate_swap(a, b, date_a, date_b, *, is_test=False):
     else:
         if (da, ta, pa) in get_test_affected_slots() or (db, tb, pb) in get_test_affected_slots():
             return False, "테스트에서 이미 사용된 슬롯입니다."
+    day_a = WEEKDAY_KR[datetime.strptime(da, "%Y-%m-%d").weekday()]
+    day_b = WEEKDAY_KR[datetime.strptime(db, "%Y-%m-%d").weekday()]
+    if not teacher_slot_is_available(ta, day_b, pb, ver):
+        return False, f"{ta} 교사는 {day_b}{pb}교시를 가능 시간으로 등록하지 않았습니다."
+    if not teacher_slot_is_available(tb, day_a, pa, ver):
+        return False, f"{tb} 교사는 {day_a}{pa}교시를 가능 시간으로 등록하지 않았습니다."
     if has_duty(ta, da, pa) or has_duty(tb, db, pb):
         return False, "복무가 등록된 슬롯은 맞교환할 수 없습니다."
     return True, ""
@@ -1905,8 +2021,15 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
     b_probe = {"교사명": teacher_b, "일자": date_b, "요일": day_b, "교시": period_b, "학급": "", "과목": ""}
     ver = st.session_state.get("_data_version", 0)
     e_b = get_effective_timetable_for_date(normalize_date_str(date_b), ver, use_test=is_test)
-    if not is_free(teacher_b, day_b, period_b, normalize_date_str(date_b), e_b):
-        pass
+    norm_a=normalize_date_str(date_a)
+    norm_b=normalize_date_str(date_b)
+    day_a=WEEKDAY_KR[datetime.strptime(norm_a, "%Y-%m-%d").weekday()] if norm_a else ""
+    if not is_free(teacher_b, day_b, period_b, norm_b, e_b):
+        return False
+    if not teacher_slot_is_available(str(a.get("교사명", "")), day_b, period_b, ver):
+        return False
+    if not teacher_slot_is_available(teacher_b, day_a, safe_int(a.get("교시", 0)), ver):
+        return False
     if is_test and _test_slot_is_affected(date_b, teacher_b, period_b):
         return False
     rec = {
@@ -2020,6 +2143,8 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
     day_b = WEEKDAY_KR[datetime.strptime(date_b_str, "%Y-%m-%d").weekday()]
     if not is_free(teacher_a, day_b, period_b, date_b_str, e_cache.get(date_b_str)):
         return [], "교사A 목표시간 수업 있음"
+    if not teacher_slot_is_available(teacher_a, day_b, period_b, version):
+        return [], "교사A의 가능시간이 아닙니다."
     slots_list = list(class_slots.keys())
     free_of_teacher = {}
     all_teachers_in_class = {info["teacher"] for info in class_slots.values()}
@@ -2031,7 +2156,7 @@ def find_cycle_linked_swaps(teacher_a, date_a_str, period_a, class_a, subject_a,
             max_p = PERIODS_PER_DAY.get(day_kr, 7)
             for p in range(1, max_p + 1):
                 slot = (d, p)
-                if slot not in occupied and not has_duty(t, d, p):
+                if slot not in occupied and not has_duty(t, d, p) and teacher_slot_is_available(t, day_kr, p, version):
                     free_set.add(slot)
         free_of_teacher[t] = free_set
     free_moves = defaultdict(list)
@@ -2111,7 +2236,7 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
     my_group = subject_group(subject_a)
     cum = cumulative_sub_count(version=ver)
     swap_recs = []
-    teacher_a_free_target = is_free(teacher_a, day_b, p_b, norm_b, e_b)
+    teacher_a_free_target = is_free(teacher_a, day_b, p_b, norm_b, e_b) and teacher_slot_is_available(teacher_a, day_b, p_b, ver)
     if not teacher_a_free_target or e_b.empty:
         return pd.DataFrame(), [], ""
     b_slots = defaultdict(list)
@@ -2120,6 +2245,8 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
             b_slots[str(getattr(b_row, "교사명", "")).strip()].append(b_row)
     for t_b in ti["교사명"].astype(str).str.strip().tolist():
         if t_b == teacher_a or has_duty(t_b, norm_b):
+            continue
+        if not teacher_slot_is_available(t_b, day_a, p_a, ver):
             continue
         b_lessons = b_slots.get(t_b, ())
         for b_row in b_lessons:
@@ -2198,7 +2325,11 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                         continue
                     if not is_free(teacher, tday, p, td_str, e_b):
                         continue
+                    if not teacher_slot_is_available(teacher, tday, p, ver):
+                        continue
                     if not is_free(other_teacher, day_kr, p, d_str, e_tt):
+                        continue
+                    if not teacher_slot_is_available(other_teacher, day_kr, p, ver):
                         continue
                     other_class = str(o["학급"]).strip()
                     same_class = (other_class == my_class)
@@ -2238,7 +2369,8 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
 @st.cache_data(show_spinner=False, ttl=180)
 def get_single_lesson_1to1_candidates(
     teacher: str, orig_date_str: str, orig_period: int,
-    orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0, use_test: bool = False
+    orig_class: str, orig_subject: str, future_days: int = 0, version: int = 0, use_test: bool = False,
+    target_date_str: str | None = None, target_period: int | None = None
 ) -> pd.DataFrame:
     source_date = datetime.strptime(normalize_date_str(orig_date_str), "%Y-%m-%d").date()
     source_str = source_date.strftime("%Y-%m-%d")
@@ -2256,12 +2388,27 @@ def get_single_lesson_1to1_candidates(
         return pd.DataFrame(columns=empty_cols)
     monday = source_date - timedelta(days=source_date.weekday())
     friday = monday + timedelta(days=4)
-    end_date = friday + timedelta(days=max(0, int(future_days)))
-    search_dates = [
-        source_date + timedelta(days=i)
-        for i in range((end_date - source_date).days + 1)
-        if (source_date + timedelta(days=i)).weekday() < 5
-    ]
+    parsed_target = None
+    if target_date_str:
+        try:
+            parsed_target = datetime.strptime(normalize_date_str(target_date_str), "%Y-%m-%d").date()
+        except Exception:
+            parsed_target = None
+    if parsed_target is not None:
+        window_start = min(monday, parsed_target)
+        window_end = max(friday + timedelta(days=max(0, int(future_days))), parsed_target)
+        search_dates = [
+            window_start + timedelta(days=i)
+            for i in range((window_end - window_start).days + 1)
+            if (window_start + timedelta(days=i)).weekday() < 5
+        ]
+    else:
+        end_date = friday + timedelta(days=max(0, int(future_days)))
+        search_dates = [
+            source_date + timedelta(days=i)
+            for i in range((end_date - source_date).days + 1)
+            if (source_date + timedelta(days=i)).weekday() < 5
+        ]
     ver = version or st.session_state.get("_data_version", 0)
     source_tt = get_effective_timetable_for_date(source_str, ver, use_test=use_test)
     if source_tt is None or source_tt.empty:
@@ -2341,6 +2488,8 @@ def get_single_lesson_1to1_candidates(
                 continue
             if (teacher, target_period) in target_busy or (teacher, 0) in target_duty or (teacher, target_period) in target_duty:
                 continue
+            if not teacher_slot_is_available(teacher, target_day, target_period, ver):
+                continue
             period_mask = target_period_s == target_period
             candidates = target_tt.loc[period_mask, ["교사명","학급","과목"]].copy()
             if candidates.empty:
@@ -2359,6 +2508,8 @@ def get_single_lesson_1to1_candidates(
                 if (other_teacher, source_period) in source_busy:
                     continue
                 if (other_teacher, 0) in source_duty or (other_teacher, source_period) in source_duty:
+                    continue
+                if not teacher_slot_is_available(other_teacher, source_day, source_period, ver):
                     continue
                 target_slot = (target_str, other_teacher, target_period)
                 source_other_slot = (source_str, other_teacher, source_period)
@@ -2786,7 +2937,12 @@ def _filter_current_swap_candidates(df, lesson, *, use_test=False):
         target_day = WEEKDAY_KR[datetime.strptime(td, "%Y-%m-%d").weekday()]
         if not is_free(source_teacher, target_day, tp, td, te):
             continue
-        if not is_free(tt, WEEKDAY_KR[datetime.strptime(source_date, "%Y-%m-%d").weekday()], source_period, source_date, source_e):
+        if not teacher_slot_is_available(source_teacher, target_day, tp, ver):
+            continue
+        source_day_check=WEEKDAY_KR[datetime.strptime(source_date, "%Y-%m-%d").weekday()]
+        if not is_free(tt, source_day_check, source_period, source_date, source_e):
+            continue
+        if not teacher_slot_is_available(tt, source_day_check, source_period, ver):
             continue
         valid_rows.append(idx)
     return df.loc[valid_rows].reset_index(drop=True)
@@ -2827,17 +2983,17 @@ def _weekly_action_dialog():
             _weekly_fragment_rerun()
         return
     action_mode = st.session_state.get("weekly_dialog_action_mode", "swap")
-    if action_mode not in {"swap", "cycle", "absence", "substitute", "detail"}:
+    if action_mode not in {"swap", "target", "absence", "substitute", "detail"}:
         action_mode = "swap"
         st.session_state.weekly_dialog_action_mode = "swap"
     if action_mode == "swap":
         st.markdown("#### 🔄 1:1 기본 맞교환")
-        st.caption("가장 자주 사용하는 1:1 맞교환을 기본 화면으로 표시합니다. 다른 작업은 아래 버튼을 눌러 진행하세요.")
+        st.caption("가장 자주 사용하는 1:1 맞교환을 기본 화면으로 표시합니다. 특정 날짜·교시를 지정하면 그 시간에 1:1이 없을 때 자동으로 연계 순환을 탐색합니다.")
     else:
         nav_cols = st.columns(5)
         nav_items = [
             ("swap", "🔄 1:1 맞교환"),
-            ("cycle", "🔗 연계 순환"),
+            ("target", "📅 날짜·교시 지정"),
             ("absence", "📌 결강"),
             ("substitute", "🟢 보강"),
             ("detail", "ℹ️ 상세"),
@@ -2851,7 +3007,7 @@ def _weekly_action_dialog():
         st.markdown(f"#### {dict(nav_items)[action_mode]}")
     if action_mode == "swap":
         alt_cols = st.columns(4)
-        alt_items = [("cycle", "🔗 연계 순환"), ("absence", "📌 결강"),
+        alt_items = [("target", "📅 날짜·교시 지정"), ("absence", "📌 결강"),
                      ("substitute", "🟢 보강"), ("detail", "ℹ️ 상세")]
         for col, (mode, label) in zip(alt_cols, alt_items):
             with col:
@@ -2979,49 +3135,180 @@ def _weekly_action_dialog():
                         _weekly_fragment_rerun()
                 else:
                     st.error("현재 상태에서는 이 1:1 맞교환을 적용할 수 없습니다. 최신 시간표 상태를 다시 확인해 주세요.")
-    elif action_mode == "cycle":
-        cache_key = (
-            str(lesson.get("교사명", "")), str(lesson.get("일자", "")), safe_int(lesson.get("교시", 0)),
-            str(lesson.get("학급", "")), str(lesson.get("과목", "")), int(extra_days), int(ver), bool(use_test)
+    elif action_mode == "target":
+        target_date_key = "weekly_dialog_target_date"
+        target_period_key = "weekly_dialog_target_period"
+        default_target = st.session_state.get(target_date_key)
+        if not default_target:
+            try:
+                default_target = normalize_date_str(lesson.get("일자", ""))
+                default_target = datetime.strptime(default_target, "%Y-%m-%d").date()
+            except Exception:
+                default_target = _today_kst()
+        elif isinstance(default_target, str):
+            try:
+                default_target = datetime.strptime(normalize_date_str(default_target), "%Y-%m-%d").date()
+            except Exception:
+                default_target = _today_kst()
+        if default_target.weekday() >= 5:
+            default_target -= timedelta(days=default_target.weekday() - 4)
+        target_date = calendar_picker("교환 희망일", default_target, key="weekly_dialog_target_calendar")
+        st.session_state[target_date_key] = target_date
+        saved_period = safe_int(st.session_state.get(target_period_key, 1))
+        if saved_period <= 0:
+            saved_period = 1
+        max_target_period = PERIODS_PER_DAY.get(WEEKDAY_KR[target_date.weekday()], MAX_PERIOD)
+        if saved_period > max_target_period:
+            saved_period = max_target_period
+        selected_periods = period_matrix_picker(
+            "교환 희망 교시", "weekly_dialog_target_period_picker",
+            selected=[saved_period] if saved_period else [], allow_all=False
         )
-        stored_key = st.session_state.get("weekly_cycle_candidates_key")
-        if stored_key != cache_key:
-            with _weekly_dialog_loading("연계 순환 후보 계산 중"):
-                cycles, cycle_msg = get_single_lesson_linked_cycles(
-                    lesson["교사명"], lesson["일자"], safe_int(lesson["교시"]),
-                    str(lesson["학급"]), str(lesson["과목"]),
-                    future_days=extra_days, version=ver, min_cycle=2, max_cycle=3, use_test=use_test,
+        target_period = safe_int(selected_periods[0]) if selected_periods else 0
+        st.session_state[target_period_key] = target_period
+        if target_period <= 0:
+            st.info("교환 희망 교시를 선택해 주세요.")
+        else:
+            target_date_str = target_date.strftime("%Y-%m-%d")
+            source_date_str = normalize_date_str(lesson.get("일자", ""))
+            source_period = safe_int(lesson.get("교시", 0))
+            if target_date_str == source_date_str and target_period == source_period:
+                st.warning("원본 수업과 같은 날짜·교시는 선택할 수 없습니다.")
+            else:
+                st.markdown(
+                    f'<div class="swap-result-summary"><strong>지정 시간</strong> · {target_date_str} ({WEEKDAY_KR[target_date.weekday()]}) · {target_period}교시</div>',
+                    unsafe_allow_html=True,
                 )
-            st.session_state.weekly_cycle_candidates = cycles
-            st.session_state.weekly_cycle_candidates_msg = cycle_msg
-            st.session_state.weekly_cycle_candidates_key = cache_key
-        else:
-            cycles = st.session_state.get("weekly_cycle_candidates", [])
-            cycle_msg = st.session_state.get("weekly_cycle_candidates_msg", "")
-        st.caption(cycle_msg or "선택한 수업을 시작점으로 연계 순환 가능성을 검사합니다.")
-        if not cycles:
-            st.info("현재 조건에서 가능한 2·3인 연계 순환 경로가 없습니다.")
-        else:
-            for idx, cyc in enumerate(cycles[:6]):
-                with st.container(border=True):
-                    st.markdown(
-                        f"**{'🔗' if cyc['length'] > 2 else '↔️'} "
-                        f"{cyc['length']}인 순환 · 점수 {cyc.get('score', '')}**"
+                target_cache_key = (
+                    "target-first-fallback-v1", str(lesson.get("교사명", "")), source_date_str, source_period,
+                    str(lesson.get("학급", "")), str(lesson.get("과목", "")), target_date_str, target_period, int(ver), bool(use_test)
+                )
+                stored_target_key = st.session_state.get("weekly_target_candidates_key")
+                if stored_target_key != target_cache_key:
+                    st.session_state.pop("weekly_target_swap_selected_row", None)
+                    with _weekly_dialog_loading("지정 시간의 1:1 교환 가능 여부 확인 중"):
+                        df_target = get_single_lesson_1to1_candidates(
+                            lesson["교사명"], lesson["일자"], source_period,
+                            str(lesson["학급"]), str(lesson["과목"]),
+                            future_days=max(0, extra_days), version=ver, use_test=use_test,
+                            target_date_str=target_date_str, target_period=target_period,
+                        )
+                    if not df_target.empty:
+                        df_target = df_target[
+                            (df_target["이동희망일"].astype(str) == target_date_str) &
+                            (df_target["이동희망교시"].apply(safe_int) == target_period)
+                        ].reset_index(drop=True)
+                    st.session_state.weekly_target_swap_candidates = df_target
+                    st.session_state.weekly_target_candidates_key = target_cache_key
+                    st.session_state.weekly_target_cycle_candidates = None
+                    st.session_state.weekly_target_cycle_msg = ""
+                else:
+                    df_target = st.session_state.get("weekly_target_swap_candidates", pd.DataFrame())
+
+                if not df_target.empty:
+                    st.success(f"지정한 시간에 1:1 교환 가능 수업이 {len(df_target)}개 있습니다.")
+                    st.markdown("#### 교환할 수업 선택")
+                    st.caption("표에서 교환할 수업을 클릭하면 바로 선택됩니다.")
+                    table_view = _swap_result_view(df_target) if "_swap_result_view" in locals() else df_target[[
+                        "이동희망일","이동희망교시","상대교사","상대학급","상대과목","교환가능사유"
+                    ]].rename(columns={
+                        "이동희망일":"날짜","이동희망교시":"교시","교환가능사유":"교환 가능 사유"
+                    })
+                    table_view["날짜"] = df_target["이동희망일"].map(lambda x: f"{x} ({WEEKDAY_KR[datetime.strptime(str(x), '%Y-%m-%d').weekday()]})")
+                    table_view["교시"] = df_target["이동희망교시"].apply(lambda x: f"{safe_int(x)}교시")
+                    table_view = table_view[["날짜","교시","상대교사","상대학급","상대과목","교환 가능 사유"]]
+                    selected_rows = []
+                    target_table_key = f"weekly_dialog_target_swap_table_{int(st.session_state.get('weekly_dialog_instance',0) or 0)}"
+                    event = st.dataframe(
+                        table_view, width="stretch", hide_index=True, key=target_table_key,
+                        on_select="rerun", selection_mode="single-row",
+                        column_config={
+                            "날짜": st.column_config.TextColumn("날짜", width="small"),
+                            "교시": st.column_config.TextColumn("교시", width="small"),
+                            "상대교사": st.column_config.TextColumn("상대 교사", width="small"),
+                            "상대학급": st.column_config.TextColumn("상대 학급", width="small"),
+                            "상대과목": st.column_config.TextColumn("상대 과목", width="small"),
+                            "교환 가능 사유": st.column_config.TextColumn("교환 가능 사유", width="large"),
+                        },
                     )
-                    st.caption(cyc.get("path_desc", ""))
-                    st.caption("학급의 담당교사·과목·시수가 보존되는 순환 후보입니다.")
-                    if st.button("🧪 이 연계 순환 테스트", key=f"dlg_cycle_test_{idx}", width="stretch"):
-                        try:
-                            with _weekly_dialog_loading("연계 순환 테스트 중"):
-                                ok = apply_cycle_swaps(cyc["moves"], is_test=True)
-                        except Exception as exc:
-                            st.error(f"연계 순환 테스트 중 오류가 발생했습니다: {exc}")
-                            ok = False
-                        if ok is not False:
-                            st.session_state["test_has_cycle"] = True
-                            st.session_state.weekly_dialog_result = f"테스트 {cyc['length']}인 연계 순환이 적용되었습니다. 실제 저장되지는 않습니다."
-                            st.success(st.session_state.weekly_dialog_result)
-                            st.rerun()
+                    selected_rows = list(getattr(getattr(event,"selection",None),"rows",[]) or [])
+                    if selected_rows:
+                        st.session_state.weekly_target_swap_selected_row = int(selected_rows[0])
+                    picked_idx = st.session_state.get("weekly_target_swap_selected_row")
+                    picked = df_target.iloc[int(picked_idx)] if picked_idx is not None and 0 <= int(picked_idx) < len(df_target) else None
+                    if picked is not None and (str(picked.get("이동희망일", "")) != target_date_str or safe_int(picked.get("이동희망교시", 0)) != target_period):
+                        picked = None
+                        st.session_state.pop("weekly_target_swap_selected_row", None)
+                    if picked is not None:
+                        st.success(
+                            f"선택됨: **{picked['상대교사']} · {picked['이동희망일']} · {safe_int(picked['이동희망교시'])}교시 · {picked['상대학급']} · {picked['상대과목']}**"
+                        )
+                        b_info = {
+                            "교사명": str(picked["상대교사"]), "일자": str(picked["이동희망일"]),
+                            "요일": str(picked["이동요일"]), "교시": safe_int(picked["이동희망교시"]),
+                            "학급": str(picked["상대학급"]), "과목": str(picked["상대과목"]),
+                        }
+                        target_button_label = "🧪 지정 시간 1:1 맞교환 테스트" if use_test else "✅ 지정 시간 1:1 맞교환 실행"
+                        if st.button(target_button_label, type="primary", key="dlg_target_direct_swap", width="stretch"):
+                            try:
+                                with _weekly_dialog_loading("지정 시간 1:1 맞교환 처리 중"):
+                                    ok = do_swap(lesson, b_info, lesson["일자"], b_info["일자"], is_test=use_test)
+                            except Exception as exc:
+                                st.error(f"맞교환 처리 중 오류가 발생했습니다: {exc}")
+                                ok = False
+                            if ok:
+                                st.session_state.weekly_dialog_result = "테스트 맞교환이 적용되었습니다." if use_test else "1:1 맞교환이 반영되었습니다."
+                                st.rerun()
+                    else:
+                        st.info("교환하려는 수업을 위 표에서 클릭해 주세요.")
+                else:
+                    st.warning("지정한 날짜·교시에 가능한 1:1 교환이 없습니다. 같은 시간대를 대상으로 연계 순환을 탐색합니다.")
+                    target_cycle_key = target_cache_key + ("cycle",)
+                    stored_cycle_key = st.session_state.get("weekly_target_cycle_key")
+                    if stored_cycle_key != target_cycle_key:
+                        with _weekly_dialog_loading("지정 시간의 연계 순환 탐색 중"):
+                            cycles, cycle_msg = find_cycle_linked_swaps(
+                                lesson["교사명"], lesson["일자"], source_period,
+                                str(lesson["학급"]), str(lesson["과목"]),
+                                target_date_str, target_period,
+                                min_cycle=2, max_cycle=3, future_days=max(0, extra_days), version=ver, use_test=use_test
+                            )
+                        st.session_state.weekly_target_cycle_candidates = cycles
+                        st.session_state.weekly_target_cycle_msg = cycle_msg
+                        st.session_state.weekly_target_cycle_key = target_cycle_key
+                    else:
+                        cycles = st.session_state.get("weekly_target_cycle_candidates") or []
+                        cycle_msg = st.session_state.get("weekly_target_cycle_msg", "")
+                    st.caption(cycle_msg or "지정한 날짜·교시를 기준으로 연계 순환 가능성을 검사합니다.")
+                    if not cycles:
+                        st.info("지정한 날짜·교시에서 가능한 연계 순환 경로도 없습니다.")
+                    else:
+                        st.markdown("#### 🔗 지정 시간 연계 순환")
+                        for idx, cyc in enumerate(cycles[:6]):
+                            with st.container(border=True):
+                                st.markdown(
+                                    f"**{'🔗' if cyc.get('length', 0) > 2 else '↔️'} {cyc.get('length','')}인 순환**"
+                                )
+                                st.caption(cyc.get("path_desc", ""))
+                                st.caption("지정한 날짜·교시에 1:1 교환이 없어서 연계 순환으로 찾은 경로입니다.")
+                                cycle_button = "🧪 이 연계 순환 테스트" if use_test else "✅ 이 연계 순환 실행"
+                                if st.button(cycle_button, key=f"dlg_target_cycle_{idx}", type="primary", width="stretch"):
+                                    try:
+                                        with _weekly_dialog_loading("지정 시간 연계 순환 처리 중"):
+                                            ok = apply_cycle_swaps(cyc["moves"], is_test=True if use_test else False)
+                                    except Exception as exc:
+                                        st.error(f"연계 순환 처리 중 오류가 발생했습니다: {exc}")
+                                        ok = False
+                                    if ok is not False:
+                                        st.session_state.weekly_dialog_result = (
+                                            f"테스트 {cyc.get('length','')}인 연계 순환이 적용되었습니다. 실제 저장되지는 않습니다."
+                                            if use_test else
+                                            f"{cyc.get('length','')}인 연계 순환이 적용되었습니다."
+                                        )
+                                        if use_test:
+                                            st.rerun()
+                                        else:
+                                            _weekly_fragment_rerun()
     elif action_mode == "absence":
         r1, r2 = st.columns([1, 2])
         with r1:
@@ -4997,6 +5284,7 @@ def _load_all_runtime_data_from_gsheet():
     st.session_state.subs = ensure_input_user(subs)
     st.session_state.swaps = ensure_input_user(swaps)
     st.session_state.part_time = ensure_part_time_columns(part_time)
+    st.session_state.cumulative = cumulative
     st.session_state.duties = ensure_duty_columns(duties)
     _invalidate_all_caches()
 def render_top_toolbar(visible_tabs):
