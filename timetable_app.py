@@ -9,6 +9,11 @@
 """
 
 import io
+import base64
+import json
+import math
+import os
+import html as html_lib
 from contextlib import contextmanager
 import uuid
 import threading
@@ -17,6 +22,8 @@ from zoneinfo import ZoneInfo
 from collections import defaultdict
 import pandas as pd
 import streamlit as st
+import requests
+import re
 import gspread
 from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
@@ -45,9 +52,35 @@ st.markdown("""
 }
 html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"]{background:var(--ui-bg)!important;color:var(--ui-text)!important}
 body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-/* 텍스트에만 앱 폰트 적용. Streamlit 아이콘 폰트는 건드리지 않는다. */
-p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"]{font-family:var(--app-font,"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif)!important}
-[class*="material-symbols"],[data-testid="stIconMaterial"]{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-style:normal!important}
+/* 선택한 글꼴을 앱 전역에 일관되게 적용한다. Streamlit 아이콘 글꼴은 마지막에 명시적으로 복원한다. */
+html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{font-family:var(--app-font,"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif)!important}
+body,body *{font-synthesis:auto}
+
+/* 일반 HTML 표 / 사용자 정의 표 / Markdown 표 */
+table,thead,tbody,tfoot,tr,th,td,caption{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}
+
+/* Streamlit / BaseWeb 입력·메뉴·팝오버 */
+[data-baseweb] *,[data-testid="stPopover"] *,[data-testid="stDialog"] *,[data-testid="stExpander"] *,[data-testid="stSidebar"] *,[role="menu"] *,[role="option"] *,[role="listbox"] *,[role="tooltip"] *{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}
+
+/* Glide Data Grid 기반 st.dataframe / st.data_editor.
+   실제 셀 텍스트가 canvas로 그려지는 경우에도 grid가 읽는 --gdg-font-family를 덮어쓴다. */
+[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] *{
+  --gdg-font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;
+}
+[data-testid="stDataFrame"],[data-testid="stDataEditor"]{
+  font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;
+}
+[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataEditor"] [role="gridcell"],[data-testid="stDataEditor"] [role="columnheader"]{
+  font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important
+}
+
+/* 차트·SVG 텍스트도 가능한 범위에서 동일한 앱 글꼴 사용 */
+[data-testid="stAppViewContainer"] svg text,.js-plotly-plot text,.plotly .legendtext,.plotly .gtitle,.plotly .xtick text,.plotly .ytick text{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}
+
+/* Streamlit 아이콘 폰트는 앱 글꼴을 적용하지 않는다. */
+[class*="material-symbols"],[data-testid="stIconMaterial"],[class*="MaterialSymbols"],
+[data-testid="stIconMaterial"] *,[aria-label="More options"] span{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-style:normal!important}
 [data-testid="stHeader"]{background:rgba(255,255,255,.88)!important;border-bottom:1px solid var(--ui-line-soft)!important;backdrop-filter:saturate(150%) blur(16px)}
 [data-testid="stDecoration"]{display:none!important}
 .block-container{width:100%!important;max-width:none!important;padding:0 clamp(16px,2.2vw,42px) 36px!important}
@@ -96,6 +129,17 @@ input::placeholder,textarea::placeholder{color:var(--ui-muted-2)!important}
 [data-testid="stDataFrame"]{border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-md)!important;overflow:hidden!important;background:var(--ui-surface)!important;box-shadow:none!important}
 [data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important;font-size:12px!important;font-weight:600!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
 [data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-size:13px!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}
+/* ---------- changed teacher weekly overview ---------- */
+.changed-teacher-block{margin:18px 0 6px}
+.changed-teacher-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 2px 8px;border-bottom:1px solid var(--ui-line-soft)}
+.changed-teacher-name{font-size:16px;font-weight:650;color:var(--ui-text);letter-spacing:-.02em}
+.changed-teacher-index{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin-right:7px;border-radius:8px;background:var(--ui-soft);color:var(--ui-muted);font-size:11px;font-weight:650}
+.changed-teacher-subject{margin-left:7px;color:var(--ui-muted);font-size:12px}
+.changed-teacher-status{font-size:11px;color:var(--ui-muted);white-space:nowrap}
+.changed-teacher-badge{display:inline-flex;align-items:center;margin-left:8px;padding:3px 7px;border-radius:999px;background:#fff3cd;color:#7a5b00;font-size:10px;font-weight:650;border:1px solid #f0d98a}
+.changed-teacher-divider{height:1px;background:var(--ui-line-soft);margin:24px 0 8px}
+/* Streamlit's fixed header can overlap custom top navigation when block-container padding is reset. */
+.streamlit-header-safe-space{height:18px;width:100%;display:block;flex:0 0 auto}
 /* ---------- changed teachers ---------- */
 .changed-teacher-selector{display:flex;align-items:center;gap:8px;margin:0 0 10px}.changed-teacher-chip{display:inline-flex;align-items:center;padding:7px 10px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft-2);color:var(--ui-text);font-size:12px}
 /* ---------- notes / states ---------- */
@@ -130,8 +174,8 @@ st.markdown(r"""
  --ui-line:#d2d2d7;--ui-line-soft:#e8e8ed;--ui-accent:#0066cc;--ui-accent-hover:#0077ed;
 }
 /* 01. App shell: 상단은 "제품 내비게이션", 본문은 "업무 캔버스"로 분리 */
-.block-container{padding-top:0!important;padding-bottom:56px!important}
-.app-top-safe-space{height:30px!important}
+.block-container{padding-top:5.5rem!important;padding-bottom:56px!important}
+.app-top-safe-space{height:18px!important}
 .app-topbar{min-height:58px!important;padding:0 0 10px!important;margin-bottom:26px!important;gap:18px!important;border-bottom:1px solid #e8e8ed!important}
 .app-identity{font-size:11px!important;color:#86868b!important;letter-spacing:-.01em!important}
 .app-identity strong{font-size:13px!important;color:#1d1d1f!important}
@@ -193,9 +237,53 @@ st.markdown(r"""
  .app-topbar [data-testid="stRadio"] [role="radio"]{padding:0 10px!important}
 }
 @media(max-width:900px){
- .block-container{padding-left:14px!important;padding-right:14px!important}
+ .block-container{padding-top:5rem!important;padding-left:14px!important;padding-right:14px!important}
  .work-page-head{display:block!important}
  .work-page-meta{display:inline-block;margin-top:10px}
+}
+
+/* ---------- 3-step quick actions beside ··· : rounded product-control style ---------- */
+[data-testid="st-key-top_quick_refresh"],
+[data-testid="st-key-top_quick_load"],
+[data-testid="st-key-top_quick_save"]{
+  margin:0!important;
+}
+[data-testid="st-key-top_quick_refresh"] button,
+[data-testid="st-key-top_quick_load"] button,
+[data-testid="st-key-top_quick_save"] button{
+  min-height:38px!important;
+  height:38px!important;
+  padding:5px 9px!important;
+  border-radius:11px!important;
+  border:1px solid #dedee3!important;
+  background:#fff!important;
+  color:#242426!important;
+  box-shadow:0 1px 2px rgba(0,0,0,.04), inset 0 1px 0 rgba(255,255,255,.65)!important;
+  font-size:11px!important;
+  font-weight:600!important;
+  letter-spacing:-.03em!important;
+  white-space:nowrap!important;
+}
+[data-testid="st-key-top_quick_refresh"] button:hover,
+[data-testid="st-key-top_quick_load"] button:hover{
+  background:#f6f6f8!important;
+  border-color:#cfcfd5!important;
+  transform:translateY(-1px);
+}
+[data-testid="st-key-top_quick_save"] button,
+[data-testid="st-key-top_quick_save"] button[kind="primary"]{
+  background:#1d1d1f!important;
+  border-color:#1d1d1f!important;
+  color:#fff!important;
+  box-shadow:0 2px 5px rgba(0,0,0,.12)!important;
+}
+[data-testid="st-key-top_quick_save"] button:hover{
+  background:#2d2d30!important;
+  border-color:#2d2d30!important;
+  transform:translateY(-1px);
+}
+@media(max-width:1100px){
+  .top-quick-step-hide{display:none!important}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -209,13 +297,83 @@ APP_VERSION = "5.0-Apple-ProductUX-Renewal"
 # - 외부 웹폰트 다운로드에 의존하지 않고, 사용자의 OS에 설치된 폰트를 우선 사용한다.
 # - 한국어 fallback을 충분히 제공하여 학교 PC에서도 깨지지 않게 한다.
 # ==========================================================================================
+GITHUB_FONT_BASE = "https://cdn.jsdelivr.net/gh/pse915/Timetable@main"
+GITHUB_FONT_RAW_BASE = "https://raw.githubusercontent.com/pse915/Timetable/main"
+GITHUB_FONT_FAMILY = "Pse Noto Sans KR"
+HAKYO_FONT_FAMILY = "Hakgyoansim Wooju R"
+
 UI_FONT_OPTIONS = {
     "시스템 기본 (Apple / Windows)": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif',
     "Pretendard": '"Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif',
     "Noto Sans KR": '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif',
+    "Noto Sans KR · GitHub (Light + Bold)": f'"{GITHUB_FONT_FAMILY}", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
+    "학교안심 우주체 · GitHub": f'"{HAKYO_FONT_FAMILY}", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif',
     "Inter": '"Inter", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif',
 }
 UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
+
+
+def render_font_runtime_css(selected_font: str):
+    """선택 폰트를 매 실행 전역에 적용한다.
+
+    GitHub TTF는 브라우저가 실제 파일을 사용하도록 @font-face로 등록한다.
+    jsDelivr을 우선 사용하고 GitHub raw URL을 fallback으로 둔다.
+    """
+    selected_font = selected_font if selected_font in UI_FONT_OPTIONS else UI_FONT_DEFAULT
+
+    if selected_font == "Noto Sans KR · GitHub (Light + Bold)":
+        light_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Light.ttf"
+        bold_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Bold.ttf"
+        light_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Light.ttf"
+        bold_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Bold.ttf"
+        st.markdown(
+            f"""
+<style id="github-noto-sans-kr-runtime-font">
+@font-face {{ font-family: '{GITHUB_FONT_FAMILY}'; font-style: normal; font-weight: 300; font-display: swap;
+  src: url('{light_url}') format('truetype'), url('{light_raw}') format('truetype'); }}
+@font-face {{ font-family: '{GITHUB_FONT_FAMILY}'; font-style: normal; font-weight: 700; font-display: swap;
+  src: url('{bold_url}') format('truetype'), url('{bold_raw}') format('truetype'); }}
+:root {{ --app-font: '{GITHUB_FONT_FAMILY}', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }}
+p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-baseweb="select"],[data-baseweb="input"] input,[data-baseweb="textarea"] textarea {{ font-family: var(--app-font) !important; }}
+[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] * {{ --gdg-font-family: var(--app-font) !important; font-family: var(--app-font) !important; }}
+table,thead,tbody,tfoot,tr,th,td,caption {{ font-family: var(--app-font) !important; }}
+</style>
+""",
+            unsafe_allow_html=True,
+        )
+        return
+
+    if selected_font == "학교안심 우주체 · GitHub":
+        hakyo_url = f"{GITHUB_FONT_BASE}/HakgyoansimWoojuR.ttf"
+        hakyo_raw = f"{GITHUB_FONT_RAW_BASE}/HakgyoansimWoojuR.ttf"
+        st.markdown(
+            f"""
+<style id="github-hakgyoansim-wooju-runtime-font">
+@font-face {{ font-family: '{HAKYO_FONT_FAMILY}'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('{hakyo_url}') format('truetype'), url('{hakyo_raw}') format('truetype'); }}
+:root {{ --app-font: '{HAKYO_FONT_FAMILY}', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif; }}
+p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-baseweb="select"],[data-baseweb="input"] input,[data-baseweb="textarea"] textarea {{ font-family: var(--app-font) !important; }}
+[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] * {{ --gdg-font-family: var(--app-font) !important; font-family: var(--app-font) !important; }}
+table,thead,tbody,tfoot,tr,th,td,caption {{ font-family: var(--app-font) !important; }}
+</style>
+""",
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown(
+        f"""<style id="runtime-app-font-global">
+:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}
+html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{{font-family:var(--app-font)!important}}
+body table,body table *,[data-testid="stDataFrame"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"],[data-testid="stDataEditor"] *{{font-family:var(--app-font)!important;--gdg-font-family:var(--app-font)!important}}
+[class*="material-symbols"],[data-testid="stIconMaterial"],[data-testid="stIconMaterial"] *{{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important}}
+</style>""",
+        unsafe_allow_html=True,
+    )
+
+
+# 저장된 선택값을 dialog가 닫혀 있어도 전체 화면에 적용
+render_font_runtime_css(st.session_state.get("ui_font", UI_FONT_DEFAULT))
 
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
@@ -280,6 +438,7 @@ SUBJECT_GROUP = {
 
 ROLE_MASTER = "마스터"
 ROLE_EDU = "교육과정부"
+ROLE_OFFICE = "교무계원"
 ROLE_TEACHER = "일반교사"
 ROLE_GUEST = "게스트"
 MASTER_ID = "pse915"
@@ -299,6 +458,11 @@ ALL_TABS = [
     "📑 회원별 탭 권한 관리"
 ]
 
+OFFICE_TABS = [
+    "교무호봉획정",
+]
+ALL_APP_TABS = ALL_TABS + OFFICE_TABS
+
 NAV_LABELS = {
     "시간표 조회": "시간표",
     "시간강사 관리": "시간강사",
@@ -311,15 +475,18 @@ NAV_LABELS = {
     "🛠️ 다중 출장·전체 조정 추천": "다중 조정",
     "🔑 아이디·권한 관리": "아이디",
     "📑 회원별 탭 권한 관리": "탭 권한",
+    "교무호봉획정": "호봉획정",
 }
 
 DEFAULT_TABS = {
-    ROLE_MASTER: ALL_TABS,
-    ROLE_EDU: ALL_TABS,
+    ROLE_MASTER: ALL_APP_TABS,
+    ROLE_EDU: ALL_APP_TABS,
+    ROLE_OFFICE: OFFICE_TABS,
     ROLE_TEACHER: [
         "시간표 조회", "시간강사 관리", "결강·보강",
         "시간표 맞교환 & 변경 추천", "통계",
-        "시간표 변경 테스트용", "변경된 교사 주간표", "📋 복무 관리 & 판단"
+        "시간표 변경 테스트용", "변경된 교사 주간표", "📋 복무 관리 & 판단",
+        "교무호봉획정"
     ],
     ROLE_GUEST: []
 }
@@ -836,20 +1003,58 @@ def df_to_worksheet(ws, df):
 # ==========================================================================================
 # 아이디 / 권한 / 예산 / 수업교체신청
 # ==========================================================================================
+def _empty_id_df():
+    return pd.DataFrame(columns=["아이디", "이름", "권한", "허용탭"])
+
+
+def _seed_master_id_df():
+    return pd.DataFrame([{
+        "아이디": MASTER_ID,
+        "이름": "관리자",
+        "권한": ROLE_MASTER,
+        "허용탭": ",".join(ALL_APP_TABS),
+    }])
+
+
 def load_id_sheet():
+    """아이디 시트를 읽되, Google Sheets 장애가 로그인 화면을 치명적으로 중단시키지 않게 한다.
+
+    - 워크시트를 열 수 없으면 빈 테이블을 반환하고 상세 원인을 session_state에 남긴다.
+    - 시트는 열리지만 비어 있으면 최초 1회 관리자 행 생성을 시도한다.
+    - 자동 생성 저장에 실패하더라도 앱 전체는 죽지 않고, 로그인 화면에서 원인을 보여준다.
+    """
     ws = get_worksheet(WORK_SHEET_ID, "아이디저장함")
+    if ws is None:
+        detail = st.session_state.get("_gsheet_last_error", "알 수 없는 Google Sheets 오류")
+        st.session_state["_id_sheet_error"] = (
+            "아이디저장함을 열 수 없습니다. Google Sheets 서비스 계정의 공유 권한과 "
+            f"시트 ID/네트워크를 확인하세요. ({detail})"
+        )
+        return _empty_id_df()
+
     df = df_from_worksheet(ws)
     if df.empty or "아이디" not in df.columns:
-        df = pd.DataFrame([{
-            "아이디": MASTER_ID, "이름": "관리자", "권한": ROLE_MASTER, "허용탭": ",".join(ALL_TABS)
-        }])
-        df_to_worksheet(ws, df)
+        seed = _seed_master_id_df()
+        try:
+            df_to_worksheet(ws, seed)
+            df = seed
+            st.session_state.pop("_id_sheet_error", None)
+        except Exception as exc:
+            st.session_state["_id_sheet_error"] = (
+                "아이디저장함은 열렸지만 초기 관리자 계정을 저장하지 못했습니다. "
+                f"Google Sheets 편집 권한을 확인하세요. ({exc})"
+            )
+            # 저장 실패 시에도 현재 실행에서만 seed를 사용하지 않는다.
+            # 저장되지 않은 권한 정보를 임시 로그인에 사용하면 보안/일관성 문제가 생길 수 있다.
+            return _empty_id_df()
+
     for c in ["아이디", "이름", "권한", "허용탭"]:
         if c not in df.columns:
             df[c] = ""
     df["권한"] = df["권한"].replace("", ROLE_TEACHER)
     df["이름"] = df["이름"].fillna("").astype(str)
     df["허용탭"] = df["허용탭"].fillna("").astype(str)
+    st.session_state.pop("_id_sheet_error", None)
     return df
 
 def save_id_sheet(df):
@@ -1827,6 +2032,17 @@ def cancel_substitute(cid, period):
 
 
 def do_swap(a, b, date_a, date_b, is_part_time_purpose=False, is_test=False):
+    # 1:1 맞교환은 실제 실행 단계에서도 동일 학급만 허용한다.
+    # UI/후보 검색을 우회해 다른 학급 데이터를 전달하더라도 교환되지 않도록 최종 방어선을 둔다.
+    class_a = str(a.get("학급", "")).strip()
+    class_b = str(b.get("학급", "")).strip()
+    if class_a and class_b and class_a != class_b:
+        if is_test:
+            st.error("1:1 맞교환 테스트는 동일 학급 수업끼리만 가능합니다.")
+        else:
+            st.warning("1:1 맞교환은 동일 학급 수업끼리만 가능합니다.")
+        return False
+
     ok, msg = validate_swap(a, b, date_a, date_b, is_test=is_test)
     if not ok:
         if not is_test: st.warning(msg)
@@ -2114,16 +2330,15 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
         if not b_lessons.empty:
             for _, b_row in b_lessons.iterrows():
                 if is_free(teacher_a, day_b, p_b, norm_b, e_b) and is_free(t_b, day_a, p_a, norm_a, e_a):
-                    other_class = b_row["학급"]
+                    other_class = str(b_row["학급"]).strip()
+                    # 다중 추천을 포함한 모든 1:1 맞교환은 동일 학급만 허용한다.
+                    same_class = (other_class == my_class)
+                    if not same_class:
+                        continue
                     other_grade = grade_of(other_class)
                     other_group = subject_group(b_row["과목"])
-                    score = 0
-                    same_class = (other_class == my_class)
                     same_grade = (other_grade == my_grade)
-                    if same_class:
-                        score += 200
-                    elif same_grade:
-                        score += 100
+                    score = 200
                     if other_group == my_group:
                         score += 40
                     if norm_b == norm_a:
@@ -2212,13 +2427,15 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                         continue
 
                     other_class = str(o["학급"]).strip()
+                    # 1:1 맞교환은 모든 화면에서 동일 학급만 후보로 허용한다.
+                    # 다른 학급/다른 학년 후보는 계산 단계에서부터 제외해 UI에 노출되지 않도록 한다.
+                    same_class = (other_class == my_class)
+                    if not same_class:
+                        continue
                     other_grade = grade_of(other_class)
-                    same_class  = (other_class == my_class)
                     same_grade  = (other_grade == my_grade)
 
-                    score = 0
-                    if same_class: score += 200
-                    elif same_grade: score += 100
+                    score = 200
                     if subject_group(str(o["과목"])) == my_group: score += 40
                     if td_str[:7] == d_str[:7]: score += 10
 
@@ -2261,7 +2478,7 @@ def get_single_lesson_1to1_candidates(
     원칙
     - 선택일 이후의 평일만 검색한다.
     - 검색 범위의 모든 교시를 검사한다.
-    - 동일 학급 후보를 우선하되 다른 학급도 누락하지 않는다.
+    - 1:1 맞교환은 **동일 학급 후보만** 허용한다. 다른 학급 후보는 계산 단계에서 제외한다.
     - A는 목표 슬롯이 공강이고 B는 A의 원본 슬롯이 공강이어야 한다.
     - 테스트 모드에서는 이미 테스트 변경에 사용된 슬롯을 재사용하지 않는다.
     - 반복적인 DataFrame 검색을 줄여 대규모 시간표에서도 빠르게 동작한다.
@@ -2423,19 +2640,18 @@ def get_single_lesson_1to1_candidates(
                     continue
                 seen.add(key)
 
+                # 모든 1:1 맞교환은 동일 학급만 허용한다.
                 same_class = other_class == source_class
+                if not same_class:
+                    continue
                 same_grade = grade_of(other_class) == source_grade
                 same_group = subject_group(other_subject) == source_group
-                reasons = []
-                if same_class:
-                    reasons.append("동일 학급")
-                elif same_grade:
-                    reasons.append("동일 학년")
+                reasons = ["동일 학급"]
                 reasons.extend(["내 공강", "상대 교사 공강"])
                 if same_group:
                     reasons.append("같은 과목군")
 
-                score = (300 if same_class else 120 if same_grade else 0) + (40 if same_group else 0)
+                score = 300 + (40 if same_group else 0)
                 if target_str == source_str:
                     score += 20 + max(0, 8 - abs(target_period - source_period))
 
@@ -3051,6 +3267,7 @@ def _weekly_action_dialog():
     # ----------------------------------------------------------------
     if action_mode == "swap":
         cache_key = (
+            "same-class-only-v2",
             str(lesson.get("교사명", "")), str(lesson.get("일자", "")), safe_int(lesson.get("교시", 0)),
             str(lesson.get("학급", "")), str(lesson.get("과목", "")), int(extra_days), int(ver), bool(use_test)
         )
@@ -3070,14 +3287,16 @@ def _weekly_action_dialog():
         # 캐시에 남은 후보도 표시 직전에 현재 Effective Schedule과 다시 대조한다.
         # 따라서 과거 날짜/과거 교사·과목 정보가 UI에 나타나지 않는다.
         df_swap = _filter_current_swap_candidates(df_swap, lesson, use_test=use_test)
+        # 과거 세션/캐시에 남아 있던 다른 학급 후보까지 최종 단계에서 차단한다.
+        if not df_swap.empty and "동일학급" in df_swap.columns:
+            df_swap = df_swap[df_swap["동일학급"].astype(str).str.strip() == "🏆"].copy()
 
         if df_swap.empty:
-            st.info("현재 조건에서 가능한 1:1 맞교환 위치가 없습니다.")
+            st.info("현재 같은 학급 조건에서 가능한 1:1 맞교환 위치가 없습니다.")
         else:
-            same_df = df_swap[df_swap["동일학급"].astype(str).str.strip() == "🏆"].copy()
-            other_df = df_swap[df_swap["동일학급"].astype(str).str.strip() != "🏆"].copy()
+            same_df = df_swap.copy()
             st.markdown(
-                f'<div class="swap-result-summary"><strong>{len(df_swap)}개</strong> 교환 가능 · <strong>{len(same_df)}개</strong> 동일 학급 · <strong>{len(other_df)}개</strong> 다른 학급</div>',
+                f'<div class="swap-result-summary"><strong>{len(same_df)}개</strong> 동일 학급 1:1 교환 가능</div>',
                 unsafe_allow_html=True,
             )
 
@@ -3113,9 +3332,8 @@ def _weekly_action_dialog():
                     },
                 )
 
-            # 검색 결과를 범주별로 분리해 비교 비용을 줄이고, 동일 학급 후보가 다른 학급에 묻히지 않게 한다.
-            _render_swap_group("동일 학급", same_df, "같은 학급의 다른 날짜·교시 수업과 교환 가능한 모든 후보입니다.")
-            _render_swap_group("다른 학급", other_df, "같은 학급 후보가 없거나 다른 학급도 허용할 때 선택할 수 있는 후보입니다.")
+            # 1:1 맞교환은 동일 학급만 표시한다. 다른 학급 그룹/안내 문구는 제공하지 않는다.
+            _render_swap_group("동일 학급", same_df, "같은 학급의 다른 날짜·교시 수업과 교환 가능한 후보입니다.")
             labels = [
                 f"{row['이동희망일']} ({row['이동요일']}) · {safe_int(row['이동희망교시'])}교시 · {row['상대교사']} · {row['상대학급']} {row['상대과목']}"
                 for _, row in df_swap.iterrows()
@@ -4241,6 +4459,921 @@ def to_excel_bytes(sheets: dict) -> bytes:
             (df if isinstance(df, pd.DataFrame) else pd.DataFrame(df)).to_excel(w, sheet_name=name[:31], index=False)
     return buf.getvalue()
 
+
+# ==========================================================================================
+# 교무행정 · 교무호봉획정
+# ------------------------------------------------------------------------------------------
+# Index.html + Code.gs의 기능을 Streamlit/Python 방식으로 재해석한다.
+# 계산 규칙의 핵심은 원본 JavaScript의 1년=360일, 1개월=30일이다.
+# Gemini API 키는 소스에 하드코딩하지 않고 Streamlit Secrets/환경변수에서 읽는다.
+# ==========================================================================================
+
+SALARY_BASE_OPTIONS = [
+    (9, "정교사(1급)"),
+    (9, "전문상담교사(1급)"),
+    (9, "사서교사(1급)"),
+    (9, "보건교사(1급)"),
+    (9, "영양교사(1급)"),
+    (9, "교장·원장·교감·원감·교육장·장학(연구)직"),
+    (8, "정교사(2급)"),
+    (8, "전문상담교사(2급)"),
+    (8, "사서교사(2급)"),
+    (8, "보건교사(2급)"),
+    (8, "영양교사(2급)"),
+    (5, "준교사"),
+    (5, "실기교사"),
+]
+
+SALARY_ACADEMIC_OPTIONS = [
+    (0, "4년제 일반대학 졸업", "학령: 16년 → 학령가감: +0년"),
+    (0, "교육대학·사범대학 졸업 (4년)", "학령: 16년 → 학령가감: +0년"),
+    (2, "6년제 대학 졸업 (의대 등)", "학령: 18년 → 학령가감: +2년"),
+]
+
+SALARY_DEGREE_TYPES = [
+    "동등 수준 추가 학사 학위 (2번째 대학교)",
+    "석사학위 취득 수학기간",
+    "박사학위 취득 수학기간",
+]
+
+SALARY_CAREER_TYPES = [
+    "국·공립학교 교원 (기간제 포함, 자격 일치)",
+    "사립학교 교원 (관할청 보고, 자격 일치)",
+    "기간제교원 자격-학교급 불일치 (예:중등→초등)",
+    "유·초·중등 강사 (전일제·종일제, 1일 8시간 ↑)",
+    "유·초·중등 시간제 강사 (주 12시간 ↓ 또는 시수 불명)",
+    "국가·지방공무원 (현역 군복무 포함)",
+    "등록 학원 강사 / 신고 교습소 교습자",
+    "회사 (상법상 합명·합자·주식·유한회사) 근무",
+]
+
+# 원본 Index.html / Code.gs의 경력별 환산율 기준을 그대로 반영한다.
+# UI에서는 이 값을 기본 환산율로 자동 적용하며, 계산 직전에는 사용자가 수정한
+# '환산율 (%)' 값을 그대로 사용한다. 즉, 원본 기준을 잃지 않으면서 필요 시
+# 개별 경력의 환산율을 수동 조정할 수 있다.
+SALARY_CAREER_RATE_BY_TYPE = {
+    "국·공립학교 교원 (기간제 포함, 자격 일치)": 100,
+    "사립학교 교원 (관할청 보고, 자격 일치)": 100,
+    "기간제교원 자격-학교급 불일치 (예:중등→초등)": 80,
+    "유·초·중등 강사 (전일제·종일제, 1일 8시간 ↑)": 100,
+    "유·초·중등 시간제 강사 (주 12시간 ↓ 또는 시수 불명)": 30,
+    "국가·지방공무원 (현역 군복무 포함)": 100,
+    "등록 학원 강사 / 신고 교습소 교습자": 50,
+    "회사 (상법상 합명·합자·주식·유한회사) 근무": 40,
+}
+
+SALARY_DEGREE_RATE_BY_TYPE = {
+    "동등 수준 추가 학사 학위 (2번째 대학교)": 80,
+    "석사학위 취득 수학기간": 100,
+    "박사학위 취득 수학기간": 100,
+}
+
+SALARY_GEMINI_PROMPT = """
+당신은 대한민국 교육공무원 및 기간제교원 호봉 획정 서류 분석 전문가입니다.
+첨부된 문서(경력증명서, 인사기록카드, 자격증 등)를 정확히 읽고, 아래 요청하는 형식의 JSON으로만 출력해 주세요.
+
+[출력 구조 예시]
+{
+  "name": "홍길동",
+  "baseSalary": 8,
+  "qualLabel": "정교사(2급)",
+  "academicValue": "0",
+  "isSabom": true,
+  "degrees": [
+    {
+      "type": "동등 수준 추가 학사 학위 (2번째 대학교)",
+      "detail": "OO대학교 국어교육과 (학사)",
+      "start": "2018-03-01",
+      "end": "2020-02-28",
+      "rate": 80
+    }
+  ],
+  "careers": [
+    {
+      "type": "국·공립학교 교원 (기간제 포함, 자격 일치)",
+      "detail": "OO고등학교 기간제교사",
+      "start": "2022-03-01",
+      "end": "2023-02-28",
+      "inc": true,
+      "rate": 100
+    }
+  ]
+}
+
+[경력 type 매칭 옵션]
+- "국·공립학교 교원 (기간제 포함, 자격 일치)" (100%)
+- "사립학교 교원 (관할청 보고, 자격 일치)" (100%)
+- "기간제교원 자격-학교급 불일치 (예:중등→초등)" (80%)
+- "유·초·중등 강사 (전일제·종일제, 1일 8시간 ↑)" (100%)
+- "유·초·중등 시간제 강사 (주 12시간 ↓ 또는 시수 불명)" (30%)
+- "국가·지방공무원 (현역 군복무 포함)" (100%)
+- "등록 학원 강사 / 신고 교습소 교습자" (50%)
+- "회사 (상법상 합명·합자·주식·유한회사) 근무" (40%)
+
+[주의사항]
+1. 날짜는 반드시 YYYY-MM-DD 형식이어야 합니다.
+2. 경력사항이 여러 개일 경우 모두 careers 배열에 넣어주세요.
+3. 마크다운 코드블록이나 기타 설명 없이 pure JSON 문자열만 반환해야 합니다.
+""".strip()
+
+
+def _salary_default_degree_df():
+    return pd.DataFrame(columns=["학위 구분", "학교/전공 세부명", "입학일", "졸업일", "환산율"])
+
+
+def _salary_default_career_df():
+    return pd.DataFrame(columns=["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"])
+
+
+def _salary_default_rate_for_career_type(career_type):
+    return SALARY_CAREER_RATE_BY_TYPE.get(str(career_type or "").strip(), 100)
+
+
+def _salary_default_rate_for_degree_type(degree_type):
+    return SALARY_DEGREE_RATE_BY_TYPE.get(str(degree_type or "").strip(), 80)
+
+
+def _salary_sync_rate_defaults(df, type_col, rate_col, rate_map, fallback_rate, previous_snapshot=None):
+    """경력/학위 종류가 바뀐 행에 원본 기준 환산율을 자동 반영한다.
+
+    사용자가 같은 종류의 환산율을 직접 수정한 경우에는 그대로 보존한다.
+    종류를 변경한 경우에는 새 종류의 기준 환산율을 다시 적용한다.
+    반환값은 (정규화된 df, 변경 여부)이다.
+    """
+    columns = list(df.columns)
+    out = df.copy().reset_index(drop=True)
+    previous_snapshot = previous_snapshot or []
+    changed = False
+
+    for i in range(len(out)):
+        current_type = str(out.at[i, type_col]).strip()
+        mapped_rate = rate_map.get(current_type, fallback_rate)
+        current_rate_raw = out.at[i, rate_col]
+        current_rate = safe_int(current_rate_raw, mapped_rate)
+
+        prev_type = ""
+        if i < len(previous_snapshot):
+            try:
+                prev_type = str(previous_snapshot[i][0] or "").strip()
+            except Exception:
+                prev_type = ""
+
+        # 새 행 또는 종류 변경 행은 기준 환산율을 자동 적용한다.
+        if current_type and (not prev_type or prev_type != current_type):
+            if current_rate != mapped_rate:
+                out.at[i, rate_col] = mapped_rate
+                changed = True
+        elif pd.isna(current_rate_raw) or str(current_rate_raw).strip() in ("", "nan", "None", "NaT"):
+            out.at[i, rate_col] = mapped_rate
+            changed = True
+        else:
+            # 매핑된 종류인데 0 등 비정상 값으로 들어온 신규 데이터는 기준값을 사용한다.
+            if current_rate < 0 or current_rate > 100:
+                out.at[i, rate_col] = mapped_rate
+                changed = True
+
+    return out[columns], changed
+
+
+def _salary_rate_snapshot(df, type_col, rate_col):
+    if df is None or df.empty:
+        return []
+    snapshot = []
+    for _, row in df.iterrows():
+        snapshot.append((str(row.get(type_col, "")).strip(), safe_int(row.get(rate_col), -1)))
+    return snapshot
+
+
+def _salary_init_state():
+    defaults = {
+        "salary_name": "",
+        "salary_calc_date": _today_kst(),
+        "salary_org": "",
+        "salary_position": "기간제교사",
+        "salary_writer_name": "",
+        "salary_writer_pos": "",
+        "salary_base_idx": 7,
+        "salary_academic_idx": 1,
+        "salary_is_sabom": True,
+        "salary_degrees": _salary_default_degree_df(),
+        "salary_careers": _salary_default_career_df(),
+        "salary_result": None,
+        "salary_ai_message": "",
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value.copy(deep=True) if isinstance(value, pd.DataFrame) else value
+
+    # 이전 세션에서 이미 만들어진 경력/학위 데이터가 있다면 한 번만 원본 기준
+    # 환산율로 마이그레이션한다. 이후 사용자가 수정한 값은 덮어쓰지 않는다.
+    if not st.session_state.get("_salary_rate_defaults_migrated", False):
+        degrees = _salary_normalize_table(
+            st.session_state.salary_degrees,
+            ["학위 구분", "학교/전공 세부명", "입학일", "졸업일", "환산율"],
+        )
+        for i in range(len(degrees)):
+            dtype = str(degrees.at[i, "학위 구분"] or "").strip()
+            if dtype:
+                degrees.at[i, "환산율"] = _salary_default_rate_for_degree_type(dtype)
+
+        careers = _salary_normalize_table(
+            st.session_state.salary_careers,
+            ["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"],
+        )
+        for i in range(len(careers)):
+            ctype = str(careers.at[i, "경력 종류"] or "").strip()
+            if ctype:
+                careers.at[i, "환산율 (%)"] = _salary_default_rate_for_career_type(ctype)
+
+        st.session_state.salary_degrees = degrees
+        st.session_state.salary_careers = careers
+        st.session_state["_salary_rate_defaults_migrated"] = True
+
+
+def _salary_safe_date(value):
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    s = str(value).strip()
+    if not s or s.lower() in {"nan", "none", "nat"}:
+        return None
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _salary_duration_days(start_value, end_value, include_end=True):
+    """Index.html의 calcDurationDays()를 Python으로 재현."""
+    start = _salary_safe_date(start_value)
+    end = _salary_safe_date(end_value)
+    if start is None or end is None:
+        return 0
+
+    if include_end:
+        end = end + timedelta(days=1)
+
+    y = end.year - start.year
+    m = end.month - start.month
+    d = end.day - start.day
+
+    if d < 0:
+        m -= 1
+        first_of_month = end.replace(day=1)
+        prev_month_last_day = first_of_month - timedelta(days=1)
+        d += prev_month_last_day.day
+
+    if m < 0:
+        y -= 1
+        m += 12
+
+    return (y * 360) + (m * 30) + d
+
+
+def _salary_ymd_from_360(days):
+    days = max(0, int(days))
+    return days // 360, (days % 360) // 30, days % 30
+
+
+def _salary_duration_text(days):
+    y, m, d = _salary_ymd_from_360(days)
+    return f"{y}년 {m}월 {d}일"
+
+
+def _salary_normalize_table(df, columns):
+    if df is None or not isinstance(df, pd.DataFrame):
+        return pd.DataFrame(columns=columns)
+    out = df.copy()
+    for c in columns:
+        if c not in out.columns:
+            out[c] = ""
+    return out[columns].reset_index(drop=True)
+
+
+def _salary_add_degree_row():
+    _salary_init_state()
+    df = _salary_normalize_table(
+        st.session_state.salary_degrees,
+        ["학위 구분", "학교/전공 세부명", "입학일", "졸업일", "환산율"],
+    )
+    degree_type = SALARY_DEGREE_TYPES[0]
+    df.loc[len(df)] = {
+        "학위 구분": degree_type,
+        "학교/전공 세부명": "",
+        "입학일": None,
+        "졸업일": None,
+        "환산율": _salary_default_rate_for_degree_type(degree_type),
+    }
+    st.session_state.salary_degrees = df
+
+
+def _salary_add_career_row():
+    _salary_init_state()
+    df = _salary_normalize_table(
+        st.session_state.salary_careers,
+        ["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"],
+    )
+    career_type = SALARY_CAREER_TYPES[0]
+    df.loc[len(df)] = {
+        "경력 종류": career_type,
+        "세부 근무처/직위": "",
+        "시작일": None,
+        "종료일": None,
+        "종료일 산입": True,
+        "환산율 (%)": _salary_default_rate_for_career_type(career_type),
+    }
+    st.session_state.salary_careers = df
+
+
+def _salary_clean_ai_json(raw_text):
+    value = (raw_text or "").strip()
+    if value.startswith("```"):
+        value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE)
+        value = re.sub(r"\s*```$", "", value)
+    return json.loads(value)
+
+
+def _salary_gemini_config():
+    api_key = ""
+    model = "gemini-2.5-flash"
+    try:
+        api_key = str(st.secrets.get("GEMINI_API_KEY", "") or "").strip()
+        model = str(st.secrets.get("GEMINI_MODEL", model) or model).strip()
+    except Exception:
+        pass
+    api_key = api_key or os.getenv("GEMINI_API_KEY", "").strip()
+    model = os.getenv("GEMINI_MODEL", model).strip() or model
+    return api_key, model
+
+
+def _salary_analyze_uploaded_file(uploaded_file):
+    api_key, model = _salary_gemini_config()
+    if not api_key:
+        raise RuntimeError(
+            "Gemini API 키가 없습니다. Streamlit Cloud Secrets에 GEMINI_API_KEY를 설정하거나 "
+            "환경변수로 등록해 주세요."
+        )
+
+    raw = uploaded_file.getvalue()
+    if not raw:
+        raise ValueError("업로드된 파일이 비어 있습니다.")
+
+    if len(raw) > 50 * 1024 * 1024:
+        raise ValueError("PDF/이미지 파일은 50MB 이하로 사용해 주세요.")
+
+    mime_type = getattr(uploaded_file, "type", None) or ""
+    if not mime_type:
+        suffix = Path(getattr(uploaded_file, "name", "")).suffix.lower()
+        mime_type = "application/pdf" if suffix == ".pdf" else "image/jpeg"
+
+    encoded = base64.b64encode(raw).decode("utf-8")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+    payload = {
+        "contents": [{
+            "parts": [
+                {"inlineData": {"mimeType": mime_type, "data": encoded}},
+                {"text": SALARY_GEMINI_PROMPT},
+            ]
+        }],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": 0.1,
+        },
+    }
+
+    response = requests.post(
+        url,
+        params={"key": api_key},
+        json=payload,
+        timeout=90,
+    )
+    if response.status_code >= 400:
+        try:
+            detail = response.json().get("error", {}).get("message", response.text)
+        except Exception:
+            detail = response.text
+        raise RuntimeError(f"Gemini API 오류 ({response.status_code}): {detail}")
+
+    try:
+        data = response.json()
+        ai_text = data["candidates"][0]["content"]["parts"][0]["text"]
+        return _salary_clean_ai_json(ai_text)
+    except Exception as exc:
+        raise RuntimeError(f"Gemini 응답을 JSON으로 해석하지 못했습니다: {exc}") from exc
+
+
+def _salary_apply_ai_result(data):
+    if not data:
+        raise ValueError("AI 분석 결과가 비어 있습니다.")
+
+    if data.get("name"):
+        st.session_state.salary_name = str(data["name"]).strip()
+
+    if data.get("baseSalary") is not None:
+        base = safe_int(data.get("baseSalary"), 0)
+        idx = next((i for i, (v, _) in enumerate(SALARY_BASE_OPTIONS) if v == base), None)
+        if idx is not None:
+            st.session_state.salary_base_idx = idx
+            qual = str(data.get("qualLabel") or SALARY_BASE_OPTIONS[idx][1]).strip()
+            exact_label = next(
+                (f"{v}호봉 · {label}" for v, label in SALARY_BASE_OPTIONS if v == base and label == qual),
+                f"{base}호봉 · {SALARY_BASE_OPTIONS[idx][1]}",
+            )
+            st.session_state["salary_base_radio"] = exact_label
+
+    if data.get("isSabom") is not None:
+        is_sabom = bool(data.get("isSabom"))
+        st.session_state.salary_is_sabom = is_sabom
+        st.session_state["salary_sabom_checkbox"] = is_sabom
+
+    degree_rows = []
+    for deg in data.get("degrees") or []:
+        degree_type = str(deg.get("type", SALARY_DEGREE_TYPES[0])).strip()
+        degree_rows.append({
+            "학위 구분": degree_type,
+            "학교/전공 세부명": str(deg.get("detail", "")),
+            "입학일": _salary_safe_date(deg.get("start")),
+            "졸업일": _salary_safe_date(deg.get("end")),
+            "환산율": _salary_default_rate_for_degree_type(degree_type),
+        })
+    st.session_state.salary_degrees = (
+        pd.DataFrame(degree_rows, columns=["학위 구분", "학교/전공 세부명", "입학일", "졸업일", "환산율"])
+        if degree_rows else _salary_default_degree_df()
+    )
+
+    career_rows = []
+    for car in data.get("careers") or []:
+        career_type = str(car.get("type", SALARY_CAREER_TYPES[0])).strip()
+        career_rows.append({
+            "경력 종류": career_type,
+            "세부 근무처/직위": str(car.get("detail", "")),
+            "시작일": _salary_safe_date(car.get("start")),
+            "종료일": _salary_safe_date(car.get("end")),
+            "종료일 산입": bool(car.get("inc", True)),
+            "환산율 (%)": _salary_default_rate_for_career_type(career_type),
+        })
+    if career_rows:
+        st.session_state.salary_careers = pd.DataFrame(
+            career_rows,
+            columns=["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"],
+        )
+    else:
+        default_career_type = SALARY_CAREER_TYPES[0]
+        st.session_state.salary_careers = pd.DataFrame([{
+            "경력 종류": default_career_type,
+            "세부 근무처/직위": "",
+            "시작일": None,
+            "종료일": None,
+            "종료일 산입": True,
+            "환산율 (%)": _salary_default_rate_for_career_type(default_career_type),
+        }])
+
+    st.session_state.salary_ai_message = (
+        "AI 분석이 완료되었습니다. 성명·기산호봉·사범계 여부·학위·경력 정보를 자동 반영했습니다."
+    )
+
+
+def _salary_calculate(
+    name, calc_date, org, position, writer_name, writer_pos,
+    base_value, qual_label, academic_value, academic_label, is_sabom,
+    degree_df, career_df
+):
+    total_converted_days = 0
+    details = []
+
+    degree_df = _salary_normalize_table(
+        degree_df,
+        ["학위 구분", "학교/전공 세부명", "입학일", "졸업일", "환산율"],
+    )
+    career_df = _salary_normalize_table(
+        career_df,
+        ["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"],
+    )
+
+    for _, row in degree_df.iterrows():
+        dtype = str(row.get("학위 구분", "")).strip()
+        detail = str(row.get("학교/전공 세부명", "")).strip()
+        start = row.get("입학일")
+        end = row.get("졸업일")
+        rate = max(0, safe_int(row.get("환산율"), 0))
+        raw_days = _salary_duration_days(start, end, True)
+        converted = math.floor(raw_days * (rate / 100.0))
+        total_converted_days += converted
+        cy, cm, cd = _salary_ymd_from_360(converted)
+        details.append({
+            "구분": f"[학위] {dtype} ({detail})",
+            "시작일": _salary_safe_date(start),
+            "종료일": _salary_safe_date(end),
+            "원기간": _salary_duration_text(raw_days),
+            "환산율": f"{rate}%",
+            "환산년": cy, "환산월": cm, "환산일": cd,
+            "종류": "학위",
+        })
+
+    for _, row in career_df.iterrows():
+        ctype = str(row.get("경력 종류", "")).strip()
+        detail = str(row.get("세부 근무처/직위", "")).strip()
+        start = row.get("시작일")
+        end = row.get("종료일")
+        inc = bool(row.get("종료일 산입", True))
+        rate = max(0, safe_int(row.get("환산율 (%)"), 0))
+        raw_days = _salary_duration_days(start, end, inc)
+        converted = math.floor(raw_days * (rate / 100.0))
+        total_converted_days += converted
+        cy, cm, cd = _salary_ymd_from_360(converted)
+        details.append({
+            "구분": f"{ctype} ({detail})",
+            "시작일": _salary_safe_date(start),
+            "종료일": _salary_safe_date(end),
+            "원기간": _salary_duration_text(raw_days),
+            "환산율": f"{rate}%",
+            "환산년": cy, "환산월": cm, "환산일": cd,
+            "종류": "경력",
+        })
+
+    total_y, total_m, total_d = _salary_ymd_from_360(total_converted_days)
+    add_years = 1 if is_sabom else 0
+    calculated_step = base_value + academic_value + add_years + total_y
+    final_step = max(1, min(40, calculated_step))
+
+    return {
+        "name": name,
+        "calc_date": calc_date,
+        "org": org,
+        "position": position,
+        "writer_name": writer_name,
+        "writer_pos": writer_pos,
+        "base_salary": base_value,
+        "qual_label": qual_label,
+        "academic_value": academic_value,
+        "academic_label": academic_label,
+        "add_years": add_years,
+        "is_sabom": bool(is_sabom),
+        "details": details,
+        "total_y": total_y, "total_m": total_m, "total_d": total_d,
+        "final_step": final_step,
+        "rem_m": total_m, "rem_d": total_d,
+    }
+
+
+def _salary_report_html(result):
+    def esc(value):
+        if value is None:
+            return ""
+        if isinstance(value, (date, datetime)):
+            return value.strftime("%Y-%m-%d")
+        return html_lib.escape(str(value))
+
+    rows = []
+    for item in result.get("details", []):
+        rows.append(
+            "<tr>"
+            f"<td class='left'>{esc(item['구분'])}</td>"
+            f"<td>{esc(item['시작일']) or '-'}</td>"
+            f"<td>{esc(item['종료일']) or '-'}</td>"
+            f"<td>{esc(item['원기간'])}</td>"
+            f"<td>{esc(item['환산율'])}</td>"
+            f"<td>{item['환산년']}</td><td>{item['환산월']}</td><td>{item['환산일']}</td>"
+            "</tr>"
+        )
+    if not rows:
+        rows.append("<tr><td colspan='8'>학위 및 경력 사항이 없습니다.</td></tr>")
+
+    calc_date = result.get("calc_date")
+    calc_date_text = calc_date.strftime("%Y년 %m월 %d일") if isinstance(calc_date, date) else esc(calc_date)
+
+    return f"""<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>호봉 획정 (재획정) 조서 - {esc(result.get('name'))}</title>
+<style>
+@page {{ size: A4 portrait; margin: 12mm; }}
+body {{ font-family: "Malgun Gothic","Noto Sans KR","Apple SD Gothic Neo",sans-serif; color:#111; font-size:11pt; line-height:1.45; }}
+h1 {{ text-align:center; font-size:19pt; text-decoration:underline; margin:0 0 18px; }}
+h2 {{ font-size:12pt; margin:18px 0 8px; }}
+table {{ width:100%; border-collapse:collapse; table-layout:fixed; }}
+th,td {{ border:1px solid #333; padding:6px 4px; text-align:center; vertical-align:middle; word-break:break-word; }}
+th {{ background:#f1f1f1; font-weight:700; }}
+td.left {{ text-align:left; }}
+.meta th {{ width:14%; }} .meta td {{ width:36%; }}
+.small {{ font-size:9.5pt; }}
+.signature {{ display:flex; justify-content:space-between; margin-top:30px; }}
+.no-print {{ margin-top:18px; text-align:center; }}
+@media print {{ .no-print {{ display:none; }} }}
+</style>
+</head>
+<body>
+<h1>호봉 획정 (재획정) 조서</h1>
+<table class="meta">
+<tr><th>소 속</th><td>{esc(result.get('org'))}</td><th>직 위</th><td>{esc(result.get('position'))}</td></tr>
+<tr><th>성 명</th><td>{esc(result.get('name'))}</td><th>교사 (자격)</th><td>{esc(result.get('qual_label'))}</td></tr>
+</table>
+
+<h2>■ 학위 수학기간 및 경력 내용 환산 상세</h2>
+<table class="small">
+<thead>
+<tr><th rowspan="2">구분 (학위/경력 내용)</th><th colspan="3">기간</th><th rowspan="2">환산율</th><th colspan="3">환산 경력</th></tr>
+<tr><th>시작일</th><th>종료일</th><th>원기간</th><th>년</th><th>월</th><th>일</th></tr>
+</thead>
+<tbody>{''.join(rows)}</tbody>
+<tfoot>
+<tr><th colspan="4" style="text-align:right">환산경력 합계 :</th><th colspan="4">{result['total_y']}년 {result['total_m']}월 {result['total_d']}일</th></tr>
+</tfoot>
+</table>
+
+<h2>■ 호봉 산정 결과</h2>
+<table>
+<tr><th>기산호봉</th><th>학령가감</th><th>가산연수</th><th>환산경력 (학위+경력)</th><th>최종 초임호봉</th><th>잔여 기간</th></tr>
+<tr>
+<td>{result['base_salary']}호봉</td>
+<td>{'+' if result['academic_value'] >= 0 else ''}{result['academic_value']}년</td>
+<td>+{result['add_years']}년</td>
+<td>{result['total_y']}년 {result['total_m']}월 {result['total_d']}일</td>
+<td><strong>{result['final_step']}호봉</strong></td>
+<td>{result['rem_m']}월 {result['rem_d']}일</td>
+</tr>
+</table>
+
+<div class="signature">
+<div><strong>위와 같이 호봉을 획정(재획정)함.</strong><br>일자: {calc_date_text}</div>
+<div style="text-align:right">작성자 직급: {esc(result.get('writer_pos'))}<br>작성자 성명: {esc(result.get('writer_name'))} (인)</div>
+</div>
+
+<div class="no-print"><button onclick="window.print()">📄 A4 인쇄 / PDF 저장</button></div>
+</body>
+</html>"""
+
+
+def render_salary_tab():
+    _salary_init_state()
+
+    st.markdown('<div class="sandbox-title">📋 교무호봉획정</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="apple-note"><strong>기간제교원 호봉(재)획정</strong> · '
+        '원본 HTML/Apps Script의 입력·계산 흐름을 Streamlit용으로 재해석했습니다. '
+        '계산 단위는 1년=360일, 1개월=30일입니다.</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.container(border=True):
+        st.markdown("### 🤖 AI 서류 자동 분석")
+        st.caption("경력증명서·인사기록카드·자격증 등의 PDF/이미지를 올리면 Gemini가 성명, 기산호봉, 사범계 여부, 추가 학위, 경력 정보를 분석합니다.")
+        ai_file = st.file_uploader(
+            "분석 파일",
+            type=["pdf", "png", "jpg", "jpeg", "webp"],
+            key="salary_ai_file",
+            label_visibility="collapsed",
+        )
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            st.caption("PDF/이미지는 50MB 이하로 사용하세요. AI 결과는 최종 계산 전에 반드시 직접 확인하세요.")
+        with c2:
+            if st.button("⚡ AI 자동 입력 실행", type="primary", width="stretch", key="salary_ai_run"):
+                if ai_file is None:
+                    st.error("분석할 PDF 또는 이미지 파일을 선택해 주세요.")
+                else:
+                    try:
+                        with st.spinner("Gemini AI가 서류 데이터를 분석하고 있습니다..."):
+                            data = _salary_analyze_uploaded_file(ai_file)
+                            _salary_apply_ai_result(data)
+                        st.success("AI 분석이 완료되어 입력 항목에 자동 반영되었습니다.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"AI 분석 실패: {exc}")
+        if st.session_state.get("salary_ai_message"):
+            st.info(st.session_state.salary_ai_message)
+
+    with st.container(border=True):
+        st.markdown("### 👤 기본 인적사항 및 조서 출력 정보")
+        r1, r2, r3, r4 = st.columns(4)
+        with r1:
+            st.session_state.salary_name = st.text_input("성명", value=st.session_state.salary_name, key="salary_name_input")
+        with r2:
+            st.session_state.salary_calc_date = st.date_input(
+                "임용(호봉획정)일",
+                value=_salary_safe_date(st.session_state.salary_calc_date) or _today_kst(),
+                key="salary_calc_date_input",
+            )
+        with r3:
+            st.session_state.salary_org = st.text_input("소속 기관", value=st.session_state.salary_org, key="salary_org_input")
+        with r4:
+            st.session_state.salary_position = st.text_input("직위/직급", value=st.session_state.salary_position, key="salary_position_input")
+        r5, r6 = st.columns(2)
+        with r5:
+            st.session_state.salary_writer_name = st.text_input("작성자 성명", value=st.session_state.salary_writer_name, key="salary_writer_name_input")
+        with r6:
+            st.session_state.salary_writer_pos = st.text_input("작성자 직급", value=st.session_state.salary_writer_pos, key="salary_writer_pos_input")
+
+    with st.container(border=True):
+        st.markdown("### 🎓 교원자격증 (기산호봉 결정)")
+        base_labels = [f"{value}호봉 · {label}" for value, label in SALARY_BASE_OPTIONS]
+        current = max(0, min(int(st.session_state.get("salary_base_idx", 7)), len(base_labels) - 1))
+        selected_base = st.radio("기산호봉", base_labels, index=current, key="salary_base_radio", label_visibility="collapsed")
+        st.session_state.salary_base_idx = base_labels.index(selected_base)
+        selected_base_value, selected_qual_label = SALARY_BASE_OPTIONS[st.session_state.salary_base_idx]
+        st.caption("원본 분류: 9호봉 기산 / 8호봉 기산 / 5호봉 기산 교원자격증")
+
+    with st.container(border=True):
+        st.markdown("### 📚 최초(기본) 학력 (학부 기준 · 학령 계산)")
+        academic_labels = [f"{label} · {desc}" for value, label, desc in SALARY_ACADEMIC_OPTIONS]
+        current = max(0, min(int(st.session_state.get("salary_academic_idx", 1)), len(academic_labels) - 1))
+        selected_acad = st.radio("최초 학력", academic_labels, index=current, key="salary_academic_radio", label_visibility="collapsed")
+        st.session_state.salary_academic_idx = academic_labels.index(selected_acad)
+        selected_acad_value, selected_acad_label, _ = SALARY_ACADEMIC_OPTIONS[st.session_state.salary_academic_idx]
+
+    with st.container(border=True):
+        head1, head2 = st.columns([4, 1])
+        with head1:
+            st.markdown("### 🎓 추가 학위 (복수 대학 졸업 · 석·박사 등)")
+            st.caption("동등 수준 추가 학위는 원본 HTML과 같이 환산율 기본값 80%를 사용합니다.")
+        with head2:
+            if st.button("+ 추가 학위 등록", key="salary_add_degree", width="stretch"):
+                _salary_add_degree_row()
+                st.rerun()
+
+        degrees = _salary_normalize_table(st.session_state.salary_degrees, ["학위 구분", "학교/전공 세부명", "입학일", "졸업일", "환산율"])
+        degree_epoch = int(st.session_state.get("salary_degree_editor_epoch", 0) or 0)
+        degree_snapshot = st.session_state.get("salary_degree_rate_snapshot", _salary_rate_snapshot(degrees, "학위 구분", "환산율"))
+        edited_degrees = st.data_editor(
+            degrees,
+            num_rows="dynamic",
+            width="stretch",
+            hide_index=True,
+            key=f"salary_degree_editor_{degree_epoch}",
+            column_config={
+                "학위 구분": st.column_config.SelectboxColumn("학위 구분", options=SALARY_DEGREE_TYPES, required=True),
+                "학교/전공 세부명": st.column_config.TextColumn("학교/전공 세부명"),
+                "입학일": st.column_config.DateColumn("입학일"),
+                "졸업일": st.column_config.DateColumn("졸업일"),
+                "환산율": st.column_config.NumberColumn("환산율", min_value=0, max_value=100, step=1),
+            },
+        )
+        synced_degrees, degree_rate_changed = _salary_sync_rate_defaults(
+            edited_degrees, "학위 구분", "환산율", SALARY_DEGREE_RATE_BY_TYPE, 80, degree_snapshot
+        )
+        st.session_state.salary_degrees = synced_degrees
+        if degree_rate_changed:
+            st.session_state.salary_degree_rate_snapshot = _salary_rate_snapshot(synced_degrees, "학위 구분", "환산율")
+            st.session_state.salary_degree_editor_epoch = degree_epoch + 1
+            st.rerun()
+        else:
+            st.session_state.salary_degree_rate_snapshot = _salary_rate_snapshot(synced_degrees, "학위 구분", "환산율")
+
+    with st.container(border=True):
+        st.markdown("### ➕ 가산연수 해당 여부")
+        st.session_state.salary_is_sabom = st.checkbox(
+            "사범계학교(대학에 설치된 교육학과 포함) 졸업자",
+            value=bool(st.session_state.salary_is_sabom),
+            key="salary_sabom_checkbox",
+            help="수학연한 2년 이상의 사범계 학교 졸업 시 +1년 적용",
+        )
+        if st.session_state.salary_is_sabom:
+            st.success("💡 사범계 가산연수 적용: +1년")
+        else:
+            st.info("💡 가산연수 미적용: +0년")
+
+    with st.container(border=True):
+        head1, head2 = st.columns([4, 1])
+        with head1:
+            st.markdown("### 📂 경력사항 입력")
+        with head2:
+            if st.button("+ 경력 추가", key="salary_add_career", width="stretch"):
+                _salary_add_career_row()
+                st.rerun()
+
+        careers = _salary_normalize_table(
+            st.session_state.salary_careers,
+            ["경력 종류", "세부 근무처/직위", "시작일", "종료일", "종료일 산입", "환산율 (%)"],
+        )
+        career_epoch = int(st.session_state.get("salary_career_editor_epoch", 0) or 0)
+        career_snapshot = st.session_state.get("salary_career_rate_snapshot", _salary_rate_snapshot(careers, "경력 종류", "환산율 (%)"))
+        edited_careers = st.data_editor(
+            careers,
+            num_rows="dynamic",
+            width="stretch",
+            hide_index=True,
+            key=f"salary_career_editor_{career_epoch}",
+            column_config={
+                "경력 종류": st.column_config.SelectboxColumn("경력 종류", options=SALARY_CAREER_TYPES, required=True),
+                "세부 근무처/직위": st.column_config.TextColumn("세부 근무처/직위"),
+                "시작일": st.column_config.DateColumn("시작일"),
+                "종료일": st.column_config.DateColumn("종료일"),
+                "종료일 산입": st.column_config.CheckboxColumn("종료일 산입", default=True),
+                "환산율 (%)": st.column_config.NumberColumn("환산율 (%)", min_value=0, max_value=100, step=1),
+            },
+        )
+        synced_careers, career_rate_changed = _salary_sync_rate_defaults(
+            edited_careers, "경력 종류", "환산율 (%)", SALARY_CAREER_RATE_BY_TYPE, 100, career_snapshot
+        )
+        st.session_state.salary_careers = synced_careers
+        if career_rate_changed:
+            st.session_state.salary_career_rate_snapshot = _salary_rate_snapshot(synced_careers, "경력 종류", "환산율 (%)")
+            st.session_state.salary_career_editor_epoch = career_epoch + 1
+            st.rerun()
+        else:
+            st.session_state.salary_career_rate_snapshot = _salary_rate_snapshot(synced_careers, "경력 종류", "환산율 (%)")
+
+        st.caption("원본 Index.html / Code.gs 기준 환산율: 국·공립 100% · 사립 100% · 자격 불일치 기간제 80% · 전일제 강사 100% · 시간제 강사 30% · 국가·지방공무원 100% · 학원/교습소 50% · 회사 40%")
+        st.caption("경력 종류를 변경하면 해당 기준 환산율이 자동 적용되며, 마지막 '환산율 (%)' 값은 필요 시 직접 조정할 수 있습니다.")
+        st.caption("※ 종료일 산입: 기간제 계약만료일·군 전역일 등 만료일을 포함하는 경력에만 체크하세요. 일반 퇴직일은 원칙적으로 제외합니다.")
+
+    ccalc1, ccalc2 = st.columns([4, 1])
+    with ccalc1:
+        st.caption("입력된 학위·경력 중 시작일과 종료일이 모두 있는 항목만 실제 환산일수가 계산됩니다.")
+    with ccalc2:
+        do_calculate = st.button("📊 호봉 계산 및 조서 생성", type="primary", width="stretch", key="salary_calculate")
+
+    if do_calculate:
+        try:
+            st.session_state.salary_result = _salary_calculate(
+                st.session_state.salary_name,
+                _salary_safe_date(st.session_state.salary_calc_date),
+                st.session_state.salary_org,
+                st.session_state.salary_position,
+                st.session_state.salary_writer_name,
+                st.session_state.salary_writer_pos,
+                selected_base_value,
+                selected_qual_label,
+                selected_acad_value,
+                selected_acad_label,
+                bool(st.session_state.salary_is_sabom),
+                st.session_state.salary_degrees,
+                st.session_state.salary_careers,
+            )
+        except Exception as exc:
+            st.error(f"호봉 계산 중 오류가 발생했습니다: {exc}")
+
+    result = st.session_state.get("salary_result")
+    if not result:
+        return
+
+    with st.container(border=True):
+        st.markdown("## 호봉 획정 (재획정) 조서")
+        meta1, meta2, meta3, meta4 = st.columns(4)
+        meta1.metric("소속", result["org"] or "-")
+        meta2.metric("직위", result["position"] or "-")
+        meta3.metric("성명", result["name"] or "-")
+        meta4.metric("교사(자격)", result["qual_label"] or "-")
+
+        st.markdown("#### ■ 학위 수학기간 및 경력 내용 환산 상세")
+        detail_rows = [{
+            "구분 (학위/경력 내용)": item["구분"],
+            "시작일": item["시작일"] or "-",
+            "종료일": item["종료일"] or "-",
+            "원기간": item["원기간"],
+            "환산율": item["환산율"],
+            "환산 경력(년)": item["환산년"],
+            "환산 경력(월)": item["환산월"],
+            "환산 경력(일)": item["환산일"],
+        } for item in result["details"]]
+        if detail_rows:
+            st.dataframe(pd.DataFrame(detail_rows), width="stretch", hide_index=True)
+        else:
+            st.info("학위 및 경력 사항이 없습니다.")
+
+        st.markdown("#### ■ 호봉 산정 결과")
+        st.dataframe(pd.DataFrame([{
+            "기산호봉": f"{result['base_salary']}호봉",
+            "학령가감": f"{'+' if result['academic_value'] >= 0 else ''}{result['academic_value']}년",
+            "가산연수": f"+{result['add_years']}년",
+            "환산경력 (학위+경력)": f"{result['total_y']}년 {result['total_m']}월 {result['total_d']}일",
+            "최종 초임호봉": f"{result['final_step']}호봉",
+            "잔여 기간": f"{result['rem_m']}월 {result['rem_d']}일",
+        }]), width="stretch", hide_index=True)
+
+        calc_date_text = (
+            result["calc_date"].strftime("%Y년 %m월 %d일")
+            if isinstance(result.get("calc_date"), date)
+            else str(result.get("calc_date", ""))
+        )
+        st.markdown(
+            f'<div class="work-note"><strong>위와 같이 호봉을 획정(재획정)함.</strong><br>'
+            f'일자: {html_lib.escape(calc_date_text)}'
+            f'<span style="float:right">작성자 직급: {html_lib.escape(str(result["writer_pos"]))} · '
+            f'작성자 성명: {html_lib.escape(str(result["writer_name"]))} (인)</span></div>',
+            unsafe_allow_html=True,
+        )
+
+        report_html = _salary_report_html(result)
+        file_date = result["calc_date"].strftime("%Y%m%d") if isinstance(result.get("calc_date"), date) else "일자미상"
+        st.download_button(
+            "📄 A4 인쇄용 HTML / PDF 저장",
+            data=report_html.encode("utf-8"),
+            file_name=f"호봉획정조서_{result.get('name') or '교원'}_{file_date}.html",
+            mime="text/html",
+            width="stretch",
+            key="salary_report_download",
+        )
+        st.caption("다운로드한 HTML을 브라우저에서 열어 인쇄 → PDF로 저장하면 A4 조서로 사용할 수 있습니다.")
+
+
 # ==========================================================================================
 # 로그인 페이지
 # ==========================================================================================
@@ -4281,8 +5414,14 @@ def show_login_page():
                 st.error("아이디를 입력해주세요.")
             else:
                 ids = load_id_sheet()
-                match = ids[ids["아이디"].astype(str).str.strip() == uid]
-                if not match.empty:
+                if ids.empty:
+                    detail = st.session_state.get("_id_sheet_error") or st.session_state.get("_gsheet_last_error", "")
+                    st.error("아이디 정보를 불러오지 못했습니다. Google Sheets 연결/권한을 확인해주세요.")
+                    if detail:
+                        st.caption(detail)
+                else:
+                    match = ids[ids["아이디"].astype(str).str.strip() == uid]
+                if not ids.empty and not match.empty:
                     st.session_state.login_attempts = 0
                     row = match.iloc[0]
                     role = str(row["권한"]).strip() or ROLE_TEACHER
@@ -4328,8 +5467,12 @@ def show_login_page():
             if not (name and email and desired):
                 st.error("이름, 이메일, 아이디는 필수입니다.")
             else:
-                save_id_request(name, email, desired, memo)
-                st.success("요청이 정상적으로 접수되었습니다.")
+                try:
+                    save_id_request(name, email, desired, memo)
+                    st.success("요청이 정상적으로 접수되었습니다.")
+                except Exception as exc:
+                    st.error("아이디 추가 요청을 저장하지 못했습니다. Google Sheets 연결/권한을 확인해주세요.")
+                    st.caption(str(exc))
 
 def _week_anchor(ref_date=None):
     ref = ref_date or _today_kst()
@@ -4356,10 +5499,30 @@ if not st.session_state.logged_in:
     show_login_page()
     st.stop()
 
-if not init_state():
+# 교무행정 화면은 시간표 Google Sheets에 의존하지 않도록 시간표 초기화를 지연한다.
+allowed_tabs_preview = get_user_allowed_tabs()
+visible_tabs_preview = [t for t in ALL_APP_TABS if t in allowed_tabs_preview]
+# 교무 대분류/호봉획정 메뉴는 로그인 사용자에게 항상 탐색 가능하게 표시한다.
+# 권한이 없는 사용자가 실제 화면을 열면 아래 본문에서 권한 안내를 표시한다.
+if current_role() != ROLE_GUEST and "교무호봉획정" not in visible_tabs_preview:
+    visible_tabs_preview.append("교무호봉획정")
+if can_manage_ids():
+    for t in ["🔑 아이디·권한 관리", "📑 회원별 탭 권한 관리", "🛠️ 다중 출장·전체 조정 추천"]:
+        if t not in visible_tabs_preview:
+            visible_tabs_preview.append(t)
+
+if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs_preview:
+    if "교무호봉획정" in visible_tabs_preview and current_role() == ROLE_OFFICE:
+        st.session_state.active_tab = "교무호봉획정"
+        st.session_state.app_category = "🏫 교무"
+    else:
+        st.session_state.active_tab = visible_tabs_preview[0] if visible_tabs_preview else None
+        st.session_state.app_category = "📚 수업" if st.session_state.active_tab in ALL_TABS else "🏫 교무"
+
+if st.session_state.get("active_tab") in ALL_TABS and not init_state():
     st.error("⚠️ 시간표 초기화에 실패했습니다.")
     st.warning(st.session_state.get("_load_error", "시간표 데이터를 불러오지 못했습니다."))
-    st.caption("무한 로딩으로 멈추지 않도록 앱 실행을 중단했습니다. 상단의 도구가 표시되지 않는 경우 Streamlit Cloud 로그에서 Google Sheets 오류를 확인하세요.")
+    st.caption("수업 업무 실행을 중단했습니다. 교무행정 업무는 시간표와 독립적으로 사용할 수 있습니다.")
     if st.button("🔄 시간표 다시 연결", type="primary", key="fatal_reload_timetable"):
         _clear_gsheet_runtime_cache()
         st.session_state.pop("_load_error", None)
@@ -4371,13 +5534,19 @@ if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_
 
 # 현재 선택된 폰트를 CSS 변수로 주입한다. 폰트 선택은 앱 전체에 즉시 적용된다.
 st.markdown(
-    f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}</style>""",
+    f"""<style id="dialog-font-state">
+:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}
+html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{{font-family:var(--app-font)!important}}
+body table,body table *,[data-testid="stDataFrame"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"],[data-testid="stDataEditor"] *{{font-family:var(--app-font)!important;--gdg-font-family:var(--app-font)!important}}
+[class*="material-symbols"],[data-testid="stIconMaterial"],[data-testid="stIconMaterial"] *{{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important}}
+</style>""",
     unsafe_allow_html=True,
 )
 
 # ==========================================================================================
 # 상단 가로 업무 Toolbar
 # ==========================================================================================
+st.markdown('<div class="streamlit-header-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
 @st.dialog("도구", width="small")
 def render_tools_dialog():
     """상단 도구 창.
@@ -4399,33 +5568,26 @@ def render_tools_dialog():
         help="이 브라우저에서 사용할 수 있는 글꼴을 우선 적용합니다. 학교 PC에 해당 글꼴이 설치되어 있지 않으면 다음 대체 글꼴이 사용됩니다.",
     )
     st.session_state.ui_font = selected_font
-    st.markdown(
-        f"""<style>:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}</style>""",
-        unsafe_allow_html=True,
-    )
-    st.caption("글꼴은 이 기기에 설치된 폰트를 우선 사용합니다.")
+    render_font_runtime_css(selected_font)
+    if selected_font == "Noto Sans KR · GitHub (Light + Bold)":
+        st.caption("GitHub의 NotoSansKR-Light.ttf(일반체)와 NotoSansKR-Bold.ttf(볼드체)를 사용합니다.")
+        st.markdown(
+            f"<div style=\"font-family:'{GITHUB_FONT_FAMILY}';font-weight:300;font-size:14px;line-height:1.7\">가나다라마바사 아자차카 · 일반체 <strong style=\"font-weight:700\">가나다라마바사 아자차카 · 볼드체</strong></div>",
+            unsafe_allow_html=True,
+        )
+    elif selected_font == "학교안심 우주체 · GitHub":
+        st.caption("GitHub의 HakgyoansimWoojuR.ttf를 사용합니다.")
+        st.markdown(
+            f"<div style=\"font-family:'{HAKYO_FONT_FAMILY}';font-size:16px;line-height:1.8\">학교안심 우주체 미리보기 · 가나다라마바사 아자차카 12345</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.caption("글꼴은 이 기기에 설치된 폰트를 우선 사용합니다.")
 
     st.divider()
 
     if can_full_data() or is_teacher():
-        if st.button("🔄 시간표 새로고침", width="stretch", key="top_reload_timetable"):
-            _clear_gsheet_runtime_cache()
-            ti, tt = load_timetable_from_gsheet()
-            st.session_state.teachers, st.session_state.timetable = ti, tt
-            _invalidate_all_caches()
-            st.rerun()
-        if st.button("🔄 작업내역 새로고침", width="stretch", key="top_reload_work"):
-            _clear_gsheet_runtime_cache()
-            absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
-            st.session_state.absences = ensure_input_user(absences)
-            st.session_state.subs = ensure_input_user(subs)
-            st.session_state.swaps = ensure_input_user(swaps)
-            st.session_state.part_time = ensure_part_time_columns(part_time)
-            st.session_state.duties = ensure_duty_columns(duties)
-            _invalidate_all_caches()
-            st.rerun()
-        if st.button("💾 현재 작업 저장", width="stretch", type="primary", key="top_save_work"):
-            save_work_data_to_gsheet()
+        st.caption("① 새로고침 → ② 불러오기 → ③ 현재 작업 저장")
         st.divider()
         a, b = st.columns(2)
         if a.button("↩ Undo", width="stretch", key="top_undo"):
@@ -4464,42 +5626,133 @@ def render_tools_dialog():
             st.download_button("엑셀 다운로드", xls, f"내역서_{rd}.xlsx", key="top_dl_report_xlsx")
 
 
+def _load_all_runtime_data_from_gsheet():
+    """Google Sheets의 시간표와 업무 데이터를 함께 불러와 현재 세션을 갱신한다."""
+    _clear_gsheet_runtime_cache()
+    ti, tt = load_timetable_from_gsheet()
+    absences, subs, swaps, part_time, cumulative, duties = load_work_data_from_gsheet()
+    st.session_state.teachers = ti
+    st.session_state.timetable = tt
+    st.session_state.absences = ensure_input_user(absences)
+    st.session_state.subs = ensure_input_user(subs)
+    st.session_state.swaps = ensure_input_user(swaps)
+    st.session_state.part_time = ensure_part_time_columns(part_time)
+    st.session_state.duties = ensure_duty_columns(duties)
+    _invalidate_all_caches()
+
+
 def render_top_toolbar(visible_tabs):
-    """업무 중심 상단 셸. Dialog와 충돌하지 않도록 일반 실행 컨텍스트에서 렌더링한다."""
-    core = [t for t in ["시간표 조회", "결강·보강", "시간표 맞교환 & 변경 추천", "변경된 교사 주간표"] if t in visible_tabs]
-    secondary = [t for t in visible_tabs if t not in core]
-    c_id, c_nav, c_more, c_tools, c_user = st.columns([1.25, 5.35, 1.05, .72, .72], vertical_alignment="center")
-    with c_id:
-        st.markdown(f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_role()}</div>', unsafe_allow_html=True)
-    with c_nav:
-        if "active_tab" not in st.session_state or st.session_state.active_tab not in visible_tabs:
-            st.session_state.active_tab = visible_tabs[0]
-        previous = st.session_state.active_tab
-        if core:
-            labels=[NAV_LABELS.get(t,t) for t in core]
-            mapping=dict(zip(labels,core))
-            selected = NAV_LABELS.get(previous,previous) if previous in core else labels[0]
-            active_label=st.radio("핵심 업무",labels,index=labels.index(selected),horizontal=True,key="top_core_nav",label_visibility="collapsed")
-            active=mapping.get(active_label,core[0])
+    """통합 앱 셸: 1차 카테고리(수업/교무행정) → 2차 업무 탭."""
+    # 대분류는 로그인 사용자에게 항상 보인다.
+    # 실제 세부 메뉴 접근권한은 기존 visible_tabs로 계속 제한한다.
+    category_map = {
+        "📚 수업": [t for t in ALL_TABS if t in visible_tabs],
+        "🏫 교무": OFFICE_TABS[:] if current_role() != ROLE_GUEST else [],
+    }
+    available_categories = [c for c, tabs in category_map.items() if tabs]
+    if not available_categories:
+        return
+
+    old_active = st.session_state.get("active_tab")
+    if "app_category" not in st.session_state or st.session_state.app_category not in available_categories:
+        if old_active in category_map.get("🏫 교무", []):
+            st.session_state.app_category = "🏫 교무"
         else:
-            active=previous
-        if active != previous:
-            _clear_weekly_selection(); st.session_state.pop("weekly_dialog_use_test",None); st.session_state.pop("weekly_dialog_title",None); st.session_state.pop("weekly_dialog_instance",None); st.rerun()
-    with c_more:
-        if secondary:
-            sec_labels=["더보기"]+[NAV_LABELS.get(t,t) for t in secondary]
-            sec_map=dict(zip(sec_labels[1:],secondary))
-            current_sec=NAV_LABELS.get(previous,previous) if previous in secondary else "더보기"
-            picked=st.selectbox("기타 업무",sec_labels,index=sec_labels.index(current_sec),key="top_secondary_nav",label_visibility="collapsed")
-            if picked != "더보기" and sec_map.get(picked) != previous:
-                st.session_state.active_tab=sec_map[picked]; _clear_weekly_selection(); st.rerun()
-    with c_tools:
-        if st.button("···",width="stretch",key="top_tools_open",help="화면·출력·기타 도구"):
+            st.session_state.app_category = available_categories[0]
+
+    top_id, top_nav, top_quick, top_tools, top_user = st.columns([1.35, 4.65, 3.05, 0.72, 0.72], vertical_alignment="center")
+    with top_id:
+        st.markdown(
+            f'<div class="app-identity"><strong>{current_name() or current_user()}</strong> · {current_role()}</div>',
+            unsafe_allow_html=True,
+        )
+    with top_nav:
+        # 대분류는 radio 대신 두 개의 명시적인 버튼으로 렌더링한다.
+        # Streamlit 상단 radio CSS/폭 제약으로 "교무"가 사라지는 현상을 방지한다.
+        category_cols = st.columns(2, gap="small")
+        for category, col in zip(available_categories, category_cols):
+            with col:
+                is_active = st.session_state.app_category == category
+                if st.button(
+                    category,
+                    key=f"app_category_btn_{category}",
+                    width="stretch",
+                    type="primary" if is_active else "secondary",
+                    help="현재 선택된 업무 영역" if is_active else f"{category} 업무로 이동",
+                ):
+                    if category != st.session_state.app_category:
+                        st.session_state.app_category = category
+                        sub_tabs = category_map.get(category, [])
+                        st.session_state.active_tab = sub_tabs[0] if sub_tabs else None
+                        _clear_weekly_selection()
+                        st.session_state.pop("weekly_dialog_use_test", None)
+                        st.session_state.pop("weekly_dialog_title", None)
+                        st.session_state.pop("weekly_dialog_instance", None)
+                        st.rerun()
+
+    with top_quick:
+        # LG 제품 UI의 라운드 카드/단계형 정보 구조를 참고한 3-step 빠른 작업
+        q1, q2, q3 = st.columns(3, gap="small")
+        with q1:
+            if st.button("① 새로고침", width="stretch", key="top_quick_refresh", help="앱 화면과 캐시를 새로고침합니다."):
+                _clear_gsheet_runtime_cache()
+                _invalidate_all_caches()
+                st.toast("화면을 새로고침했습니다.", icon="🔄")
+                st.rerun()
+        with q2:
+            if st.button("② 불러오기", width="stretch", key="top_quick_load", help="Google Sheets의 최신 시간표와 업무 데이터를 불러옵니다."):
+                try:
+                    with st.spinner("최신 데이터를 불러오는 중..."):
+                        _load_all_runtime_data_from_gsheet()
+                    st.toast("최신 데이터를 불러왔습니다.", icon="⬇️")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"데이터를 불러오지 못했습니다: {exc}")
+        with q3:
+            if st.button("③ 작업 저장", width="stretch", type="primary", key="top_quick_save", help="현재 작업을 Google Sheets에 저장합니다."):
+                try:
+                    ok = save_work_data_to_gsheet()
+                    if ok is not False:
+                        st.toast("현재 작업을 저장했습니다.", icon="✅")
+                except Exception as exc:
+                    st.error(f"현재 작업 저장 중 오류가 발생했습니다: {exc}")
+
+    with top_tools:
+        if st.button("···", width="stretch", key="top_tools_open", help="화면·출력·기타 도구"):
             render_tools_dialog()
-    with c_user:
-        if st.button("↪",width="stretch",key="top_logout",help="로그아웃"):
-            for k in list(st.session_state.keys()): del st.session_state[k]
+    with top_user:
+        if st.button("↪", width="stretch", key="top_logout", help="로그아웃"):
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
             st.rerun()
+
+    selected_category_tabs = category_map.get(st.session_state.app_category, [])
+    if not selected_category_tabs:
+        return
+
+    if "active_tab" not in st.session_state or st.session_state.active_tab not in selected_category_tabs:
+        st.session_state.active_tab = selected_category_tabs[0]
+
+    sub_labels = [NAV_LABELS.get(t, t) for t in selected_category_tabs]
+    sub_map = dict(zip(sub_labels, selected_category_tabs))
+    current_label = NAV_LABELS.get(st.session_state.active_tab, st.session_state.active_tab)
+
+    picked_sub = st.radio(
+        "세부 업무",
+        sub_labels,
+        index=sub_labels.index(current_label) if current_label in sub_labels else 0,
+        horizontal=True,
+        key=f"app_sub_nav_{st.session_state.app_category}",
+        label_visibility="collapsed",
+    )
+    picked_tab = sub_map.get(picked_sub, selected_category_tabs[0])
+    if picked_tab != st.session_state.active_tab:
+        st.session_state.active_tab = picked_tab
+        _clear_weekly_selection()
+        st.session_state.pop("weekly_dialog_use_test", None)
+        st.session_state.pop("weekly_dialog_title", None)
+        st.session_state.pop("weekly_dialog_instance", None)
+        st.rerun()
 
 if current_role() == ROLE_GUEST:
     st.title("게스트 모드")
@@ -4517,16 +5770,14 @@ if current_role() == ROLE_GUEST:
                 st.error("필수 항목을 입력해주세요.")
     st.stop()
 
-if st.session_state.timetable.empty:
-    st.error("시간표 데이터가 비어 있습니다. 무한 로딩 대신 오류 원인을 표시합니다.")
-    st.stop()
-
 # ==========================================================================================
 # 메인 화면
 # ==========================================================================================
 
 allowed_tabs = get_user_allowed_tabs()
-visible_tabs = [t for t in ALL_TABS if t in allowed_tabs]
+visible_tabs = [t for t in ALL_APP_TABS if t in allowed_tabs]
+if current_role() != ROLE_GUEST and "교무호봉획정" not in visible_tabs:
+    visible_tabs.append("교무호봉획정")
 
 if can_manage_ids():
     for t in ["🔑 아이디·권한 관리", "📑 회원별 탭 권한 관리", "🛠️ 다중 출장·전체 조정 추천"]:
@@ -4538,8 +5789,7 @@ if not visible_tabs:
     st.stop()
 
 # 한 번에 하나의 업무 화면만 렌더링해 비활성 화면의 계산을 막는다.
-# 메뉴/사용자 정보는 상단 가로 toolbar로 통합한다.
-st.markdown('<div class="app-top-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
+# 상단 대분류 → 하위 업무 탭 구조를 사용한다.
 render_top_toolbar(visible_tabs)
 active_tab = st.session_state.active_tab
 tab_map = {active_tab: st.container()}
@@ -4556,6 +5806,7 @@ PAGE_DESCRIPTIONS = {
     "🛠️ 다중 출장·전체 조정 추천": "여러 교사의 부재 상황을 함께 조정합니다.",
     "🔑 아이디·권한 관리": "사용자 계정과 역할을 관리합니다.",
     "📑 회원별 탭 권한 관리": "사용자별 업무 메뉴 접근 권한을 관리합니다.",
+    "교무호봉획정": "기간제교원 호봉(재)획정과 조서 출력을 처리합니다.",
 }
 st.markdown(
     f'<div class="work-page-head"><div>'
@@ -4909,20 +6160,107 @@ if "시간표 변경 테스트용" in tab_map:
 # ------------------------------------------------------------------ 변경된 교사 주간표
 if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
-        ref = calendar_picker("기준 날짜", _today_kst(), key="chg_ref")
-        changed = get_changed_teachers_for_week(ref)
-        if not changed:
-            st.markdown('<div class="work-note"><strong>변경된 교사가 없습니다.</strong> 선택한 주간에는 현재 시간표 변경 이력이 없습니다.</div>', unsafe_allow_html=True)
+        st.markdown("### 변경된 교사 주간표")
+        st.caption("원본 교사별 주간표 형식을 기준으로 전체 교사를 한 번에 표시합니다. 변경 이력이 있는 교사는 이름과 상태에 표시됩니다.")
+
+        ref = calendar_picker("주간 기준일", _today_kst(), key="chg_ref")
+        changed = set(str(x).strip() for x in get_changed_teachers_for_week(ref) if str(x).strip())
+
+        # 원본 시간표의 교사 목록을 기준으로 정렬하고, 시간표에만 존재하는 교사도 보완한다.
+        teacher_names = []
+        teachers_df = st.session_state.get("teachers", pd.DataFrame())
+        if isinstance(teachers_df, pd.DataFrame) and not teachers_df.empty and "교사명" in teachers_df.columns:
+            teacher_names.extend(teachers_df["교사명"].dropna().astype(str).str.strip().tolist())
+        timetable_df = st.session_state.get("timetable", pd.DataFrame())
+        if isinstance(timetable_df, pd.DataFrame) and not timetable_df.empty and "교사명" in timetable_df.columns:
+            teacher_names.extend(timetable_df["교사명"].dropna().astype(str).str.strip().tolist())
+        all_teachers = sorted({x for x in teacher_names if x})
+
+        # 변경 교사는 먼저 표시하고, 나머지는 가나다순으로 표시한다.
+        all_teachers = sorted(all_teachers, key=lambda x: (x not in changed, x))
+
+        st.markdown(
+            f'<div class="work-note"><strong>전체 {len(all_teachers)}명</strong> · '
+            f'이번 주 변경 이력 {len(changed)}명 · 🔄 변경 교사 우선 표시 · 조회 전용</div>',
+            unsafe_allow_html=True,
+        )
+
+        if not all_teachers:
+            st.info("교사 목록이 없습니다. 시간표/교사 시트의 교사명 데이터를 확인해 주세요.")
         else:
-            st.markdown(f'<div class="work-section-title">이번 주 변경 교사 <span style="color:var(--ui-muted);font-weight:400">{len(changed)}명</span></div>', unsafe_allow_html=True)
-            selected_changed = st.selectbox("교사", changed, key="changed_teacher_selected", label_visibility="collapsed")
-            teacher_grid, _ = get_teacher_week_view(str(selected_changed), ref, use_test=False)
-            if teacher_grid.empty:
-                st.info("선택한 교사의 주간 시간표를 표시할 데이터가 없습니다.")
-            else:
-                st.markdown(f'<div class="matrix-toolbar"><div><div class="matrix-title">{selected_changed} · 변경된 주간 시간표</div><div class="matrix-subtitle">조회 전용 · 셀을 눌러도 작업 창이 열리지 않습니다.</div></div></div>', unsafe_allow_html=True)
-                st.markdown('<div class="matrix-legend"><span>↻ 교환</span><span>+ 보강</span><span>• 시간강사</span></div>', unsafe_allow_html=True)
-                render_standard_weekly_matrix(teacher_grid, ref, row_label="교시", key="changed_teacher_week_single", title=None, use_test=False, height=310, open_dialog=False)
+            ver = st.session_state.get("_data_version", 0)
+            monday = ref - timedelta(days=ref.weekday())
+            week_dates = [monday + timedelta(days=i) for i in range(5)]
+
+            # get_teacher_week_view와 동일한 셀 규칙을 사용하되, Google Sheets/캐시 조회는
+            # 날짜별 5회로 묶어 전체 교사를 한 화면에 표시할 때 불필요한 반복 호출을 줄인다.
+            daily_indexes = {}
+            for d in week_dates:
+                ds = d.strftime("%Y-%m-%d")
+                e = get_effective_timetable_for_date(ds, ver, use_test=False)
+                if isinstance(e, pd.DataFrame) and not e.empty:
+                    daily_indexes[ds] = {(str(r.교사명).strip(), safe_int(r.교시)): r for r in e.itertuples(index=False)}
+                else:
+                    daily_indexes[ds] = {}
+
+            abs_df = st.session_state.get("absences", pd.DataFrame())
+            abs_lookup = set()
+            if isinstance(abs_df, pd.DataFrame) and not abs_df.empty and {"일자", "교사명", "교시"}.issubset(abs_df.columns):
+                for _, ar in abs_df.iterrows():
+                    abs_lookup.add((str(ar.get("일자", "")).strip(), str(ar.get("교사명", "")).strip(), safe_int(ar.get("교시"))))
+
+            for idx, teacher in enumerate(all_teachers, 1):
+                is_changed = teacher in changed
+                subject = get_teacher_subject(teacher)
+                badge = "<span class='changed-teacher-badge'>🔄 변경 있음</span>" if is_changed else ""
+
+                st.markdown(
+                    f'<div class="changed-teacher-block">'
+                    f'<div class="changed-teacher-head">'
+                    f'<div><span class="changed-teacher-index">{idx:02d}</span>'
+                    f'<span class="changed-teacher-name">{teacher}</span>{badge}'
+                    f'<span class="changed-teacher-subject">{(" · " + subject) if subject else ""}</span></div>'
+                    f'<div class="changed-teacher-status">주간 조회 전용</div>'
+                    f'</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+                rows = []
+                for period in range(1, MAX_PERIOD + 1):
+                    row = {"교사명": teacher, "교시": period}
+                    for day_idx, d in enumerate(week_dates):
+                        ds = d.strftime("%Y-%m-%d")
+                        r = daily_indexes[ds].get((teacher, period))
+                        cell = ""
+                        if r is not None:
+                            class_name = str(getattr(r, "학급", "") or "").strip()
+                            subj = str(getattr(r, "과목", "") or "").strip()
+                            cell = f"{class_name} {subj}".strip()
+                            typ = str(getattr(r, "변경유형", "원본") or "원본").strip()
+                            src = str(getattr(r, "변경출처", "") or "").strip()
+                            if typ == "교환":
+                                cell += f" 🔄 {src or '교환'}"
+                            elif typ == "테스트교환":
+                                cell += f" 🧪 {src or '테스트교환'}"
+                            elif typ == "보강":
+                                cell += f" 🟢 {src or '보강'}"
+                            elif typ == "시간강사":
+                                original = str(getattr(r, "원본교사", "") or "").strip()
+                                cell += f" 🟡 {original}→시간강사" if original else " 🟡 시간강사"
+                            if (ds, teacher, period) in abs_lookup:
+                                cell = f"[결강] {cell}"
+                        row[DAYS[day_idx]] = cell
+                    rows.append(row)
+
+                teacher_grid = pd.DataFrame(rows, columns=["교사명", "교시"] + DAYS)
+                render_standard_weekly_matrix(
+                    teacher_grid, ref, row_label="교시", key=f"changed_teacher_week_{idx}",
+                    title=None, use_test=False, height=335, open_dialog=False
+                )
+
+                if idx < len(all_teachers):
+                    st.markdown('<div class="changed-teacher-divider"></div>', unsafe_allow_html=True)
+
 # ------------------------------------------------------------------ 복무 관리 & 판단
 if "📋 복무 관리 & 판단" in tab_map:
     with tab_map["📋 복무 관리 & 판단"]:
@@ -5061,13 +6399,14 @@ if "📋 복무 관리 & 판단" in tab_map:
                                 others = e_tt[(e_tt["교시"] == p) & (e_tt["교사명"] != t_name)] if not e_tt.empty else pd.DataFrame()
                                 for o in others.itertuples():
                                     if is_free(t_name, tday, p, tds, e_tt) and is_free(o.교사명, day_kr, p, d_str, e_today):
-                                        other_class = o.학급
+                                        other_class = str(o.학급).strip()
+                                        # 구형/고급 검색 화면도 동일 학급만 1:1 후보로 허용한다.
+                                        if other_class != str(my_class).strip():
+                                            continue
                                         other_grade = grade_of(other_class)
-                                        same_class = (other_class == my_class)
+                                        same_class = True
                                         same_grade = (other_grade == my_grade)
-                                        score = 0
-                                        if same_class: score += 200
-                                        elif same_grade: score += 100
+                                        score = 200
                                         if subject_group(o.과목) == my_group: score += 40
                                         if tds == d_str: score += 15
                                         candidates_1to1.append({
@@ -5102,7 +6441,7 @@ if "📋 복무 관리 & 판단" in tab_map:
                                 st.info("조건에 맞는 1:1 대상 없음")
                             else:
                                 for i, c in enumerate(data["one_to_one"]):
-                                    mark = "🏆 동일학급" if c["same_class"] else ("⚠ 같은학년" if c["same_grade"] else "⚠ 다른학년")
+                                    mark = "🏆 동일학급"
                                     st.write(f"{mark} | {c['date']} ({c['day']}) {c['period']}교시 - **{c['teacher']}** ({c['lesson']})")
                                     if st.button("이 수업과 1:1 맞교환 실행", key=f"o2o_{p}_{i}"):
                                         a_info = {"교사명": t_name, "일자": d_str, "요일": day_kr, "교시": p,
@@ -5273,7 +6612,7 @@ if "🔑 아이디·권한 관리" in tab_map:
                 "이름": st.column_config.TextColumn("등록 이름", required=True),
                 "권한": st.column_config.SelectboxColumn(
                     "권한",
-                    options=[ROLE_MASTER, ROLE_EDU, ROLE_TEACHER],
+                    options=[ROLE_MASTER, ROLE_EDU, ROLE_OFFICE, ROLE_TEACHER],
                     required=True
                 ),
                 "허용탭": st.column_config.TextColumn("허용탭 (쉼표로 구분, 비워두면 기본값)")
@@ -5306,6 +6645,7 @@ if "🔑 아이디·권한 관리" in tab_map:
         |------|------|
         | **마스터** | 모든 권한 + 아이디 관리/삭제/양도 + 마스터 양도 + 전체 데이터 관리 |
         | **교육과정부** | 아이디 저장/삭제 + 전체 탭/데이터 관리 |
+        | **교무계원** | 교무행정 중심 업무 및 교무호봉획정 |
         | **일반교사** | 본인이 입력한 데이터만 조회·저장·삭제 + 본인 이름으로만 복무 등록 |
         | **게스트** | 아이디 추가요청만 가능 |
         """)
@@ -5339,7 +6679,7 @@ if "📑 회원별 탭 권한 관리" in tab_map:
             st.markdown("#### 허용할 탭 선택")
             new_allowed = []
             cols = st.columns(2)
-            for idx, tab_name in enumerate(ALL_TABS):
+            for idx, tab_name in enumerate(ALL_APP_TABS):
                 disabled = False
                 if tab_name in ("🔑 아이디·권한 관리", "📑 회원별 탭 권한 관리", "🛠️ 다중 출장·전체 조정 추천") and not can_manage_ids():
                     disabled = True
@@ -5374,7 +6714,7 @@ if "📑 회원별 탭 권한 관리" in tab_map:
                     st.rerun()
             with c2:
                 if st.button("모든 탭 허용"):
-                    ids_df.loc[ids_df["아이디"] == selected_user, "허용탭"] = ",".join(ALL_TABS)
+                    ids_df.loc[ids_df["아이디"] == selected_user, "허용탭"] = ",".join(ALL_APP_TABS)
                     save_id_sheet(ids_df)
                     st.success("모든 탭 허용됨")
                     st.rerun()
@@ -5384,6 +6724,13 @@ if "📑 회원별 탭 권한 관리" in tab_map:
                     save_id_sheet(ids_df)
                     st.success("모든 탭 차단됨")
                     st.rerun()
+
+# ------------------------------------------------------------------ 교무행정 · 교무호봉획정
+if "교무호봉획정" in tab_map:
+    with tab_map["교무호봉획정"]:
+        # 통합 업무앱에서는 로그인한 교직원이 바로 사용할 수 있도록 교무호봉획정을
+        # 대분류/세부 메뉴에 항상 노출하고 실제 계산 화면도 열어 준다.
+        render_salary_tab()
 
 # ------------------------------------------------------------------ 주간표 공통 팝업
 # 주간표 셀을 새로 선택한 순간 render_weekly_matrix() 안에서만 native dialog를 연다.
