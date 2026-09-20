@@ -320,11 +320,14 @@ def apply_neis_non_instructional_display(matrix: pd.DataFrame, ref_date: date, r
         label = labels.get(ds)
         if not label:
             continue
-        text = f"📅 {label}"
+        # NEIS에서 등교하지 않는 날로 확인되면 그 날은 "수업 없음"으로 처리합니다.
+        # 주간표 상단에는 학사일정 명칭을 표시하지만, 개별 교시 셀에는
+        # 기존 수업이나 대체 텍스트를 남기지 않아 실제 수업이 있는 것처럼
+        # 보이지 않도록 합니다.
         for p in range(1, PERIODS_PER_DAY.get(day, MAX_PERIOD) + 1):
             col = f"{day}{p}"
             if col in out.columns:
-                out[col] = text
+                out[col] = ""
     return out
 _GSHEET_NETWORK_SEMAPHORE = threading.BoundedSemaphore(2)
 def _today_kst() -> date:
@@ -5471,10 +5474,24 @@ PAGE_DESCRIPTIONS = {
 # NEIS API 키는 Streamlit Secrets에서만 읽습니다.
 # 홈페이지에는 API 키 입력창을 노출하지 않습니다.
 _neis_configured_key = _neis_secret_key()
+_previous_neis_runtime_key = str(st.session_state.get("_neis_runtime_key", "") or "")
 if _neis_configured_key:
     st.session_state.neis_api_key = _neis_configured_key
+    # NEIS Secrets가 처음 주입되거나 변경된 경우,
+    # API 키가 없던 시점에 캐시된 "원본 시간표"를 즉시 폐기합니다.
+    if _previous_neis_runtime_key != _neis_configured_key:
+        try:
+            get_effective_timetable_for_date.clear()
+            effective_teacher_matrix.clear()
+            class_matrix.clear()
+            get_neis_schedule_for_range.clear()
+            get_neis_non_instructional_days.clear()
+        except Exception:
+            pass
+    st.session_state["_neis_runtime_key"] = _neis_configured_key
 else:
     st.session_state.pop("neis_api_key", None)
+    st.session_state["_neis_runtime_key"] = ""
 
 st.markdown(
     f'<div class="work-page-head"><div>'
