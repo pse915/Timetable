@@ -109,6 +109,209 @@ WEEKDAY_KR = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "�
 SCHOOL_WEEKDAYS = (0, 1, 2, 3, 4)
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 KST = ZoneInfo("Asia/Seoul")
+
+# ─────────────────────────────────────────────────────────────
+# NEIS 학사일정 연동
+# - 사용자는 NEIS Open API 인증키만 입력하면 됩니다.
+# - 학교명으로 NEIS 학교기본정보를 자동 검색하여 교육청/학교코드를 찾습니다.
+# - 학사일정은 SchoolSchedule API의 AA_YMD/EVENT_NM/SBTR_DD_SC_NM을 기준으로
+#   수업이 없는 날을 판정합니다. (NEIS 공식 명세의 입력/출력 필드와 일치)
+# ─────────────────────────────────────────────────────────────
+NEIS_API_BASE = "https://open.neis.go.kr/hub"
+NEIS_SCHOOL_INFO_ENDPOINT = f"{NEIS_API_BASE}/schoolInfo"
+NEIS_SCHEDULE_ENDPOINT = f"{NEIS_API_BASE}/SchoolSchedule"
+NEIS_EDU_OFFICE_CODES = (
+    "B10", "C10", "D10", "E10", "F10", "G10", "H10", "I10", "J10",
+    "K10", "M10", "N10", "P10", "Q10", "R10", "S10", "T10",
+)
+NEIS_NON_INSTRUCTIONAL_TYPES = (
+    "공휴일", "휴업일", "휴일", "방학", "재량휴업일", "개교기념일", "대체공휴일",
+    "토요휴업일", "일요일", "토요일", "선거일", "임시공휴일", "근로자의날",
+)
+NEIS_SCHEDULE_CACHE_TTL = 900
+NEIS_SCHOOL_CACHE_TTL = 86400
+
+def _neis_secret_key() -> str:
+    for key_name in ("NEIS_API_KEY", "NEIS_KEY", "neis_api_key"):
+        try:
+            value = str(st.secrets.get(key_name, "") or "").strip()
+        except Exception:
+            value = ""
+        if value:
+            return value
+    return str(os.getenv("NEIS_API_KEY", "") or "").strip()
+
+def _neis_api_get(endpoint: str, params: dict, timeout: int = 12):
+    response = requests.get(endpoint, params=params, timeout=timeout)
+    response.raise_for_status()
+    data = response.json()
+    # NEIS는 정상 데이터가 없을 때도 SchoolSchedule 키 대신 ERROR를 줄 수 있습니다.
+    if isinstance(data, dict) and "RESULT" in data:
+        result = data.get("RESULT") or {}
+        code = str(result.get("CODE", "")).strip()
+        if code and code != "INFO-000":
+            raise RuntimeError(f"NEIS API {code}: {result.get('MESSAGE', '')}")
+    return data
+
+def _neis_rows(data, root_key: str):
+    if not isinstance(data, dict):
+        return []
+    blocks = data.get(root_key, [])
+    if not isinstance(blocks, list):
+        return []
+    for block in blocks:
+        if isinstance(block, dict) and isinstance(block.get("row"), list):
+            return block["row"]
+    return []
+
+def _normalize_school_name_for_neis(name: str) -> str:
+    return re.sub(r"\s+", "", str(name or "").strip())
+
+@st.cache_data(show_spinner=False, ttl=NEIS_SCHOOL_CACHE_TTL)
+def neis_find_school(api_key: str, school_name: str):
+    api_key = str(api_key or "").strip()
+    target = _normalize_school_name_for_neis(school_name)
+    if not api_key or not target:
+        return None
+    # 학교기본정보 API는 학교명을 검색할 수 있고, 반환값에 교육청/표준학교코드가 포함됩니다.
+    # 교육청 코드가 없는 경우를 대비해 17개 시도교육청을 순차 검색합니다.
+    exact = []
+    for office_code in NEIS_EDU_OFFICE_CODES:
+        try:
+            data = _neis_api_get(NEIS_SCHOOL_INFO_ENDPOINT, {
+                "KEY": api_key, "Type": "json", "pIndex": 1, "pSize": 100,
+                "ATPT_OFCDC_SC_CODE": office_code, "SCHUL_NM": school_name,
+            })
+            rows = _neis_rows(data, "schoolInfo")
+            for row in rows:
+                nm = str(row.get("SCHUL_NM", "")).strip()
+                if _normalize_school_name_for_neis(nm) == target:
+                    exact.append(row)
+        except Exception:
+            continue
+    if not exact:
+        return None
+    # 같은 학교명이 여러 교육청에 있을 경우 현재 코드의 주소/학교명과 가장 잘 맞는 첫 결과를 사용.
+    row = exact[0]
+    return {
+        "ATPT_OFCDC_SC_CODE": str(row.get("ATPT_OFCDC_SC_CODE", "")).strip(),
+        "SD_SCHUL_CODE": str(row.get("SD_SCHUL_CODE", "")).strip(),
+        "SCHUL_NM": str(row.get("SCHUL_NM", school_name)).strip(),
+        "ATPT_OFCDC_SC_NM": str(row.get("ATPT_OFCDC_SC_NM", "")).strip(),
+    }
+
+def _neis_schedule_row_is_non_instructional(row: dict) -> bool:
+    if not isinstance(row, dict):
+        return False
+    sbtr = str(row.get("SBTR_DD_SC_NM", "") or "").strip()
+    event = str(row.get("EVENT_NM", "") or "").strip()
+    content = str(row.get("EVENT_CNTNT", "") or "").strip()
+    combined = " ".join(x for x in (sbtr, event, content) if x)
+    if any(token in combined for token in NEIS_NON_INSTRUCTIONAL_TYPES):
+        return True
+    # NEIS의 수업공제일명이 공휴일/휴업일로 들어오는 경우를 최우선으로 인정.
+    return sbtr in {"공휴일", "휴업일", "휴일", "방학"}
+
+def _neis_event_label(row: dict) -> str:
+    sbtr = str(row.get("SBTR_DD_SC_NM", "") or "").strip()
+    event = str(row.get("EVENT_NM", "") or "").strip()
+    content = str(row.get("EVENT_CNTNT", "") or "").strip()
+    if event and sbtr and sbtr not in event:
+        return f"{event} · {sbtr}"
+    return event or sbtr or content or "학사일정"
+
+@st.cache_data(show_spinner=False, ttl=NEIS_SCHEDULE_CACHE_TTL)
+def neis_fetch_schedule(api_key: str, school_name: str, from_ymd: str, to_ymd: str):
+    api_key = str(api_key or "").strip()
+    start = normalize_date_str(from_ymd).replace("-", "")
+    end = normalize_date_str(to_ymd).replace("-", "")
+    if not api_key or not start or not end or start > end:
+        return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
+    school = neis_find_school(api_key, school_name)
+    if not school or not school.get("ATPT_OFCDC_SC_CODE") or not school.get("SD_SCHUL_CODE"):
+        return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
+    data = _neis_api_get(NEIS_SCHEDULE_ENDPOINT, {
+        "KEY": api_key, "Type": "json", "pIndex": 1, "pSize": 1000,
+        "ATPT_OFCDC_SC_CODE": school["ATPT_OFCDC_SC_CODE"],
+        "SD_SCHUL_CODE": school["SD_SCHUL_CODE"],
+        "AA_FROM_YMD": start, "AA_TO_YMD": end,
+    })
+    rows = []
+    for raw in _neis_rows(data, "SchoolSchedule"):
+        ds = normalize_date_str(raw.get("AA_YMD", ""))
+        if not ds:
+            continue
+        rows.append({
+            "일자": ds,
+            "명칭": _neis_event_label(raw),
+            "구분": str(raw.get("SBTR_DD_SC_NM", "") or "").strip(),
+            "내용": str(raw.get("EVENT_CNTNT", "") or "").strip(),
+            "비수업일": bool(_neis_schedule_row_is_non_instructional(raw)),
+        })
+    if not rows:
+        return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
+    df = pd.DataFrame(rows).drop_duplicates(subset=["일자", "명칭", "구분", "내용"]).sort_values(["일자", "명칭"])
+    # 같은 날짜에 여러 학사행사가 있어도 비수업일 하나라도 있으면 해당 날짜를 비수업일로 처리.
+    df["비수업일"] = df.groupby("일자")["비수업일"].transform("any")
+    return df.reset_index(drop=True)
+
+def get_neis_api_key() -> str:
+    return str(st.session_state.get("neis_api_key", "") or _neis_secret_key()).strip()
+
+def get_neis_schedule_for_range(start_date: date, end_date: date) -> pd.DataFrame:
+    key = get_neis_api_key()
+    if not key:
+        return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
+    try:
+        return neis_fetch_schedule(key, SCHOOL_NAME, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
+    except Exception as exc:
+        st.session_state["_neis_last_error"] = str(exc)
+        return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
+
+def get_neis_non_instructional_days(start_date: date, end_date: date):
+    df = get_neis_schedule_for_range(start_date, end_date)
+    if df.empty:
+        return {}
+    return {
+        str(day): str(group.iloc[0]["명칭"] or "학사일정")
+        for day, group in df[df["비수업일"]].groupby("일자", sort=False)
+    }
+
+def is_neis_non_instructional_date(on_date) -> bool:
+    try:
+        d = date.fromisoformat(normalize_date_str(on_date)) if not isinstance(on_date, date) else on_date
+    except Exception:
+        return False
+    return str(d) in get_neis_non_instructional_days(d, d)
+
+def neis_holiday_label(on_date, fallback="학사일정") -> str:
+    try:
+        d = date.fromisoformat(normalize_date_str(on_date)) if not isinstance(on_date, date) else on_date
+    except Exception:
+        return fallback
+    labels = get_neis_non_instructional_days(d, d)
+    return labels.get(d.isoformat(), fallback)
+
+def apply_neis_non_instructional_display(matrix: pd.DataFrame, ref_date: date, row_label: str) -> pd.DataFrame:
+    if matrix is None or matrix.empty:
+        return matrix
+    monday = ref_date - timedelta(days=ref_date.weekday())
+    end = monday + timedelta(days=4)
+    labels = get_neis_non_instructional_days(monday, end)
+    if not labels:
+        return matrix
+    out = matrix.copy(deep=True)
+    for i, day in enumerate(DAYS):
+        ds = (monday + timedelta(days=i)).isoformat()
+        label = labels.get(ds)
+        if not label:
+            continue
+        text = f"📅 {label}"
+        for p in range(1, PERIODS_PER_DAY.get(day, MAX_PERIOD) + 1):
+            col = f"{day}{p}"
+            if col in out.columns:
+                out[col] = text
+    return out
 _GSHEET_NETWORK_SEMAPHORE = threading.BoundedSemaphore(2)
 def _today_kst() -> date:
     return datetime.now(KST).date()
@@ -262,6 +465,21 @@ def grade_of(class_name: str) -> str:
     if isinstance(class_name, str) and "-" in class_name:
         return class_name.split("-", 1)[0]
     return ""
+
+def normalized_grade(class_name: str):
+    """학급 문자열에서 1/2/3학년을 안정적으로 추출한다."""
+    text = str(class_name or "").strip()
+    m = re.match(r"^\s*([1-3])\s*[-_./ ]", text)
+    if m:
+        return m.group(1)
+    g = grade_of(text)
+    return g if g in {"1", "2", "3"} else ""
+
+def is_grade12_thursday_7_forbidden(class_name: str, day: str, period: int) -> bool:
+    return str(day or "").strip() == "목" and safe_int(period) == 7 and normalized_grade(class_name) in {"1", "2"}
+
+def slot_allowed_for_class(class_name: str, day: str, period: int) -> bool:
+    return not is_grade12_thursday_7_forbidden(class_name, day, period)
 def format_periods(periods):
     normalized = [safe_int(p) for p in periods]
     periods = sorted({p for p in normalized if p >= 0})
@@ -397,6 +615,104 @@ def calendar_picker(label, value=None, key="calendar", help_text=None, rerun_sco
     if help_text:
         st.caption(help_text)
     return st.session_state[selected_key]
+def week_picker(label, value=None, key="week_picker", help_text=None, include_saturday=True):
+    """주간 화면용 컴팩트 선택기.
+
+    개별 날짜 달력 대신 해당 월에 포함되는 주간 버튼만 렌더링한다.
+    반환값은 언제나 해당 주의 월요일이며, 기존 주간 매트릭스 API와 호환된다.
+    표시 범위는 기본 월~토(예: 19일~24일)로 하되 실제 시간표는 기존처럼 평일만 사용한다.
+    """
+    value = value or _today_kst()
+    if value.weekday() >= 5:
+        value = value - timedelta(days=value.weekday() - 4)
+    monday = value - timedelta(days=value.weekday())
+    month_key = f"_{key}_month"
+    selected_key = f"_{key}_monday"
+    if month_key not in st.session_state:
+        st.session_state[month_key] = monday.replace(day=1)
+    if selected_key not in st.session_state:
+        st.session_state[selected_key] = monday
+
+    def _set_week(state_key, picked_monday):
+        st.session_state[state_key] = picked_monday
+
+    def _prev_week_month(month_state_key, selected_state_key):
+        m = st.session_state[month_state_key]
+        prev = (m.replace(day=1) - timedelta(days=1)).replace(day=1)
+        st.session_state[month_state_key] = prev
+        candidate = prev - timedelta(days=prev.weekday())
+        st.session_state[selected_state_key] = candidate
+
+    def _next_week_month(month_state_key, selected_state_key):
+        m = st.session_state[month_state_key]
+        nxt = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
+        st.session_state[month_state_key] = nxt
+        st.session_state[selected_state_key] = nxt - timedelta(days=nxt.weekday())
+
+    month_anchor = st.session_state[month_key].replace(day=1)
+    first_monday = month_anchor - timedelta(days=month_anchor.weekday())
+    last_day = (month_anchor.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    last_monday = last_day - timedelta(days=last_day.weekday())
+    weeks = []
+    cur = first_monday
+    while cur <= last_monday:
+        weeks.append(cur)
+        cur += timedelta(days=7)
+
+    st.markdown(f"**{label}**")
+    nav1, nav2, nav3 = st.columns([1, 5, 1])
+    with nav1:
+        st.button("◀", key=f"{key}_prev_month", width="stretch",
+                  on_click=_prev_week_month, args=(month_key, selected_key))
+    with nav2:
+        st.markdown(
+            f"<div style='text-align:center;font-weight:700;font-size:1.02rem'>"
+            f"{month_anchor.year}년 {month_anchor.month}월 · 주차 선택</div>",
+            unsafe_allow_html=True,
+        )
+    with nav3:
+        st.button("▶", key=f"{key}_next_month", width="stretch",
+                  on_click=_next_week_month, args=(month_key, selected_key))
+
+    selected = st.session_state[selected_key]
+    style_id = re.sub(r"[^A-Za-z0-9_-]", "_", str(key))
+    st.markdown(f"""
+    <style id="week-picker-{style_id}">
+      [data-testid^="st-key-{key}_week_"] button{{min-height:38px!important;height:38px!important;padding:5px 8px!important;border:1px solid #e5e5ea!important;border-radius:9px!important;background:#fff!important;color:#1d1d1f!important;font-size:12px!important;font-weight:600!important;box-shadow:none!important;white-space:nowrap!important}}
+      [data-testid^="st-key-{key}_week_"] button:hover{{background:#f5f5f7!important;border-color:#d2d2d7!important}}
+      [data-testid^="st-key-{key}_week_"] button[kind="primary"]{{background:#1d1d1f!important;border-color:#1d1d1f!important;color:#fff!important}}
+      .week-picker-note-{style_id}{{font-size:11px;color:#86868b;margin:7px 2px 9px}}
+    </style>
+    """, unsafe_allow_html=True)
+
+    # 한 줄에 최대 3개만 배치하여 모바일/좁은 화면에서도 안정적으로 유지한다.
+    for start in range(0, len(weeks), 3):
+        row = weeks[start:start + 3]
+        cols = st.columns(3)
+        for col, week_monday in zip(cols, row):
+            week_end = week_monday + timedelta(days=5 if include_saturday else 4)
+            active = week_monday == selected
+            # 월 경계 주도 실제 날짜 범위를 보여 주되, 주차의 기준은 월요일로 고정한다.
+            label_text = f"✓ {week_monday.day:02d}일~{week_end.day:02d}일" if active else f"{week_monday.day:02d}일~{week_end.day:02d}일"
+            with col:
+                st.button(
+                    label_text,
+                    key=f"{key}_week_{week_monday:%Y%m%d}",
+                    width="stretch",
+                    type="primary" if active else "secondary",
+                    on_click=_set_week,
+                    args=(selected_key, week_monday),
+                )
+    selected = st.session_state[selected_key]
+    selected_end = selected + timedelta(days=5 if include_saturday else 4)
+    st.markdown(
+        f"<div class='week-picker-note-{style_id}'>선택: <strong>{selected:%Y-%m-%d} ~ {selected_end:%Y-%m-%d}</strong> · 주간표는 평일(월~금) 기준</div>",
+        unsafe_allow_html=True,
+    )
+    if help_text:
+        st.caption(help_text)
+    return selected
+
 def calendar_range_picker(start_value=None, end_value=None, key="calendar_range", help_text=None):
     start_value = start_value or _today_kst()
     end_value = end_value or start_value
@@ -1287,8 +1603,16 @@ def validate_swap(a, b, date_a, date_b, *, is_test=False):
     pa, pb = safe_int(a.get("교시", 0)), safe_int(b.get("교시", 0))
     if not da or not db or not ta or not tb or pa <= 0 or pb <= 0:
         return False, "교사·일자·교시 정보가 올바르지 않습니다."
+    day_a = WEEKDAY_KR[datetime.strptime(da, "%Y-%m-%d").weekday()]
+    day_b = WEEKDAY_KR[datetime.strptime(db, "%Y-%m-%d").weekday()]
+    if is_grade12_thursday_7_forbidden(str(a.get("학급", "")), day_b, pb):
+        return False, "1·2학년 수업은 목요일 7교시에 배치할 수 없습니다."
+    if is_grade12_thursday_7_forbidden(str(b.get("학급", "")), day_a, pa):
+        return False, "1·2학년 수업은 목요일 7교시에 배치할 수 없습니다."
     if ta == tb and da == db and pa == pb:
         return False, "동일한 교사·일자·교시는 교환할 수 없습니다."
+    if is_neis_non_instructional_date(da) or is_neis_non_instructional_date(db):
+        return False, "NEIS 학사일정상 공휴일·휴업일 등 수업이 없는 날은 맞교환할 수 없습니다."
     ver = st.session_state.get("_data_version", 0)
     e_a = get_effective_timetable_for_date(da, ver, use_test=is_test)
     e_b = get_effective_timetable_for_date(db, ver, use_test=is_test)
@@ -1501,6 +1825,8 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
     if not norm:
         base = st.session_state.timetable.copy()
         return base.assign(**{c: "" for c in columns if c not in base.columns})
+    if is_neis_non_instructional_date(norm):
+        return pd.DataFrame(columns=columns)
     try:
         day = WEEKDAY_KR[datetime.strptime(norm, "%Y-%m-%d").weekday()]
     except Exception:
@@ -1637,9 +1963,11 @@ def has_duty(teacher: str, on_date: str, period: int = None) -> bool:
         return any(day == norm for day, _ in slots)
     p = safe_int(period)
     return (norm, 0) in slots or (norm, p) in slots
-def is_free(teacher: str, day: str, period: int, on_date: str = None, e_tt=None) -> bool:
+def is_free(teacher: str, day: str, period: int, on_date: str = None, e_tt=None, class_name: str = None) -> bool:
     p = safe_int(period)
     norm = normalize_date_str(on_date)
+    if class_name is not None and not slot_allowed_for_class(class_name, day, p):
+        return False
     if has_duty(teacher, norm, p):
         return False
     if e_tt is None:
@@ -1877,7 +2205,11 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
     norm_a=normalize_date_str(date_a)
     norm_b=normalize_date_str(date_b)
     day_a=WEEKDAY_KR[datetime.strptime(norm_a, "%Y-%m-%d").weekday()] if norm_a else ""
+    if is_neis_non_instructional_date(norm_a) or is_neis_non_instructional_date(norm_b):
+        return False
     if not is_free(teacher_b, day_b, period_b, norm_b, e_b):
+        return False
+    if not slot_allowed_for_class(str(a.get("학급", "")), day_b, period_b):
         return False
     if not is_test and _actual_direct_slot_is_affected(norm_b, teacher_b, period_b):
         return False
@@ -2038,6 +2370,8 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
     ti=st.session_state.get("teachers",pd.DataFrame()); e_a=get_effective_timetable_for_date(norm_a,ver,use_test=use_test); e_b=get_effective_timetable_for_date(norm_b,ver,use_test=use_test)
     if ti.empty or e_a.empty or e_b.empty: return pd.DataFrame(),[],""
     p_a,p_b=safe_int(period_a),safe_int(period_b); day_a=WEEKDAY_KR[date.fromisoformat(norm_a).weekday()]; day_b=WEEKDAY_KR[date.fromisoformat(norm_b).weekday()]
+    if is_neis_non_instructional_date(norm_a) or is_neis_non_instructional_date(norm_b): return pd.DataFrame(),[] ,"NEIS 학사일정상 수업이 없는 날입니다."
+    if is_grade12_thursday_7_forbidden(class_a, day_a, p_a) or is_grade12_thursday_7_forbidden(class_a, day_b, p_b): return pd.DataFrame(),[] ,"1·2학년 수업은 목요일 7교시에 배치할 수 없습니다."
     my_class=str(class_a).strip(); my_grade=grade_of(my_class); my_group=subject_group(subject_a); cum=cumulative_sub_count(version=ver)
     avail=get_teacher_availability_index(ver); duties=_duty_slot_index(ver)
     def avail_ok(t,d,p):
@@ -2085,6 +2419,8 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
     search_dates = sorted(set(search_dates))
     for d_str in week_dates:
         day_kr = WEEKDAY_KR[datetime.strptime(d_str, "%Y-%m-%d").weekday()]
+        if is_neis_non_instructional_date(d_str):
+            continue
         e_tt = get_effective_timetable_for_date(d_str, ver)
         if e_tt.empty:
             continue
@@ -2099,6 +2435,8 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                 if td_str == d_str:
                     continue
                 tday = WEEKDAY_KR[datetime.strptime(td_str, "%Y-%m-%d").weekday()]
+                if is_neis_non_instructional_date(td_str):
+                    continue
                 e_b = get_effective_timetable_for_date(td_str, ver)
                 if e_b.empty:
                     continue
@@ -2122,6 +2460,8 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                     if not same_class:
                         continue
                     other_grade = grade_of(other_class)
+                    if is_grade12_thursday_7_forbidden(my_class, tday, p) or is_grade12_thursday_7_forbidden(other_class, day_kr, p):
+                        continue
                     same_grade  = (other_grade == my_grade)
                     score = 200
                     if subject_group(str(o["과목"])) == my_group: score += 40
@@ -2174,6 +2514,8 @@ def get_single_lesson_1to1_candidates(
         search_dates=[source_date+timedelta(days=i) for i in range((end-source_date).days+1) if (source_date+timedelta(days=i)).weekday()<5]
     ver=version or st.session_state.get("_data_version",0); source_day=WEEKDAY_KR[source_date.weekday()]; source_tt=get_effective_timetable_for_date(source_str,ver,use_test=use_test)
     if source_tt is None or source_tt.empty: return pd.DataFrame(columns=cols)
+    if is_grade12_thursday_7_forbidden(source_class, source_day, source_period):
+        return pd.DataFrame(columns=cols)
     source_rows=[r for r in source_tt.itertuples(index=False) if str(getattr(r,"교사명","")).strip()==teacher and safe_int(getattr(r,"교시",0))==source_period and str(getattr(r,"학급","")).strip()==source_class and str(getattr(r,"과목","")).strip()==source_subject]
     if not source_rows: return pd.DataFrame(columns=cols)
     avail=get_teacher_availability_index(ver); duties=_duty_slot_index(ver); test_affected=get_test_affected_slots(ver) if use_test else set(); actual_affected=get_actual_direct_swap_affected_slots(ver)
@@ -2185,12 +2527,15 @@ def get_single_lesson_1to1_candidates(
     results=[]; seen=set()
     for td in search_dates:
         if td.weekday()>=5: continue
-        target_str=td.isoformat(); target_day=WEEKDAY_KR[td.weekday()]; target_tt=get_effective_timetable_for_date(target_str,ver,use_test=use_test)
+        target_str=td.isoformat(); target_day=WEEKDAY_KR[td.weekday()]
+        if is_neis_non_instructional_date(target_str): continue
+        target_tt=get_effective_timetable_for_date(target_str,ver,use_test=use_test)
         if target_tt is None or target_tt.empty: continue
         tp=safe_int(target_period) if target_date is not None and target_period is not None else None
         rows=[r for r in target_tt.itertuples(index=False) if tp is None or safe_int(getattr(r,"교시",0))==tp]
         periods=[tp] if tp is not None and 1<=tp<=PERIODS_PER_DAY.get(target_day,MAX_PERIOD) else sorted({safe_int(getattr(r,"교시",0)) for r in rows if 1<=safe_int(getattr(r,"교시",0))<=PERIODS_PER_DAY.get(target_day,MAX_PERIOD)}) if tp is None else []
         for target_p in periods:
+            if is_grade12_thursday_7_forbidden(source_class, target_day, target_p): continue
             if target_str==source_str and target_p==source_period: continue
             if not available(teacher,target_day,target_p) or duty_blocked(teacher,target_str,target_p): continue
             for r in rows:
@@ -2233,6 +2578,7 @@ def get_single_lesson_linked_cycles(
             if (teacher,p) in occupied or (target_str,0) in ds or (target_str,p) in ds: continue
             if item is not None and item[0] and (day,p) not in item[1]: continue
             if use_test and (target_str,current_t,p) in test_affected: continue
+            if is_grade12_thursday_7_forbidden(orig_class, day, p): continue
             priority=(0 if p==source_period else 1,abs((d-source_date).days),0 if subject_group(str(getattr(r,"과목","")))==subject_group(orig_subject) else 1)
             target_slots.append((priority,target_str,p))
     if not target_slots: return [], "연계 순환을 시작할 수 있는 빈 시간대가 없습니다."
@@ -2289,7 +2635,7 @@ def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = 
                 elif typ=="시간강사": cell += f" 🟡 {r.원본교사}→시간강사"
                 row[f"{d}{p}"]=cell
         rows.append(row)
-    return pd.DataFrame(rows)
+    return apply_neis_non_instructional_display(pd.DataFrame(rows), ref_date, "교사명")
 @st.cache_data(show_spinner=False)
 def class_matrix(version=0, ref_date=None, use_test=False):
     ref=ref_date or _today_kst(); monday=ref-timedelta(days=ref.weekday())
@@ -2329,7 +2675,7 @@ def class_matrix(version=0, ref_date=None, use_test=False):
                 else:
                     row[f"{d}{p}"]=""
         rows.append(row)
-    return pd.DataFrame(rows)
+    return apply_neis_non_instructional_display(pd.DataFrame(rows), ref, "학급")
 def _weekly_cell_parts(value):
     text = "" if value is None else str(value).strip()
     if not text:
@@ -2361,6 +2707,8 @@ def _resolve_weekly_selection(selection, ref_date, use_test=False):
     monday = ref_date - timedelta(days=ref_date.weekday())
     picked_date = monday + timedelta(days=selection["day_index"])
     ds = picked_date.strftime("%Y-%m-%d")
+    if is_neis_non_instructional_date(ds):
+        return None
     ver = st.session_state.get("_data_version", 0)
     e = get_effective_timetable_for_date(ds, ver, use_test=use_test)
     if e.empty:
@@ -3125,7 +3473,12 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         st.markdown(f"<div style='font-size:.86rem;font-weight:600;color:#6b7280;margin:0 0 .12rem .1rem'>{html_lib.escape(str(title))}</div>", unsafe_allow_html=True)
     if show_week_dates:
         dates = [monday + timedelta(days=i) for i in range(5)]
-        st.markdown("<div class='compact-nav'>" + "　".join(f"{DAYS[i]} {dates[i]:%m.%d}" for i in range(5)) + "</div>", unsafe_allow_html=True)
+        holiday_labels = get_neis_non_instructional_days(monday, monday + timedelta(days=4))
+        nav_parts = []
+        for i, d in enumerate(dates):
+            suffix = f" · {holiday_labels[d.isoformat()]}" if d.isoformat() in holiday_labels else ""
+            nav_parts.append(f"{DAYS[i]} {d:%m.%d}{suffix}")
+        st.markdown("<div class='compact-nav'>" + "　".join(nav_parts) + "</div>", unsafe_allow_html=True)
     visible_matrix = _hide_past_week_slots(matrix, ref_date, hide_past=True)
     teacher_period_grid = row_label == "교시" and all(d in visible_matrix.columns for d in DAYS)
     display = _weekly_styled_matrix(visible_matrix, drop_teacher_name=teacher_period_grid)
@@ -5101,6 +5454,37 @@ PAGE_DESCRIPTIONS = {
     "📑 회원별 탭 권한 관리": "사용자별 업무 메뉴 접근 권한을 관리합니다.",
     "교무호봉획정": "기간제교원 호봉(재)획정과 조서 출력을 처리합니다.",
 }
+# NEIS API 키는 세션에만 보관하며 코드/Google Sheets에 저장하지 않습니다.
+if "neis_api_key" not in st.session_state:
+    st.session_state.neis_api_key = _neis_secret_key()
+with st.expander("⚙️ NEIS 학사일정", expanded=False):
+    neis_col1, neis_col2 = st.columns([4, 2])
+    with neis_col1:
+        st.session_state.neis_api_key = st.text_input(
+            "NEIS Open API 인증키",
+            value=st.session_state.get("neis_api_key", ""),
+            type="password", key="neis_api_key_input",
+            help="NEIS Open API 인증키만 입력하면 학교명으로 학교코드를 자동 찾고 학사일정을 불러옵니다."
+        ).strip()
+    with neis_col2:
+        if st.button("학사일정 새로고침", key="neis_refresh"):
+            neis_find_school.clear(); neis_fetch_schedule.clear()
+            st.session_state.pop("_neis_last_error", None)
+            _invalidate_all_caches()
+            st.rerun()
+    if st.session_state.get("neis_api_key"):
+        today = _today_kst()
+        neis_test = get_neis_schedule_for_range(today.replace(month=1, day=1), today.replace(month=12, day=31))
+        if neis_test.empty and st.session_state.get("_neis_last_error"):
+            st.warning(f"NEIS 학사일정을 불러오지 못했습니다: {st.session_state['_neis_last_error']}")
+        elif not neis_test.empty:
+            non_count = int(neis_test["비수업일"].sum())
+            st.caption(f"NEIS 연결됨 · {SCHOOL_NAME} · 비수업일 {non_count}일 확인")
+        else:
+            st.caption("NEIS 연결은 되었지만 조회된 학사일정이 없습니다.")
+    else:
+        st.caption("인증키를 입력하면 주간 시간표에 NEIS 공휴일·휴업일·방학 등이 자동 표시됩니다.")
+
 st.markdown(
     f'<div class="work-page-head"><div>'
     f'<div style="font-size:11px;color:#86868b;margin-bottom:6px;letter-spacing:.01em">{SCHOOL_NAME} · {SCHOOL_YEAR}</div>'
@@ -5127,13 +5511,13 @@ if "시간표 조회" in tab_map:
                         details.append({"교사":r["교사명"],"교시":sel["교시"],"학급":r["학급"],"과목":r["과목"],"변경유형":r.get("변경유형","원본"),"변경상세":r.get("변경상세","")})
                 st.dataframe(pd.DataFrame(details),width="stretch",hide_index=True)
         elif view == "교사별 주간":
-            ref=calendar_picker("주간 기준일",_today_kst(),key="view_week_ref")
+            ref=week_picker("주간 선택",_today_kst(),key="view_week_ref")
             st.markdown('<div class="matrix-legend"><span>↻ 교환</span><span>+ 보강</span><span>• 시간강사</span></div>', unsafe_allow_html=True)
             render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
         elif view == "학급별 주간":
-            ref=calendar_picker("주간 기준일",_today_kst(),key="view_class_ref")
+            ref=week_picker("주간 선택",_today_kst(),key="view_class_ref")
             st.markdown('<div class="matrix-legend"><span>과목명 기준 · 조회 전용</span><span>↻ 교환</span><span>+ 보강</span></div>', unsafe_allow_html=True)
             render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_class_schedule_excel_bytes(ref, use_test=False)
@@ -5141,7 +5525,7 @@ if "시간표 조회" in tab_map:
         else:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
-            ref=calendar_picker("주간 기준일",_today_kst(),key="view_ref")
+            ref=week_picker("주간 선택",_today_kst(),key="view_ref")
             teacher_week = effective_teacher_matrix(ref, ver, use_test=False)
             if not teacher_week.empty and t:
                 teacher_week = teacher_week[teacher_week["교사명"].astype(str).str.strip() == str(t).strip()].reset_index(drop=True)
@@ -5347,10 +5731,10 @@ if "결강·보강" in tab_map:
                                         st.rerun()
 if "시간표 맞교환 & 변경 추천" in tab_map:
     with tab_map["시간표 맞교환 & 변경 추천"]:
-        week_anchor = calendar_picker(
-            "교환 검색 기준 주", _today_kst(),
+        week_anchor = week_picker(
+            "교환 검색 주차", _today_kst(),
             key="exchange_week_anchor",
-            help_text="선택한 날짜가 포함된 평일 주간 시간표를 표시합니다. 토·일은 표시하지 않습니다."
+            help_text="주차 버튼을 선택하면 해당 주의 월요일을 기준으로 주간 시간표를 표시합니다."
         )
         ver = st.session_state.get("_data_version", 0)
         lesson_matrix = effective_teacher_matrix(week_anchor, ver, use_test=False)
@@ -5401,7 +5785,7 @@ if "시간표 변경 테스트용" in tab_map:
             st.rerun()
         st.markdown("#### 수업 선택 — **현재 적용 + 테스트 변경 결과**에서 수업 셀 하나를 클릭")
         st.caption("실제 변경과 현재까지의 테스트 변경을 모두 반영합니다. 선택한 현재 상태를 기준으로 다음 1:1 가능 위치를 계산합니다.")
-        test_week_anchor = calendar_picker("테스트 검색 기준 주", _today_kst(), key="test_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표를 테스트 기준으로 사용합니다.")
+        test_week_anchor = week_picker("테스트 검색 주차", _today_kst(), key="test_week_anchor", help_text="주차 버튼을 선택하면 해당 주를 테스트 기준으로 사용합니다.")
         ver = st.session_state.get("_data_version", 0)
         test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
@@ -5441,7 +5825,7 @@ if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
         st.markdown("### 변경된 교사 주간표")
         st.caption("원본 교사별 주간표 형식을 기준으로 전체 교사를 한 번에 표시합니다. 변경 이력이 있는 교사는 이름과 상태에 표시됩니다.")
-        ref = calendar_picker("주간 기준일", _today_kst(), key="chg_ref")
+        ref = week_picker("주간 선택", _today_kst(), key="chg_ref")
         changed = set(str(x).strip() for x in get_changed_teachers_for_week(ref) if str(x).strip())
         teacher_names = []
         teachers_df = st.session_state.get("teachers", pd.DataFrame())
