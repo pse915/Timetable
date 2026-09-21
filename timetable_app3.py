@@ -57,7 +57,6 @@ UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
 UI_THEME_OPTIONS = {
     "Apple Light": "light",
     "Black": "black",
-    "X.AI": "xai",
 }
 UI_THEME_DEFAULT = "Apple Light"
 
@@ -183,7 +182,7 @@ def render_theme_runtime_css(selected_theme: str):
     같은 토큰으로 칠한다. 특히 Black에서는 흰색 배경과 검은 글자가 남지 않도록
     하드코딩된 Streamlit 기본 스타일보다 높은 우선순위를 사용한다.
     """
-    theme = selected_theme if selected_theme in {"light", "black", "xai"} else "light"
+    theme = selected_theme if selected_theme in {"light", "black"} else "light"
 
     if theme == "black":
         css = r"""
@@ -352,30 +351,6 @@ a { color:#70a7ff!important; }
 hr, [data-testid="stDivider"] { border-color:var(--ui-line-soft)!important; }
 .app-topbar { border-bottom-color:var(--ui-line-soft)!important; }
 """
-    elif theme == "xai":
-        css = r"""
-:root {
-  color-scheme: dark;
-  --ui-bg:#07080b; --ui-surface:#0d1016; --ui-surface-2:#11151d;
-  --ui-soft:#151922; --ui-soft-2:#10131a;
-  --ui-text:#f4f7fb; --ui-text-2:#d9e0ea; --ui-muted:#9199a8; --ui-muted-2:#747d8d;
-  --ui-line:#252c38; --ui-line-soft:#1b212b; --ui-accent:#3b82f6; --ui-accent-hover:#60a5fa;
-}
-html,body,.stApp,[data-testid="stApp"],[data-testid="stAppViewContainer"],[data-testid="stMain"],
-[data-testid="stMainBlockContainer"],[data-testid="stAppViewContainer"] > section,section.main,.main {
-  background:var(--ui-bg)!important;color:var(--ui-text)!important;
-}
-[data-testid="stHeader"] { background:rgba(7,8,11,.94)!important;border-bottom:1px solid var(--ui-line-soft)!important; }
-[data-testid="stVerticalBlockBorderWrapper"],[data-testid="stExpander"],[data-testid="stDialog"]>div>div,.ui-kpi { background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
-html body .stApp button { color:var(--ui-text)!important; }
-html body .stApp .stButton>button,html body .stApp .stDownloadButton>button,html body .stApp .stFormSubmitButton>button,html body .stApp button[data-testid^="stBaseButton"],html body .stApp [data-testid^="st-key-"] button { background:var(--ui-surface-2)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
-html body .stApp button[data-testid^="stBaseButton-primary"],html body .stApp .stButton>button[kind="primary"],html body .stApp [class*="st-key-top_quick_save"] button { background:var(--ui-accent)!important;color:#fff!important;border-color:var(--ui-accent)!important; }
-html body .stApp [data-baseweb="input"],html body .stApp [data-baseweb="textarea"],html body .stApp [data-baseweb="select"]>div,html body .stApp [data-testid="stDateInput"]>div>div { background:var(--ui-surface-2)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
-html body .stApp input,html body .stApp textarea { color:var(--ui-text)!important;-webkit-text-fill-color:var(--ui-text)!important;background:transparent!important; }
-html body .stApp [data-testid="stDataFrame"],html body .stApp [data-testid="stDataEditor"] { background:var(--ui-surface)!important;border-color:var(--ui-line)!important; }
-html body .stApp [data-testid="stDataFrame"] [role="columnheader"],html body .stApp [data-testid="stDataEditor"] [role="columnheader"] { background:var(--ui-soft)!important;color:var(--ui-text-2)!important; }
-html body .stApp [data-testid="stDataFrame"] [role="gridcell"],html body .stApp [data-testid="stDataEditor"] [role="gridcell"] { background:var(--ui-surface)!important;color:var(--ui-text)!important; }
-"""
     else:
         css = r"""
 :root {
@@ -541,7 +516,7 @@ html body .stApp [data-testid="stDataEditor"] [role="columnheader"] {
     css = css + final_override
     st.markdown(f'<style id="runtime-app-theme">{css}</style>', unsafe_allow_html=True)
 
-if "ui_theme" not in st.session_state or st.session_state.ui_theme not in {"light", "black", "xai"}:
+if "ui_theme" not in st.session_state or st.session_state.ui_theme not in {"light", "black"}:
     st.session_state.ui_theme = UI_THEME_OPTIONS[UI_THEME_DEFAULT]
 render_theme_runtime_css(st.session_state.ui_theme)
 render_font_runtime_css(st.session_state.get("ui_font", UI_FONT_DEFAULT))
@@ -5882,13 +5857,26 @@ render_font_runtime_css(st.session_state.ui_font)
 st.markdown('<div class="streamlit-header-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
 def _apply_ui_theme_from_dialog():
     selected = st.session_state.get("ui_theme_selector", UI_THEME_DEFAULT)
-    # 레이블("Black", "X.AI", "Apple Light")을 코드("black", "xai", "light")로 매핑
+    # 레이블("Black", "Apple Light")을 코드("black", "light")로 매핑
     theme_code = UI_THEME_OPTIONS.get(selected, selected)
-    if theme_code not in {"light", "black", "xai"}:
+    if theme_code not in {"light", "black"}:
         theme_code = "light"
     st.session_state.ui_theme = theme_code
     try:
         st.rerun(scope="app")
+    except TypeError:
+        st.rerun()
+
+
+def _apply_ui_font_from_dialog():
+    selected = st.session_state.get("ui_font_selector", UI_FONT_DEFAULT)
+    if selected not in UI_FONT_OPTIONS:
+        selected = UI_FONT_DEFAULT
+    st.session_state.ui_font = selected
+    try:
+        st.rerun(scope="app")
+    except TypeError:
+        st.rerun()
     except TypeError:
         st.rerun()
 
@@ -5932,7 +5920,7 @@ def render_tools_dialog():
         index=list(UI_THEME_OPTIONS.keys()).index(next((k for k, v in UI_THEME_OPTIONS.items() if v == st.session_state.get("ui_theme", "light")), UI_THEME_DEFAULT)),
         key="ui_theme_selector",
         on_change=_apply_ui_theme_from_dialog,
-        help="Apple Light / Black / X.AI 디자인을 앱 전체에 적용합니다.",
+        help="Apple Light / Black 디자인을 앱 전체에 적용합니다.",
     )
     selected_font = st.selectbox(
         "글꼴",
