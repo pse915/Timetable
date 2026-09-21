@@ -397,6 +397,91 @@ html body .stApp [data-baseweb="input"],html body .stApp [data-baseweb="textarea
 html body .stApp input,html body .stApp textarea { color:var(--ui-text)!important;-webkit-text-fill-color:var(--ui-text)!important;background:transparent!important; }
 html body .stApp [data-testid="stDataFrame"],html body .stApp [data-testid="stDataEditor"] { background:#fff!important;border-color:var(--ui-line)!important; }
 """
+    # Streamlit 버전별 내부 래퍼와 이후 컴포넌트 CSS까지 마지막 우선순위로 통일한다.
+    final_override = r"""
+/* ===== FINAL THEME OVERRIDE: 전체 viewport + 후속 컴포넌트까지 일원화 ===== */
+html, body, #root, body > div,
+html body .stApp,
+html body [data-testid="stAppViewContainer"],
+html body [data-testid="stAppViewContainer"] > .main,
+html body [data-testid="stMain"],
+html body [data-testid="stMainBlockContainer"],
+html body [data-testid="stMainBlockContainer"] > div,
+html body section.main,
+html body section.main > div {
+  background:var(--ui-bg)!important;
+  color:var(--ui-text)!important;
+}
+html body [data-testid="stAppViewContainer"] > .main > div,
+html body [data-testid="stMainBlockContainer"] > div:first-child {
+  background:transparent!important;
+}
+html body .block-container {
+  background:transparent!important;
+  color:var(--ui-text)!important;
+}
+html body [data-testid="stHeader"],
+html body [data-testid="stToolbar"],
+html body [data-testid="stDecoration"] {
+  color:var(--ui-text)!important;
+}
+html body .stApp .stButton > button,
+html body .stApp .stDownloadButton > button,
+html body .stApp .stFormSubmitButton > button,
+html body .stApp button[data-testid^="stBaseButton"],
+html body .stApp [data-testid^="st-key-"] button {
+  background:var(--ui-surface-2)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp .stButton > button:hover,
+html body .stApp .stDownloadButton > button:hover,
+html body .stApp button[data-testid^="stBaseButton"]:hover,
+html body .stApp [data-testid^="st-key-"] button:hover {
+  background:var(--ui-soft)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp .stButton > button[kind="primary"],
+html body .stApp .stFormSubmitButton > button[kind="primary"],
+html body .stApp button[data-testid^="stBaseButton-primary"],
+html body .stApp [data-testid^="st-key-"] button[kind="primary"] {
+  background:var(--ui-accent)!important;
+  color:#fff!important;
+  border-color:var(--ui-accent)!important;
+}
+html body .stApp [data-baseweb="input"],
+html body .stApp [data-baseweb="textarea"],
+html body .stApp [data-baseweb="select"] > div,
+html body .stApp [data-testid="stDateInput"] > div > div,
+html body .stApp [data-testid="stDataFrame"],
+html body .stApp [data-testid="stDataEditor"] {
+  background:var(--ui-surface-2)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp [data-testid="stVerticalBlockBorderWrapper"],
+html body .stApp [data-testid="stExpander"],
+html body .stApp [data-testid="stDialog"] > div > div,
+html body .stApp [data-testid="stPopover"],
+html body .stApp [data-baseweb="popover"],
+html body .stApp [role="dialog"] {
+  background:var(--ui-surface)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp [data-testid="stDataFrame"] [role="gridcell"],
+html body .stApp [data-testid="stDataEditor"] [role="gridcell"] {
+  background:var(--ui-surface)!important;
+  color:var(--ui-text)!important;
+}
+html body .stApp [data-testid="stDataFrame"] [role="columnheader"],
+html body .stApp [data-testid="stDataEditor"] [role="columnheader"] {
+  background:var(--ui-soft)!important;
+  color:var(--ui-text-2)!important;
+}
+"""
+    css = css + final_override
     st.markdown(f'<style id="runtime-app-theme">{css}</style>', unsafe_allow_html=True)
 
 if "ui_theme" not in st.session_state or st.session_state.ui_theme not in {"light", "black", "xai"}:
