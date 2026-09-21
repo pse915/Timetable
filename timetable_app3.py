@@ -54,12 +54,12 @@ UI_FONT_OPTIONS = {
 }
 UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
 
+# 앱 전체에서 사용하는 단일 디자인 모드.
+# Streamlit/OS의 Light·Dark 설정과 무관하게 항상 동일한 ChatGPT Gray 테마를 사용한다.
 UI_THEME_OPTIONS = {
-    "Apple Light": "light",
-    "Black": "black",
-    "X.AI": "xai",
+    "ChatGPT Gray": "chatgpt",
 }
-UI_THEME_DEFAULT = "Apple Light"
+UI_THEME_DEFAULT = "ChatGPT Gray"
 
 def render_font_runtime_css(selected_font: str):
     """선택 글꼴을 실제로 로드하고 Streamlit/AG Grid/HTML에 일관되게 적용한다.
@@ -175,318 +175,335 @@ table, thead, tbody, tfoot, tr, th, td, caption {{
         unsafe_allow_html=True,
     )
 
-def render_theme_runtime_css(selected_theme: str):
-    """앱 전체에 하나의 명시적 테마 토큰을 적용한다.
+def render_theme_runtime_css(selected_theme: str = "chatgpt"):
+    """앱 전용 단일 테마: Streamlit 기본 Light/Dark와 완전히 독립된 ChatGPT Gray.
 
-    Streamlit의 OS 자동 다크모드와 앱 테마가 서로 덮어쓰지 않도록
-    color-scheme까지 명시하고, 페이지/컨테이너/컨트롤/표/팝오버/다이얼로그를
-    같은 토큰으로 칠한다. 특히 Black에서는 흰색 배경과 검은 글자가 남지 않도록
-    하드코딩된 Streamlit 기본 스타일보다 높은 우선순위를 사용한다.
+    이 앱은 더 이상 OS/브라우저/Streamlit의 color-scheme에 따라 색상이 바뀌지 않는다.
+    화면 전체를 하나의 디자인 토큰으로 강제해, 페이지/컨테이너/버튼/입력/팝오버/
+    다이얼로그/달력/시간표가 서로 다른 테마로 분리되는 현상을 막는다.
     """
-    theme = selected_theme if selected_theme in {"light", "black", "xai"} else "light"
-
-    if theme == "black":
-        css = r"""
+    # 하위 호환을 위해 기존 인자는 받지만 실제로는 항상 단일 테마를 사용한다.
+    css = r"""
+/* =========================================================
+   APP-OWNED THEME: CHATGPT GRAY
+   Streamlit theme / browser dark mode independent
+   ========================================================= */
 :root {
-  color-scheme: dark;
-  --ui-bg:#08090b; --ui-surface:#111318; --ui-surface-2:#15181e;
-  --ui-soft:#191d24; --ui-soft-2:#14171c;
-  --ui-text:#f5f7fa; --ui-text-2:#e5e7eb; --ui-muted:#a3a7b0; --ui-muted-2:#858a94;
-  --ui-line:#2b3039; --ui-line-soft:#20242c;
-  --ui-accent:#ff4b55; --ui-accent-hover:#ff646d; --ui-focus:rgba(255,75,85,.28);
+  color-scheme: dark !important;
+  --ui-bg:#212121;
+  --ui-bg-deep:#171717;
+  --ui-surface:#2f2f2f;
+  --ui-surface-2:#343434;
+  --ui-surface-3:#3a3a3a;
+  --ui-soft:#404040;
+  --ui-soft-2:#2a2a2a;
+  --ui-text:#f1f1f1;
+  --ui-text-2:#d1d5db;
+  --ui-muted:#a7a7a7;
+  --ui-muted-2:#8e8e8e;
+  --ui-line:#4a4a4a;
+  --ui-line-soft:#383838;
+  --ui-accent:#10a37f;
+  --ui-accent-hover:#19b88d;
+  --ui-focus:rgba(16,163,127,.30);
+  --ui-danger:#ef4444;
+  --ui-warning:#f59e0b;
 }
-html, body, .stApp,
-[data-testid="stApp"], [data-testid="stAppViewContainer"],
-[data-testid="stMain"], [data-testid="stMainBlockContainer"],
+
+/* ----- ROOT: never inherit Streamlit's white canvas ----- */
+html,
+body,
+#root,
+.stApp,
+[data-testid="stApp"],
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],
 [data-testid="stAppViewContainer"] > section,
-[data-testid="stMain"] > div, section.main, .main {
+[data-testid="stAppViewContainer"] > div,
+[data-testid="stMain"] > div,
+section.main,
+.main,
+.block-container,
+[data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"] {
   background:var(--ui-bg)!important;
   color:var(--ui-text)!important;
 }
-[data-testid="stMainBlockContainer"], [data-testid="stMain"] [data-testid="stVerticalBlock"] {
-  background:transparent!important;
-}
-[data-testid="stHeader"] {
-  background:rgba(8,9,11,.92)!important;
+
+/* Streamlit header/decorations */
+html body [data-testid="stHeader"] {
+  background:var(--ui-bg)!important;
   color:var(--ui-text)!important;
   border-bottom:1px solid var(--ui-line-soft)!important;
 }
-[data-testid="stToolbar"], [data-testid="stDecoration"] { background:transparent!important; }
-[data-testid="stSidebar"], [data-testid="stPopover"],
-[data-testid="stDialog"], [data-baseweb="popover"] {
-  color:var(--ui-text)!important;
+html body [data-testid="stToolbar"],
+html body [data-testid="stDecoration"] {
+  background:var(--ui-bg)!important;
 }
-[data-testid="stSidebar"] { background:var(--ui-surface)!important; }
 
-/* 모든 일반 텍스트가 기본 검정색으로 되돌아가지 않도록 한다. */
-html body .stApp :where(p, label, small, li, dt, dd, caption, legend,
-  [data-testid="stMarkdownContainer"], [data-testid="stCaptionContainer"],
-  .stCaption) { color:var(--ui-text)!important; }
-html body .stApp :where(h1,h2,h3,h4,h5,h6) { color:var(--ui-text)!important; }
-html body .stApp :where(.app-identity,.work-page-head p,.work-page-meta,
-  .work-section-note,.matrix-subtitle,.matrix-legend,.changed-teacher-status,
-  [data-testid="stCaptionContainer"],.stCaption) { color:var(--ui-muted)!important; }
+/* ----- UNIVERSAL TEXT ----- */
+html body .stApp,
+html body .stApp :where(p,span,div,label,small,li,dt,dd,legend,caption,
+  h1,h2,h3,h4,h5,h6,th,td,a,summary) {
+  color:var(--ui-text);
+}
+html body .stApp :where(.stCaption,[data-testid="stCaptionContainer"],
+  .app-identity,.work-page-meta,.work-section-note,.matrix-subtitle,
+  .matrix-legend,.changed-teacher-status) {
+  color:var(--ui-muted)!important;
+}
+html body .stApp a {
+  color:#7dd3b8!important;
+}
 
-/* 카드/패널/확장영역 */
-[data-testid="stVerticalBlockBorderWrapper"],
-[data-testid="stExpander"], [data-testid="stExpander"] details,
-[data-testid="stDialog"] > div > div, .ui-kpi,
-.apple-note, .work-note, .swap-result-summary,
-.changed-teacher-chip, .swap-group-count {
+/* ----- PANELS / CARDS / EXPANDERS ----- */
+html body .stApp :where(
+  [data-testid="stVerticalBlockBorderWrapper"],
+  [data-testid="stExpander"],
+  [data-testid="stExpander"] details,
+  [data-testid="stDialog"] > div > div,
+  [data-testid="stPopover"],
+  [data-baseweb="popover"],
+  [data-baseweb="menu"],
+  [role="menu"],
+  [role="listbox"],
+  .ui-kpi,.apple-note,.work-note,.swap-result-summary,
+  .changed-teacher-chip,.swap-group-count
+) {
   background:var(--ui-surface)!important;
   color:var(--ui-text)!important;
   border-color:var(--ui-line)!important;
 }
-[data-testid="stExpander"] summary:hover { background:var(--ui-soft)!important; }
+html body .stApp [data-testid="stExpander"] summary:hover,
+html body .stApp [role="option"]:hover,
+html body .stApp [role="menuitem"]:hover {
+  background:var(--ui-soft)!important;
+}
 
-/* 버튼: Streamlit 버전에 따라 kind/data-testid가 달라도 동일하게 처리 */
+/* ----- BUTTONS: one neutral system + one green primary system ----- */
 html body .stApp button,
 html body .stApp [role="button"] {
-  color:var(--ui-text)!important;
-}
-html body .stApp .stButton > button,
-html body .stApp .stDownloadButton > button,
-html body .stApp .stFormSubmitButton > button,
-html body .stApp button[data-testid^="stBaseButton"],
-html body .stApp [data-testid^="st-key-"] button,
-html body .stApp [class*="st-key-top_quick_"] button {
   background:var(--ui-surface-2)!important;
   color:var(--ui-text)!important;
   border:1px solid var(--ui-line)!important;
+  box-shadow:none!important;
 }
-html body .stApp .stButton > button:hover,
-html body .stApp .stDownloadButton > button:hover,
-html body .stApp .stFormSubmitButton > button:hover,
-html body .stApp button[data-testid^="stBaseButton"]:hover {
+html body .stApp button:hover,
+html body .stApp [role="button"]:hover {
   background:var(--ui-soft)!important;
   color:#fff!important;
-  border-color:#3d444f!important;
+  border-color:#5a5a5a!important;
 }
+html body .stApp button:focus,
+html body .stApp [role="button"]:focus {
+  outline:none!important;
+  box-shadow:0 0 0 2px var(--ui-focus)!important;
+}
+
+/* Primary actions */
+html body .stApp button[kind="primary"],
+html body .stApp [data-testid^="stBaseButton-primary"],
+html body .stApp [data-testid^="stBaseButton"][kind="primary"],
 html body .stApp .stButton > button[kind="primary"],
 html body .stApp .stFormSubmitButton > button[kind="primary"],
-html body .stApp button[data-testid^="stBaseButton-primary"],
-html body .stApp [data-testid^="st-key-"] button[kind="primary"],
 html body .stApp [class*="st-key-top_quick_save"] button {
   background:var(--ui-accent)!important;
   color:#fff!important;
   border-color:var(--ui-accent)!important;
 }
-html body .stApp .stButton > button[kind="primary"]:hover,
-html body .stApp button[data-testid^="stBaseButton-primary"]:hover {
+html body .stApp button[kind="primary"]:hover,
+html body .stApp [data-testid^="stBaseButton-primary"]:hover {
   background:var(--ui-accent-hover)!important;
   color:#fff!important;
 }
 
-/* 입력 컨트롤 */
+/* Danger actions keep semantic red */
+html body .stApp .danger,
+html body .stApp .danger button,
+html body .stApp button[data-danger="true"] {
+  background:var(--ui-danger)!important;
+  color:#fff!important;
+  border-color:var(--ui-danger)!important;
+}
+
+/* ----- INPUTS / SELECTS / DATE INPUTS ----- */
+html body .stApp input,
+html body .stApp textarea,
+html body .stApp select,
 html body .stApp [data-baseweb="input"],
 html body .stApp [data-baseweb="textarea"],
 html body .stApp [data-baseweb="select"] > div,
 html body .stApp [data-testid="stDateInput"] > div > div,
-html body .stApp input, html body .stApp textarea, html body .stApp select {
+html body .stApp [data-baseweb="select"] {
   background:var(--ui-surface-2)!important;
   color:var(--ui-text)!important;
   border-color:var(--ui-line)!important;
-}
-html body .stApp [data-baseweb="input"] input,
-html body .stApp [data-baseweb="textarea"] textarea,
-html body .stApp [data-baseweb="select"] input,
-html body .stApp input, html body .stApp textarea {
-  color:var(--ui-text)!important;
   -webkit-text-fill-color:var(--ui-text)!important;
+}
+html body .stApp input,
+html body .stApp textarea {
   background:transparent!important;
 }
 html body .stApp input::placeholder,
-html body .stApp textarea::placeholder { color:var(--ui-muted-2)!important; opacity:1!important; }
-
-/* 라디오/탭/셀렉트 */
-.app-topbar [data-testid="stRadio"] [role="radiogroup"] {
-  background:var(--ui-surface)!important; border-color:var(--ui-line)!important;
-}
-.app-topbar [data-testid="stRadio"] [role="radio"] { color:var(--ui-muted)!important; }
-.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
-  background:#252a32!important; color:#fff!important; box-shadow:none!important;
-}
-html body .stApp [data-testid="stRadio"] [role="radio"] {
-  background:var(--ui-surface-2)!important; color:var(--ui-text-2)!important; border-color:var(--ui-line)!important;
-}
-html body .stApp [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
-  background:#252a32!important; color:#fff!important; border-color:#3d444f!important;
-}
-[data-baseweb="tab-list"] { background:transparent!important; border-color:var(--ui-line-soft)!important; }
-[data-baseweb="tab"] { color:var(--ui-muted)!important; }
-[data-baseweb="tab"][aria-selected="true"] { color:var(--ui-text)!important; }
-
-/* 데이터프레임 / 시간표 */
-html body .stApp [data-testid="stDataFrame"],
-html body .stApp [data-testid="stDataEditor"] {
-  background:var(--ui-surface)!important; border-color:var(--ui-line)!important;
-}
-html body .stApp [data-testid="stDataFrame"] [role="columnheader"],
-html body .stApp [data-testid="stDataEditor"] [role="columnheader"] {
-  background:var(--ui-soft)!important; color:var(--ui-text-2)!important; border-color:var(--ui-line-soft)!important;
-}
-html body .stApp [data-testid="stDataFrame"] [role="gridcell"],
-html body .stApp [data-testid="stDataEditor"] [role="gridcell"] {
-  background:var(--ui-surface)!important; color:var(--ui-text)!important; border-color:var(--ui-line-soft)!important;
+html body .stApp textarea::placeholder {
+  color:var(--ui-muted-2)!important;
+  opacity:1!important;
 }
 
-/* Dialog / Popover / Alert */
-html body .stApp [data-testid="stDialog"] > div > div,
-html body .stApp [data-testid="stDialog"] [data-testid="stVerticalBlockBorderWrapper"] {
-  background:var(--ui-surface)!important; color:var(--ui-text)!important;
-  border-color:var(--ui-line)!important;
-}
-html body .stApp [data-testid="stAlert"] {
-  background:var(--ui-surface-2)!important; color:var(--ui-text)!important; border-color:var(--ui-line)!important;
-}
-html body .stApp [data-baseweb="popover"],
+/* Selectbox / popover menus */
 html body .stApp [data-baseweb="menu"],
 html body .stApp [role="listbox"],
-html body .stApp [role="menu"] {
-  background:var(--ui-surface)!important; color:var(--ui-text)!important; border-color:var(--ui-line)!important;
+html body .stApp [role="option"] {
+  background:var(--ui-surface)!important;
+  color:var(--ui-text)!important;
 }
-html body .stApp [role="option"], html body .stApp [role="menuitem"] { color:var(--ui-text)!important; }
-html body .stApp [role="option"]:hover, html body .stApp [role="menuitem"]:hover { background:var(--ui-soft)!important; }
+html body .stApp [role="option"][aria-selected="true"] {
+  background:var(--ui-soft)!important;
+}
 
-a { color:#70a7ff!important; }
-hr, [data-testid="stDivider"] { border-color:var(--ui-line-soft)!important; }
-.app-topbar { border-bottom-color:var(--ui-line-soft)!important; }
-"""
-    elif theme == "xai":
-        css = r"""
-:root {
-  color-scheme: dark;
-  --ui-bg:#07080b; --ui-surface:#0d1016; --ui-surface-2:#11151d;
-  --ui-soft:#151922; --ui-soft-2:#10131a;
-  --ui-text:#f4f7fb; --ui-text-2:#d9e0ea; --ui-muted:#9199a8; --ui-muted-2:#747d8d;
-  --ui-line:#252c38; --ui-line-soft:#1b212b; --ui-accent:#3b82f6; --ui-accent-hover:#60a5fa;
+/* ----- RADIO / TABS / CHECKBOX ----- */
+html body .stApp [data-testid="stRadio"] [role="radiogroup"] {
+  background:var(--ui-surface)!important;
+  border-color:var(--ui-line)!important;
 }
-html,body,.stApp,[data-testid="stApp"],[data-testid="stAppViewContainer"],[data-testid="stMain"],
-[data-testid="stMainBlockContainer"],[data-testid="stAppViewContainer"] > section,section.main,.main {
-  background:var(--ui-bg)!important;color:var(--ui-text)!important;
+html body .stApp [data-testid="stRadio"] [role="radio"] {
+  color:var(--ui-muted)!important;
 }
-[data-testid="stHeader"] { background:rgba(7,8,11,.94)!important;border-bottom:1px solid var(--ui-line-soft)!important; }
-[data-testid="stVerticalBlockBorderWrapper"],[data-testid="stExpander"],[data-testid="stDialog"]>div>div,.ui-kpi { background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
-html body .stApp button { color:var(--ui-text)!important; }
-html body .stApp .stButton>button,html body .stApp .stDownloadButton>button,html body .stApp .stFormSubmitButton>button,html body .stApp button[data-testid^="stBaseButton"],html body .stApp [data-testid^="st-key-"] button { background:var(--ui-surface-2)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
-html body .stApp button[data-testid^="stBaseButton-primary"],html body .stApp .stButton>button[kind="primary"],html body .stApp [class*="st-key-top_quick_save"] button { background:var(--ui-accent)!important;color:#fff!important;border-color:var(--ui-accent)!important; }
-html body .stApp [data-baseweb="input"],html body .stApp [data-baseweb="textarea"],html body .stApp [data-baseweb="select"]>div,html body .stApp [data-testid="stDateInput"]>div>div { background:var(--ui-surface-2)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
-html body .stApp input,html body .stApp textarea { color:var(--ui-text)!important;-webkit-text-fill-color:var(--ui-text)!important;background:transparent!important; }
-html body .stApp [data-testid="stDataFrame"],html body .stApp [data-testid="stDataEditor"] { background:var(--ui-surface)!important;border-color:var(--ui-line)!important; }
-html body .stApp [data-testid="stDataFrame"] [role="columnheader"],html body .stApp [data-testid="stDataEditor"] [role="columnheader"] { background:var(--ui-soft)!important;color:var(--ui-text-2)!important; }
-html body .stApp [data-testid="stDataFrame"] [role="gridcell"],html body .stApp [data-testid="stDataEditor"] [role="gridcell"] { background:var(--ui-surface)!important;color:var(--ui-text)!important; }
-"""
-    else:
-        css = r"""
-:root {
-  color-scheme: light;
-  --ui-bg:#ffffff; --ui-surface:#ffffff; --ui-surface-2:#ffffff;
-  --ui-soft:#f5f5f7; --ui-soft-2:#fafafc;
-  --ui-text:#1d1d1f; --ui-text-2:#3a3a3c; --ui-muted:#6e6e73; --ui-muted-2:#86868b;
-  --ui-line:#d2d2d7; --ui-line-soft:#e5e5ea; --ui-accent:#0066cc; --ui-accent-hover:#0071e3;
+html body .stApp [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
+  background:var(--ui-soft)!important;
+  color:#fff!important;
 }
-html,body,.stApp,[data-testid="stApp"],[data-testid="stAppViewContainer"],[data-testid="stMain"],
-[data-testid="stMainBlockContainer"],[data-testid="stAppViewContainer"] > section,section.main,.main {
-  background:var(--ui-bg)!important;color:var(--ui-text)!important;
-}
-[data-testid="stHeader"] { background:rgba(255,255,255,.94)!important;border-bottom:1px solid var(--ui-line-soft)!important; }
-html body .stApp button { color:var(--ui-text)!important; }
-html body .stApp .stButton>button,html body .stApp .stDownloadButton>button,html body .stApp .stFormSubmitButton>button,html body .stApp button[data-testid^="stBaseButton"],html body .stApp [data-testid^="st-key-"] button { background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
-html body .stApp button[data-testid^="stBaseButton-primary"],html body .stApp .stButton>button[kind="primary"],html body .stApp [class*="st-key-top_quick_save"] button { background:#1d1d1f!important;color:#fff!important;border-color:#1d1d1f!important; }
-html body .stApp [data-baseweb="input"],html body .stApp [data-baseweb="textarea"],html body .stApp [data-baseweb="select"]>div,html body .stApp [data-testid="stDateInput"]>div>div { background:#fff!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
-html body .stApp input,html body .stApp textarea { color:var(--ui-text)!important;-webkit-text-fill-color:var(--ui-text)!important;background:transparent!important; }
-html body .stApp [data-testid="stDataFrame"],html body .stApp [data-testid="stDataEditor"] { background:#fff!important;border-color:var(--ui-line)!important; }
-"""
-    # Streamlit 버전별 내부 래퍼와 이후 컴포넌트 CSS까지 마지막 우선순위로 통일한다.
-    final_override = r"""
-/* ===== FINAL THEME OVERRIDE: 전체 viewport + 후속 컴포넌트까지 일원화 ===== */
-html, body, #root, body > div,
-html body .stApp,
-html body [data-testid="stAppViewContainer"],
-html body [data-testid="stAppViewContainer"] > .main,
-html body [data-testid="stMain"],
-html body [data-testid="stMainBlockContainer"],
-html body [data-testid="stMainBlockContainer"] > div,
-html body section.main,
-html body section.main > div {
-  background:var(--ui-bg)!important;
-  color:var(--ui-text)!important;
-}
-html body [data-testid="stAppViewContainer"] > .main > div,
-html body [data-testid="stMainBlockContainer"] > div:first-child {
+html body .stApp [data-baseweb="tab-list"] {
   background:transparent!important;
+  border-color:var(--ui-line-soft)!important;
 }
-html body .block-container {
-  background:transparent!important;
+html body .stApp [data-baseweb="tab"] {
+  color:var(--ui-muted)!important;
+}
+html body .stApp [data-baseweb="tab"][aria-selected="true"] {
   color:var(--ui-text)!important;
 }
-html body [data-testid="stHeader"],
-html body [data-testid="stToolbar"],
-html body [data-testid="stDecoration"] {
+
+/* ----- DATAFRAME / DATA EDITOR / HTML TABLE ----- */
+html body .stApp [data-testid="stDataFrame"],
+html body .stApp [data-testid="stDataEditor"] {
+  background:var(--ui-surface)!important;
   color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
 }
-html body .stApp .stButton > button,
-html body .stApp .stDownloadButton > button,
-html body .stApp .stFormSubmitButton > button,
-html body .stApp button[data-testid^="stBaseButton"],
-html body .stApp [data-testid^="st-key-"] button {
+html body .stApp [data-testid="stDataFrame"] [role="columnheader"],
+html body .stApp [data-testid="stDataEditor"] [role="columnheader"],
+html body .stApp table thead,
+html body .stApp table th {
+  background:var(--ui-bg-deep)!important;
+  color:var(--ui-text-2)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp [data-testid="stDataFrame"] [role="gridcell"],
+html body .stApp [data-testid="stDataEditor"] [role="gridcell"],
+html body .stApp table tbody,
+html body .stApp table td {
+  background:var(--ui-surface)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line-soft)!important;
+}
+
+/* ----- CALENDAR / CUSTOM APP CONTROLS ----- */
+html body .stApp [class*="calendar"],
+html body .stApp [class*="date"],
+html body .stApp [class*="month"],
+html body .stApp [class*="day"] {
+  color:var(--ui-text);
+}
+html body .stApp [class*="calendar"] button,
+html body .stApp [class*="date"] button,
+html body .stApp [class*="month"] button,
+html body .stApp [class*="day"] button {
   background:var(--ui-surface-2)!important;
   color:var(--ui-text)!important;
   border-color:var(--ui-line)!important;
 }
-html body .stApp .stButton > button:hover,
-html body .stApp .stDownloadButton > button:hover,
-html body .stApp button[data-testid^="stBaseButton"]:hover,
-html body .stApp [data-testid^="st-key-"] button:hover {
-  background:var(--ui-soft)!important;
+
+/* ----- DIALOG / POPOVER ----- */
+html body .stApp [data-testid="stDialog"],
+html body .stApp [data-testid="stDialog"] > div,
+html body .stApp [data-testid="stDialog"] > div > div,
+html body .stApp [data-testid="stPopover"],
+html body .stApp [data-baseweb="popover"] {
+  background:var(--ui-surface)!important;
   color:var(--ui-text)!important;
   border-color:var(--ui-line)!important;
 }
-html body .stApp .stButton > button[kind="primary"],
-html body .stApp .stFormSubmitButton > button[kind="primary"],
-html body .stApp button[data-testid^="stBaseButton-primary"],
-html body .stApp [data-testid^="st-key-"] button[kind="primary"] {
+
+/* ----- ALERT / NOTE / DIVIDER ----- */
+html body .stApp [data-testid="stAlert"] {
+  background:var(--ui-surface-2)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp hr,
+html body .stApp [data-testid="stDivider"] {
+  border-color:var(--ui-line-soft)!important;
+}
+
+/* ----- APP TOP BAR ----- */
+html body .stApp .app-topbar {
+  background:var(--ui-bg)!important;
+  border-bottom:1px solid var(--ui-line-soft)!important;
+}
+html body .stApp .app-topbar * {
+  color:var(--ui-text)!important;
+}
+html body .stApp .app-topbar button {
+  background:var(--ui-surface-2)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp .app-topbar button[kind="primary"],
+html body .stApp .app-topbar [class*="save"] button {
   background:var(--ui-accent)!important;
   color:#fff!important;
   border-color:var(--ui-accent)!important;
 }
-html body .stApp [data-baseweb="input"],
-html body .stApp [data-baseweb="textarea"],
-html body .stApp [data-baseweb="select"] > div,
-html body .stApp [data-testid="stDateInput"] > div > div,
-html body .stApp [data-testid="stDataFrame"],
-html body .stApp [data-testid="stDataEditor"] {
-  background:var(--ui-surface-2)!important;
-  color:var(--ui-text)!important;
-  border-color:var(--ui-line)!important;
-}
-html body .stApp [data-testid="stVerticalBlockBorderWrapper"],
-html body .stApp [data-testid="stExpander"],
-html body .stApp [data-testid="stDialog"] > div > div,
-html body .stApp [data-testid="stPopover"],
-html body .stApp [data-baseweb="popover"],
-html body .stApp [role="dialog"] {
-  background:var(--ui-surface)!important;
-  color:var(--ui-text)!important;
-  border-color:var(--ui-line)!important;
-}
-html body .stApp [data-testid="stDataFrame"] [role="gridcell"],
-html body .stApp [data-testid="stDataEditor"] [role="gridcell"] {
-  background:var(--ui-surface)!important;
+
+/* ----- REMOVE COMMON WHITE SURFACES LEFT BY STREAMLIT ----- */
+html body .stApp :where(
+  [data-baseweb="base-input"],
+  [data-baseweb="select"],
+  [data-testid="stForm"],
+  [data-testid="stVerticalBlockBorderWrapper"],
+  [data-testid="stHorizontalBlock"]
+) {
   color:var(--ui-text)!important;
 }
-html body .stApp [data-testid="stDataFrame"] [role="columnheader"],
-html body .stApp [data-testid="stDataEditor"] [role="columnheader"] {
-  background:var(--ui-soft)!important;
-  color:var(--ui-text-2)!important;
+
+/* Explicitly neutralize Streamlit's native light color variables where available. */
+html body .stApp,
+html body .stApp * {
+  --background-color:var(--ui-bg)!important;
+  --secondary-background-color:var(--ui-surface)!important;
+  --text-color:var(--ui-text)!important;
+  --border-color:var(--ui-line)!important;
+  --primary-color:var(--ui-accent)!important;
+}
+
+/* The browser must not introduce a second light/dark theme. */
+html { background:var(--ui-bg)!important; color-scheme:dark!important; }
+body { background:var(--ui-bg)!important; color:var(--ui-text)!important; }
+
+/* Fixed app theme marker */
+html body .stApp::before {
+  content:"";
+  display:none;
 }
 """
-    css = css + final_override
     st.markdown(f'<style id="runtime-app-theme">{css}</style>', unsafe_allow_html=True)
 
-if "ui_theme" not in st.session_state or st.session_state.ui_theme not in {"light", "black", "xai"}:
-    st.session_state.ui_theme = UI_THEME_OPTIONS[UI_THEME_DEFAULT]
-render_theme_runtime_css(st.session_state.ui_theme)
+# 이전 버전에서 저장된 light/black/xai 값도 단일 테마로 자동 마이그레이션한다.
+if st.session_state.get("ui_theme") != "chatgpt":
+    st.session_state.ui_theme = "chatgpt"
+render_theme_runtime_css("chatgpt")
 render_font_runtime_css(st.session_state.get("ui_font", UI_FONT_DEFAULT))
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
@@ -5822,12 +5839,11 @@ if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_
     st.session_state.ui_font = UI_FONT_DEFAULT
 # 도구 다이얼로그의 글꼴 변경도 동일한 단일 런타임 함수로 처리한다.
 render_font_runtime_css(st.session_state.ui_font)
+render_theme_runtime_css("chatgpt")
 st.markdown('<div class="streamlit-header-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
 def _apply_ui_theme_from_dialog():
-    selected = st.session_state.get("ui_theme_selector", UI_THEME_OPTIONS[UI_THEME_DEFAULT])
-    if selected not in {"light", "black", "xai"}:
-        selected = UI_THEME_OPTIONS[UI_THEME_DEFAULT]
-    st.session_state.ui_theme = selected
+    # 단일 테마이므로 어떤 Streamlit/OS 테마가 선택되어 있어도 앱은 ChatGPT Gray로 고정한다.
+    st.session_state.ui_theme = "chatgpt"
     st.rerun(scope="app")
 
 
@@ -5859,7 +5875,7 @@ def render_tools_dialog():
         index=list(UI_THEME_OPTIONS.values()).index(st.session_state.get("ui_theme", UI_THEME_OPTIONS[UI_THEME_DEFAULT])),
         key="ui_theme_selector",
         on_change=_apply_ui_theme_from_dialog,
-        help="Apple Light / Black / X.AI 디자인을 앱 전체에 적용합니다.",
+        help="Streamlit 설정과 무관하게 앱 전체에 ChatGPT Gray 디자인을 적용합니다.",
     )
     selected_font = st.selectbox(
         "글꼴",
