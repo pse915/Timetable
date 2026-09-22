@@ -1,7 +1,2 @@
-streamlit
-pandas
-numpy
-openpyxl
-xlsxwriter
-gspread
-google-auth
+streamlit>=1.30.0
+pandas>=2.0.0
