@@ -5,6 +5,7 @@ import math
 import os
 import html as html_lib
 from contextlib import contextmanager
+from pathlib import Path
 from functools import lru_cache
 import uuid
 import threading
@@ -28,12 +29,12 @@ from openpyxl.worksheet.page import PageMargins
 st.set_page_config(page_title="시간표·결보강 관리", page_icon="📘", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""
 <style>
-:root{--ui-bg:#ffffff;--ui-surface:#ffffff;--ui-soft:#f5f5f7;--ui-soft-2:#fafafc;--ui-text:#1d1d1f;--ui-text-2:#3a3a3c;--ui-muted:#6e6e73;--ui-muted-2:#86868b;--ui-line:#d2d2d7;--ui-line-soft:#e5e5ea;--ui-accent:#0066cc;--ui-accent-hover:#0071e3;--ui-focus:rgba(0,102,204,.20);--ui-success:#1b7f3a;--ui-danger:#c62828;--ui-radius-sm:8px;--ui-radius-md:12px;--ui-radius-lg:16px;--ui-pill:999px;}html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"]{background:var(--ui-bg)!important;color:var(--ui-text)!important}body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{font-family:var(--app-font,"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif)!important}body,body *{font-synthesis:auto}table,thead,tbody,tfoot,tr,th,td,caption{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}[data-baseweb] *,[data-testid="stPopover"] *,[data-testid="stDialog"] *,[data-testid="stExpander"] *,[data-testid="stSidebar"] *,[role="menu"] *,[role="option"] *,[role="listbox"] *,[role="tooltip"] *{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] *{--gdg-font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;}[data-testid="stDataFrame"],[data-testid="stDataEditor"]{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;}[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"],[data-testid="stDataEditor"] [role="gridcell"],[data-testid="stDataEditor"] [role="columnheader"]{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}[data-testid="stAppViewContainer"] svg text,.js-plotly-plot text,.plotly .legendtext,.plotly .gtitle,.plotly .xtick text,.plotly .ytick text{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}[class*="material-symbols"],[data-testid="stIconMaterial"],[class*="MaterialSymbols"],[data-testid="stIconMaterial"] *,[aria-label="More options"] span{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-style:normal!important}[data-testid="stHeader"]{background:rgba(255,255,255,.88)!important;border-bottom:1px solid var(--ui-line-soft)!important;backdrop-filter:saturate(150%) blur(16px)}[data-testid="stDecoration"]{display:none!important}.block-container{width:100%!important;max-width:none!important;padding:0 clamp(16px,2.2vw,42px) 36px!important}.app-top-safe-space{height:30px;width:100%}.app-topbar{position:relative;z-index:3;display:flex;align-items:center;gap:14px;min-height:54px;padding:4px 0 8px;margin:0 0 14px;border-bottom:1px solid var(--ui-line-soft)}.app-identity{white-space:nowrap;color:var(--ui-muted);font-size:12px;line-height:1.25}.app-identity strong{color:var(--ui-text);font-weight:600}.app-topbar .stButton>button{min-height:34px!important;padding:6px 13px!important;border-radius:var(--ui-pill)!important;font-size:12px!important}.app-topbar [data-testid="stRadio"] [role="radiogroup"]{display:flex!important;align-items:center!important;gap:2px!important;width:100%!important;padding:2px!important;background:var(--ui-soft)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-pill)!important;overflow-x:auto!important;scrollbar-width:none}.app-topbar [data-testid="stRadio"] [role="radiogroup"]::-webkit-scrollbar{display:none}.app-topbar [data-testid="stRadio"] [role="radio"]{flex:0 0 auto!important;min-height:34px!important;padding:0 14px!important;border-radius:var(--ui-pill)!important;color:var(--ui-muted)!important;font-size:13px!important;font-weight:500!important;background:transparent!important;border:0!important}.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-weight:600!important;box-shadow:0 1px 3px rgba(0,0,0,.08)!important}.app-topbar [data-testid="stRadio"] [role="radio"]>div:first-child{display:none!important}.app-topbar [data-testid="stSelectbox"]>div>div{min-height:34px!important;border-radius:var(--ui-pill)!important;background:var(--ui-soft)!important;border-color:var(--ui-line-soft)!important}.work-page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:8px 2px 16px;margin:0 0 18px;border-bottom:1px solid var(--ui-line-soft)}.work-page-head h1{margin:0!important;font-size:30px!important;line-height:1.12!important;font-weight:600!important;letter-spacing:-.04em!important;color:var(--ui-text)!important}.work-page-head p{margin:6px 0 0!important;font-size:13px!important;line-height:1.45!important;color:var(--ui-muted)!important}.work-page-meta{font-size:12px;color:var(--ui-muted);white-space:nowrap;padding-bottom:3px}.work-section{margin:0 0 24px}.work-section-title{font-size:14px;font-weight:600;color:var(--ui-text);margin:0 0 8px 2px}.work-section-note{font-size:12px;color:var(--ui-muted);margin:-3px 0 10px 2px}[data-testid="stVerticalBlockBorderWrapper"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-lg)!important;box-shadow:none!important}[data-testid="stExpander"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-md)!important;box-shadow:none!important;overflow:hidden!important}[data-testid="stExpander"] summary{min-height:42px!important;padding:6px 12px!important;color:var(--ui-text)!important;font-size:13px!important;font-weight:600!important}[data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}h1,h2,h3,h4,h5,h6{color:var(--ui-text)!important}h2{font-size:22px!important;font-weight:600!important;letter-spacing:-.025em!important}h3{font-size:18px!important;font-weight:600!important;letter-spacing:-.02em!important}h4{font-size:15px!important;font-weight:600!important}[data-testid="stCaptionContainer"],.stCaption{color:var(--ui-muted)!important;font-size:12px!important;line-height:1.45!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:40px!important;padding:7px 16px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;box-shadow:none!important;transform:none!important;transition:background .12s ease,border-color .12s ease!important;font-size:13px!important;font-weight:500!important}.stButton>button:hover,.stDownloadButton>button:hover,.stFormSubmitButton>button:hover{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;box-shadow:none!important}.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{background:var(--ui-accent)!important;border-color:var(--ui-accent)!important;color:#fff!important;font-weight:600!important}.stButton>button[kind="primary"]:hover,.stFormSubmitButton>button[kind="primary"]:hover{background:var(--ui-accent-hover)!important;border-color:var(--ui-accent-hover)!important}.stButton>button:focus-visible,.stDownloadButton>button:focus-visible,.stFormSubmitButton>button:focus-visible{outline:3px solid var(--ui-focus)!important;outline-offset:1px}[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{min-height:40px!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-sm)!important;box-shadow:none!important}[data-baseweb="input"] input,[data-baseweb="textarea"] textarea,[data-baseweb="select"] input{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-text)!important;background:transparent!important;font-size:13px!important}input::placeholder,textarea::placeholder{color:var(--ui-muted-2)!important}[data-baseweb="input"]:focus-within,[data-baseweb="textarea"]:focus-within,[data-baseweb="select"]:focus-within{border-color:var(--ui-accent)!important;box-shadow:0 0 0 3px var(--ui-focus)!important}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{display:flex!important;gap:6px!important;padding:0!important;background:transparent!important;border:0!important;overflow:visible!important;flex-wrap:wrap}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;padding:6px 13px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text-2)!important;font-size:13px!important;font-weight:500!important}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"]{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;color:var(--ui-text)!important;font-weight:600!important}.swap-result-summary{margin:8px 0 10px;padding:8px 12px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft);font-size:12px;color:var(--ui-muted)}.swap-result-summary strong{color:var(--ui-text);font-weight:600}.matrix-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 9px}.matrix-title{font-size:14px;font-weight:600;color:var(--ui-text)}.matrix-subtitle{font-size:12px;color:var(--ui-muted)}.matrix-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--ui-muted);margin:0 0 8px 2px}.matrix-legend span{white-space:nowrap}[data-testid="stDataFrame"]{border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-md)!important;overflow:hidden!important;background:var(--ui-surface)!important;box-shadow:none!important}[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important;font-size:12px!important;font-weight:600!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-size:13px!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}.changed-teacher-block{margin:18px 0 6px}.changed-teacher-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 2px 8px;border-bottom:1px solid var(--ui-line-soft)}.changed-teacher-name{font-size:16px;font-weight:650;color:var(--ui-text);letter-spacing:-.02em}.changed-teacher-index{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin-right:7px;border-radius:8px;background:var(--ui-soft);color:var(--ui-muted);font-size:11px;font-weight:650}.changed-teacher-subject{margin-left:7px;color:var(--ui-muted);font-size:12px}.changed-teacher-status{font-size:11px;color:var(--ui-muted);white-space:nowrap}.changed-teacher-badge{display:inline-flex;align-items:center;margin-left:8px;padding:3px 7px;border-radius:999px;background:#fff3cd;color:#7a5b00;font-size:10px;font-weight:650;border:1px solid #f0d98a}.changed-teacher-divider{height:1px;background:var(--ui-line-soft);margin:24px 0 8px}.streamlit-header-safe-space{height:18px;width:100%;display:block;flex:0 0 auto}.changed-teacher-selector{display:flex;align-items:center;gap:8px;margin:0 0 10px}.changed-teacher-chip{display:inline-flex;align-items:center;padding:7px 10px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft-2);color:var(--ui-text);font-size:12px}.apple-note,.work-note{padding:10px 12px;margin:0 0 12px;background:var(--ui-soft-2);border:1px solid var(--ui-line-soft);border-radius:10px;color:var(--ui-muted);font-size:12px;line-height:1.5}.apple-note strong,.work-note strong{color:var(--ui-text)}.sandbox-title{margin:0 0 4px!important;font-size:24px!important;line-height:1.2!important;font-weight:600!important;letter-spacing:-.045em!important;color:var(--ui-text)!important}.swap-group-head{display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px;padding-top:4px}.swap-group-title{font-size:13px;font-weight:600;color:var(--ui-text)}.swap-group-count{font-size:11px;color:var(--ui-muted);padding:3px 7px;border:1px solid var(--ui-line-soft);border-radius:999px;background:var(--ui-soft)}[data-testid="stDialog"]>div>div{max-height:calc(100vh - 5rem)!important;overflow-y:auto!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:18px!important;box-shadow:0 18px 48px rgba(0,0,0,.14)!important}[data-testid="stDialog"] [data-testid="stVerticalBlockBorderWrapper"]{border:0!important;background:transparent!important}[data-testid="stDialog"] [data-testid="stSlider"]{margin:0!important;padding:3px 0!important}[data-testid="stDialog"] [data-testid="stSlider"]>label{display:none!important}[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"]{min-height:34px!important;margin:0!important}[data-baseweb="tab-list"]{gap:4px!important;border-bottom:1px solid var(--ui-line-soft)!important}[data-baseweb="tab"]{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-muted)!important}[data-baseweb="tab"][aria-selected="true"]{color:var(--ui-text)!important}a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var(--ui-line-soft)!important}[data-testid="stMetric"]{padding:8px 0!important}.ui-kpi-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px}.ui-kpi{padding:13px 15px;border:1px solid var(--ui-line-soft);border-radius:12px;background:var(--ui-surface)}.ui-kpi-label{font-size:11px;color:var(--ui-muted)}.ui-kpi-value{margin-top:4px;font-size:21px;font-weight:600;color:var(--ui-text)}@media(max-width:900px){.block-container{padding-left:12px!important;padding-right:12px!important}.app-top-safe-space{height:24px}.work-page-head{display:block}.work-page-meta{margin-top:8px}.ui-kpi-row{grid-template-columns:1fr}.app-topbar{overflow:hidden}}@media(prefers-color-scheme:dark){:root{--ui-bg:#000;--ui-surface:#1c1c1e;--ui-soft:#2c2c2e;--ui-soft-2:#232326;--ui-text:#f5f5f7;--ui-text-2:#e5e5ea;--ui-muted:#a1a1a6;--ui-muted-2:#8e8e93;--ui-line:#48484a;--ui-line-soft:#38383a;--ui-accent:#2997ff;--ui-accent-hover:#47a6ff;--ui-focus:rgba(41,151,255,.30)}[data-testid="stHeader"]{background:rgba(0,0,0,.76)!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button,[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"]{background:var(--ui-surface)!important;border-color:var(--ui-line)!important}[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important}[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important}[data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}[data-testid="stDialog"]>div>div{background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important}.ui-kpi{background:var(--ui-surface)!important;border-color:var(--ui-line-soft)!important}}
+:root{--ui-bg:#ffffff;--ui-surface:#ffffff;--ui-soft:#f5f5f7;--ui-soft-2:#fafafc;--ui-text:#1d1d1f;--ui-text-2:#3a3a3c;--ui-muted:#6e6e73;--ui-muted-2:#86868b;--ui-line:#d2d2d7;--ui-line-soft:#e5e5ea;--ui-accent:#0066cc;--ui-accent-hover:#0071e3;--ui-focus:rgba(0,102,204,.20);--ui-success:#1b7f3a;--ui-danger:#c62828;--ui-radius-sm:8px;--ui-radius-md:12px;--ui-radius-lg:16px;--ui-pill:999px;}html,body,[data-testid="stAppViewContainer"],[data-testid="stApp"],[data-testid="stMain"]{background:var(--ui-bg)!important;color:var(--ui-text)!important}body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{font-family:var(--app-font,"SF Pro Text","SF Pro Display",-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif)!important}body,body *{font-synthesis:auto}table,thead,tbody,tfoot,tr,th,td,caption{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}[data-baseweb] *,[data-testid="stPopover"] *,[data-testid="stDialog"] *,[data-testid="stExpander"] *,[data-testid="stSidebar"] *,[role="menu"] *,[role="option"] *,[role="listbox"] *,[role="tooltip"] *{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] *{--gdg-font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;}[data-testid="stDataFrame"],[data-testid="stDataEditor"]{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;}[data-testid="stDataFrame"] [role="gridcell"],[data-testid="stDataFrame"] [role="columnheader"],[data-testid="stDataEditor"] [role="gridcell"],[data-testid="stDataEditor"] [role="columnheader"]{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}[data-testid="stAppViewContainer"] svg text,.js-plotly-plot text,.plotly .legendtext,.plotly .gtitle,.plotly .xtick text,.plotly .ytick text{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important}[class*="material-symbols"],[data-testid="stIconMaterial"],[class*="MaterialSymbols"],[data-testid="stIconMaterial"] *,[aria-label="More options"] span{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important;font-style:normal!important}[data-testid="stHeader"]{background:rgba(255,255,255,.88)!important;border-bottom:1px solid var(--ui-line-soft)!important;backdrop-filter:saturate(150%) blur(16px)}[data-testid="stDecoration"]{display:none!important}.block-container{width:100%!important;max-width:none!important;padding:0 clamp(16px,2.2vw,42px) 36px!important}.app-top-safe-space{height:30px;width:100%}.app-topbar{position:relative;z-index:3;display:flex;align-items:center;gap:14px;min-height:54px;padding:4px 0 8px;margin:0 0 14px;border-bottom:1px solid var(--ui-line-soft)}.app-identity{white-space:nowrap;color:var(--ui-muted);font-size:12px;line-height:1.25}.app-identity strong{color:var(--ui-text);font-weight:600}.app-topbar .stButton>button{min-height:34px!important;padding:6px 13px!important;border-radius:var(--ui-pill)!important;font-size:12px!important}.app-topbar [data-testid="stRadio"] [role="radiogroup"]{display:flex!important;align-items:center!important;gap:2px!important;width:100%!important;padding:2px!important;background:var(--ui-soft)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-pill)!important;overflow-x:auto!important;scrollbar-width:none}.app-topbar [data-testid="stRadio"] [role="radiogroup"]::-webkit-scrollbar{display:none}.app-topbar [data-testid="stRadio"] [role="radio"]{flex:0 0 auto!important;min-height:34px!important;padding:0 14px!important;border-radius:var(--ui-pill)!important;color:var(--ui-muted)!important;font-size:13px!important;font-weight:500!important;background:transparent!important;border:0!important}.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-weight:600!important;box-shadow:0 1px 3px rgba(0,0,0,.08)!important}.app-topbar [data-testid="stRadio"] [role="radio"]>div:first-child{display:none!important}.app-topbar [data-testid="stSelectbox"]>div>div{min-height:34px!important;border-radius:var(--ui-pill)!important;background:var(--ui-soft)!important;border-color:var(--ui-line-soft)!important}.work-page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:8px 2px 16px;margin:0 0 18px;border-bottom:1px solid var(--ui-line-soft)}.work-page-head h1{margin:0!important;font-size:30px!important;line-height:1.12!important;font-weight:600!important;letter-spacing:-.04em!important;color:var(--ui-text)!important}.work-page-head p{margin:6px 0 0!important;font-size:13px!important;line-height:1.45!important;color:var(--ui-muted)!important}.work-page-meta{font-size:12px;color:var(--ui-muted);white-space:nowrap;padding-bottom:3px}.work-section{margin:0 0 24px}.work-section-title{font-size:14px;font-weight:600;color:var(--ui-text);margin:0 0 8px 2px}.work-section-note{font-size:12px;color:var(--ui-muted);margin:-3px 0 10px 2px}[data-testid="stVerticalBlockBorderWrapper"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-lg)!important;box-shadow:none!important}[data-testid="stExpander"]{background:var(--ui-surface)!important;border:1px solid var(--ui-line-soft)!important;border-radius:var(--ui-radius-md)!important;box-shadow:none!important;overflow:hidden!important}[data-testid="stExpander"] summary{min-height:42px!important;padding:6px 12px!important;color:var(--ui-text)!important;font-size:13px!important;font-weight:600!important}[data-testid="stExpander"] summary:hover{background:var(--ui-soft)!important}h1,h2,h3,h4,h5,h6{color:var(--ui-text)!important}h2{font-size:22px!important;font-weight:600!important;letter-spacing:-.025em!important}h3{font-size:18px!important;font-weight:600!important;letter-spacing:-.02em!important}h4{font-size:15px!important;font-weight:600!important}[data-testid="stCaptionContainer"],.stCaption{color:var(--ui-muted)!important;font-size:12px!important;line-height:1.45!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:40px!important;padding:7px 16px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;box-shadow:none!important;transform:none!important;transition:background .12s ease,border-color .12s ease!important;font-size:13px!important;font-weight:500!important}.stButton>button:hover,.stDownloadButton>button:hover,.stFormSubmitButton>button:hover{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;box-shadow:none!important}.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{background:var(--ui-accent)!important;border-color:var(--ui-accent)!important;color:#fff!important;font-weight:600!important}.stButton>button[kind="primary"]:hover,.stFormSubmitButton>button[kind="primary"]:hover{background:var(--ui-accent-hover)!important;border-color:var(--ui-accent-hover)!important}.stButton>button:focus-visible,.stDownloadButton>button:focus-visible,.stFormSubmitButton>button:focus-visible{outline:3px solid var(--ui-focus)!important;outline-offset:1px}[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{min-height:40px!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-sm)!important;box-shadow:none!important}[data-baseweb="input"] input,[data-baseweb="textarea"] textarea,[data-baseweb="select"] input{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-text)!important;background:transparent!important;font-size:13px!important}input::placeholder,textarea::placeholder{color:var(--ui-muted-2)!important}[data-baseweb="input"]:focus-within,[data-baseweb="textarea"]:focus-within,[data-baseweb="select"]:focus-within{border-color:var(--ui-accent)!important;box-shadow:0 0 0 3px var(--ui-focus)!important}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{display:flex!important;gap:6px!important;padding:0!important;background:transparent!important;border:0!important;overflow:visible!important;flex-wrap:wrap}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;padding:6px 13px!important;border:1px solid var(--ui-line)!important;border-radius:var(--ui-pill)!important;background:var(--ui-surface)!important;color:var(--ui-text-2)!important;font-size:13px!important;font-weight:500!important}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"][aria-checked="true"]{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;color:var(--ui-text)!important;font-weight:600!important}.swap-result-summary{margin:8px 0 10px;padding:8px 12px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft);font-size:12px;color:var(--ui-muted)}.swap-result-summary strong{color:var(--ui-text);font-weight:600}.matrix-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 9px}.matrix-title{font-size:14px;font-weight:600;color:var(--ui-text)}.matrix-subtitle{font-size:12px;color:var(--ui-muted)}.matrix-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--ui-muted);margin:0 0 8px 2px}.matrix-legend span{white-space:nowrap}[data-testid="stDataFrame"]{border:1px solid var(--ui-line)!important;border-radius:var(--ui-radius-md)!important;overflow:hidden!important;background:var(--ui-surface)!important;box-shadow:none!important}[data-testid="stDataFrame"] [role="columnheader"]{background:var(--ui-soft)!important;color:var(--ui-text-2)!important;font-size:12px!important;font-weight:600!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}[data-testid="stDataFrame"] [role="gridcell"]{background:var(--ui-surface)!important;color:var(--ui-text)!important;font-size:13px!important;border-right:1px solid var(--ui-line-soft)!important;border-bottom:1px solid var(--ui-line-soft)!important}.changed-teacher-block{margin:18px 0 6px}.changed-teacher-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 2px 8px;border-bottom:1px solid var(--ui-line-soft)}.changed-teacher-name{font-size:16px;font-weight:650;color:var(--ui-text);letter-spacing:-.02em}.changed-teacher-index{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin-right:7px;border-radius:8px;background:var(--ui-soft);color:var(--ui-muted);font-size:11px;font-weight:650}.changed-teacher-subject{margin-left:7px;color:var(--ui-muted);font-size:12px}.changed-teacher-status{font-size:11px;color:var(--ui-muted);white-space:nowrap}.changed-teacher-badge{display:inline-flex;align-items:center;margin-left:8px;padding:3px 7px;border-radius:999px;background:#fff3cd;color:#7a5b00;font-size:10px;font-weight:650;border:1px solid #f0d98a}.changed-teacher-divider{height:1px;background:var(--ui-line-soft);margin:24px 0 8px}.streamlit-header-safe-space{height:18px;width:100%;display:block;flex:0 0 auto}.changed-teacher-selector{display:flex;align-items:center;gap:8px;margin:0 0 10px}.changed-teacher-chip{display:inline-flex;align-items:center;padding:7px 10px;border:1px solid var(--ui-line-soft);border-radius:10px;background:var(--ui-soft-2);color:var(--ui-text);font-size:12px}.apple-note,.work-note{padding:10px 12px;margin:0 0 12px;background:var(--ui-soft-2);border:1px solid var(--ui-line-soft);border-radius:10px;color:var(--ui-muted);font-size:12px;line-height:1.5}.apple-note strong,.work-note strong{color:var(--ui-text)}.sandbox-title{margin:0 0 4px!important;font-size:24px!important;line-height:1.2!important;font-weight:600!important;letter-spacing:-.045em!important;color:var(--ui-text)!important}.swap-group-head{display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px;padding-top:4px}.swap-group-title{font-size:13px;font-weight:600;color:var(--ui-text)}.swap-group-count{font-size:11px;color:var(--ui-muted);padding:3px 7px;border:1px solid var(--ui-line-soft);border-radius:999px;background:var(--ui-soft)}[data-testid="stDialog"]>div>div{max-height:calc(100vh - 5rem)!important;overflow-y:auto!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;border:1px solid var(--ui-line)!important;border-radius:18px!important;box-shadow:0 18px 48px rgba(0,0,0,.14)!important}[data-testid="stDialog"] [data-testid="stVerticalBlockBorderWrapper"]{border:0!important;background:transparent!important}[data-testid="stDialog"] [data-testid="stSlider"]{margin:0!important;padding:3px 0!important}[data-testid="stDialog"] [data-testid="stSlider"]>label{display:none!important}[data-testid="stDialog"] [data-testid="stSlider"] [data-baseweb="slider"]{min-height:34px!important;margin:0!important}[data-baseweb="tab-list"]{gap:4px!important;border-bottom:1px solid var(--ui-line-soft)!important}[data-baseweb="tab"]{font-family:var(--app-font,"SF Pro Text",system-ui,sans-serif)!important;color:var(--ui-muted)!important}[data-baseweb="tab"][aria-selected="true"]{color:var(--ui-text)!important}a{color:var(--ui-accent)!important}hr,[data-testid="stDivider"]{border-color:var(--ui-line-soft)!important}[data-testid="stMetric"]{padding:8px 0!important}.ui-kpi-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px}.ui-kpi{padding:13px 15px;border:1px solid var(--ui-line-soft);border-radius:12px;background:var(--ui-surface)}.ui-kpi-label{font-size:11px;color:var(--ui-muted)}.ui-kpi-value{margin-top:4px;font-size:21px;font-weight:600;color:var(--ui-text)}@media(max-width:900px){.block-container{padding-left:12px!important;padding-right:12px!important}.app-top-safe-space{height:24px}.work-page-head{display:block}.work-page-meta{margin-top:8px}.ui-kpi-row{grid-template-columns:1fr}.app-topbar{overflow:hidden}}
 </style>
 """, unsafe_allow_html=True)
 st.markdown(r"""
 <style>
-:root{--ui-bg:#fff;--ui-surface:#fff;--ui-soft:#f5f5f7;--ui-soft-2:#fafafa;--ui-text:#1d1d1f;--ui-text-2:#424245;--ui-muted:#6e6e73;--ui-muted-2:#86868b;--ui-line:#d2d2d7;--ui-line-soft:#e8e8ed;--ui-accent:#0066cc;--ui-accent-hover:#0077ed;}.block-container{padding-top:5.5rem!important;padding-bottom:56px!important}.app-top-safe-space{height:18px!important}.app-topbar{min-height:58px!important;padding:0 0 10px!important;margin-bottom:26px!important;gap:18px!important;border-bottom:1px solid #e8e8ed!important}.app-identity{font-size:11px!important;color:#86868b!important;letter-spacing:-.01em!important}.app-identity strong{font-size:13px!important;color:#1d1d1f!important}.app-topbar .stButton>button{height:36px!important;min-height:36px!important;border-radius:10px!important;padding:5px 12px!important}.app-topbar [data-testid="stRadio"] [role="radiogroup"]{background:transparent!important;border:0!important;padding:0!important;gap:4px!important}.app-topbar [data-testid="stRadio"] [role="radio"]{height:36px!important;min-height:36px!important;padding:0 13px!important;border-radius:9px!important;font-size:12px!important;color:#6e6e73!important}.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:#f5f5f7!important;color:#1d1d1f!important;box-shadow:none!important}.work-page-head{padding:0 2px 20px!important;margin-bottom:22px!important;border-bottom:0!important;align-items:center!important}.work-page-head h1{font-size:32px!important;line-height:1.1!important;letter-spacing:-.045em!important}.work-page-head p{font-size:13px!important;margin-top:7px!important;color:#86868b!important}.work-page-meta{font-size:11px!important;color:#86868b!important;padding:7px 10px!important;border:1px solid #e8e8ed!important;border-radius:999px!important;background:#fafafa!important}.work-section{margin-bottom:30px!important}.work-section-title{font-size:15px!important;margin-bottom:5px!important}.work-section-note{font-size:12px!important;color:#86868b!important}[data-testid="stDateInput"] label,[data-testid="stSelectbox"] label,[data-testid="stRadio"] label,[data-testid="stTextInput"] label,[data-testid="stNumberInput"] label{font-size:11px!important;color:#6e6e73!important;font-weight:500!important;margin-bottom:5px!important}[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{border-color:#d2d2d7!important;border-radius:9px!important;min-height:38px!important}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{gap:5px!important}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;border-radius:9px!important;padding:5px 12px!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:38px!important;border-radius:9px!important;font-size:12px!important;padding:6px 14px!important}.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{border-radius:9px!important}.matrix-toolbar{margin:0 0 8px!important}.matrix-title{font-size:15px!important;font-weight:600!important;letter-spacing:-.02em!important}.matrix-subtitle{font-size:11px!important;color:#86868b!important}.matrix-legend{gap:14px!important;margin:0 0 9px 2px!important;font-size:11px!important;color:#86868b!important}[data-testid="stDataFrame"]{border:1px solid #d2d2d7!important;border-radius:10px!important;box-shadow:none!important}[data-testid="stDataFrame"] [role="columnheader"]{background:#f5f5f7!important;color:#424245!important;font-size:11px!important;font-weight:600!important;border-color:#e8e8ed!important}[data-testid="stDataFrame"] [role="gridcell"]{font-size:12px!important;border-color:#eeeeef!important}.swap-result-summary{margin:12px 0!important;padding:10px 13px!important;border-radius:9px!important;background:#f5f5f7!important;border-color:#e8e8ed!important}.swap-group-head{margin:20px 0 6px!important;padding:0!important}.swap-group-title{font-size:13px!important}.swap-group-count{border:0!important;background:#f5f5f7!important;border-radius:999px!important}[data-testid="stDialog"]>div>div{border:1px solid #d2d2d7!important;border-radius:16px!important;box-shadow:0 16px 50px rgba(0,0,0,.12)!important}[data-testid="stDialog"] h1,[data-testid="stDialog"] h2,[data-testid="stDialog"] h3{letter-spacing:-.03em!important}[data-testid="stDialog"] .stButton>button{min-height:40px!important}[data-testid="stAlert"]{border-radius:9px!important;font-size:12px!important}.apple-note,.work-note{padding:10px 12px!important;border-radius:9px!important;background:#fafafa!important}.sandbox-title{font-size:28px!important;letter-spacing:-.045em!important;margin-bottom:7px!important}@media(max-width:1400px){.block-container{padding-left:22px!important;padding-right:22px!important}.app-topbar{gap:10px!important}.app-topbar [data-testid="stRadio"] [role="radio"]{padding:0 10px!important}}@media(max-width:900px){.block-container{padding-top:5rem!important;padding-left:14px!important;padding-right:14px!important}.work-page-head{display:block!important}.work-page-meta{display:inline-block;margin-top:10px}}[data-testid="st-key-top_quick_refresh"],[data-testid="st-key-top_quick_load"],[data-testid="st-key-top_quick_save"]{margin:0!important;}[data-testid="st-key-top_quick_refresh"] button,[data-testid="st-key-top_quick_load"] button,[data-testid="st-key-top_quick_save"] button{min-height:38px!important;height:38px!important;padding:5px 9px!important;border-radius:11px!important;border:1px solid #dedee3!important;background:#fff!important;color:#242426!important;box-shadow:0 1px 2px rgba(0,0,0,.04),inset 0 1px 0 rgba(255,255,255,.65)!important;font-size:11px!important;font-weight:600!important;letter-spacing:-.03em!important;white-space:nowrap!important;}[data-testid="st-key-top_quick_refresh"] button:hover,[data-testid="st-key-top_quick_load"] button:hover{background:#f6f6f8!important;border-color:#cfcfd5!important;transform:translateY(-1px);}[data-testid="st-key-top_quick_save"] button,[data-testid="st-key-top_quick_save"] button[kind="primary"]{background:#1d1d1f!important;border-color:#1d1d1f!important;color:#fff!important;box-shadow:0 2px 5px rgba(0,0,0,.12)!important;}[data-testid="st-key-top_quick_save"] button:hover{background:#2d2d30!important;border-color:#2d2d30!important;transform:translateY(-1px);}@media(max-width:1100px){.top-quick-step-hide{display:none!important}}
+/* 테마 토큰 하드코딩 제거: render_theme_runtime_css의 동적 토큰을 온전히 반영 */.block-container{padding-top:5.5rem!important;padding-bottom:56px!important}.app-top-safe-space{height:18px!important}.app-topbar{min-height:58px!important;padding:0 0 10px!important;margin-bottom:26px!important;gap:18px!important;border-bottom:1px solid #e8e8ed!important}.app-identity{font-size:11px!important;color:#86868b!important;letter-spacing:-.01em!important}.app-identity strong{font-size:13px!important;color:#1d1d1f!important}.app-topbar .stButton>button{height:36px!important;min-height:36px!important;border-radius:10px!important;padding:5px 12px!important}.app-topbar [data-testid="stRadio"] [role="radiogroup"]{background:transparent!important;border:0!important;padding:0!important;gap:4px!important}.app-topbar [data-testid="stRadio"] [role="radio"]{height:36px!important;min-height:36px!important;padding:0 13px!important;border-radius:9px!important;font-size:12px!important;color:#6e6e73!important}.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"]{background:#f5f5f7!important;color:#1d1d1f!important;box-shadow:none!important}.work-page-head{padding:0 2px 20px!important;margin-bottom:22px!important;border-bottom:0!important;align-items:center!important}.work-page-head h1{font-size:32px!important;line-height:1.1!important;letter-spacing:-.045em!important}.work-page-head p{font-size:13px!important;margin-top:7px!important;color:#86868b!important}.work-page-meta{font-size:11px!important;color:#86868b!important;padding:7px 10px!important;border:1px solid #e8e8ed!important;border-radius:999px!important;background:#fafafa!important}.work-section{margin-bottom:30px!important}.work-section-title{font-size:15px!important;margin-bottom:5px!important}.work-section-note{font-size:12px!important;color:#86868b!important}[data-testid="stDateInput"] label,[data-testid="stSelectbox"] label,[data-testid="stRadio"] label,[data-testid="stTextInput"] label,[data-testid="stNumberInput"] label{font-size:11px!important;color:#6e6e73!important;font-weight:500!important;margin-bottom:5px!important}[data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stDateInput"]>div>div{border-color:#d2d2d7!important;border-radius:9px!important;min-height:38px!important}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radiogroup"]{gap:5px!important}[data-testid="stRadio"]:not(.app-topbar [data-testid="stRadio"]) [role="radio"]{min-height:36px!important;border-radius:9px!important;padding:5px 12px!important}.stButton>button,.stDownloadButton>button,.stFormSubmitButton>button{min-height:38px!important;border-radius:9px!important;font-size:12px!important;padding:6px 14px!important}.stButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{border-radius:9px!important}.matrix-toolbar{margin:0 0 8px!important}.matrix-title{font-size:15px!important;font-weight:600!important;letter-spacing:-.02em!important}.matrix-subtitle{font-size:11px!important;color:#86868b!important}.matrix-legend{gap:14px!important;margin:0 0 9px 2px!important;font-size:11px!important;color:#86868b!important}[data-testid="stDataFrame"]{border:1px solid #d2d2d7!important;border-radius:10px!important;box-shadow:none!important}[data-testid="stDataFrame"] [role="columnheader"]{background:#f5f5f7!important;color:#424245!important;font-size:11px!important;font-weight:600!important;border-color:#e8e8ed!important}[data-testid="stDataFrame"] [role="gridcell"]{font-size:12px!important;border-color:#eeeeef!important}.swap-result-summary{margin:12px 0!important;padding:10px 13px!important;border-radius:9px!important;background:#f5f5f7!important;border-color:#e8e8ed!important}.swap-group-head{margin:20px 0 6px!important;padding:0!important}.swap-group-title{font-size:13px!important}.swap-group-count{border:0!important;background:#f5f5f7!important;border-radius:999px!important}[data-testid="stDialog"]>div>div{border:1px solid #d2d2d7!important;border-radius:16px!important;box-shadow:0 16px 50px rgba(0,0,0,.12)!important}[data-testid="stDialog"] h1,[data-testid="stDialog"] h2,[data-testid="stDialog"] h3{letter-spacing:-.03em!important}[data-testid="stDialog"] .stButton>button{min-height:40px!important}[data-testid="stAlert"]{border-radius:9px!important;font-size:12px!important}.apple-note,.work-note{padding:10px 12px!important;border-radius:9px!important;background:#fafafa!important}.sandbox-title{font-size:28px!important;letter-spacing:-.045em!important;margin-bottom:7px!important}@media(max-width:1400px){.block-container{padding-left:22px!important;padding-right:22px!important}.app-topbar{gap:10px!important}.app-topbar [data-testid="stRadio"] [role="radio"]{padding:0 10px!important}}@media(max-width:900px){.block-container{padding-top:5rem!important;padding-left:14px!important;padding-right:14px!important}.work-page-head{display:block!important}.work-page-meta{display:inline-block;margin-top:10px}}[data-testid="st-key-top_quick_refresh"],[data-testid="st-key-top_quick_load"],[data-testid="st-key-top_quick_save"]{margin:0!important;}[data-testid="st-key-top_quick_refresh"] button,[data-testid="st-key-top_quick_load"] button,[data-testid="st-key-top_quick_save"] button{min-height:38px!important;height:38px!important;padding:5px 9px!important;border-radius:11px!important;border:1px solid var(--ui-line)!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;box-shadow:0 1px 2px rgba(0,0,0,.04),inset 0 1px 0 rgba(255,255,255,.65)!important;font-size:11px!important;font-weight:600!important;letter-spacing:-.03em!important;white-space:nowrap!important;}[data-testid="st-key-top_quick_refresh"] button:hover,[data-testid="st-key-top_quick_load"] button:hover{background:#f6f6f8!important;border-color:#cfcfd5!important;transform:translateY(-1px);}[data-testid="st-key-top_quick_save"] button,[data-testid="st-key-top_quick_save"] button[kind="primary"]{background:var(--ui-text)!important;border-color:var(--ui-text)!important;color:var(--ui-bg)!important;box-shadow:0 2px 5px rgba(0,0,0,.12)!important;}[data-testid="st-key-top_quick_save"] button:hover{background:#2d2d30!important;border-color:#2d2d30!important;transform:translateY(-1px);}@media(max-width:1100px){.top-quick-step-hide{display:none!important}}
 </style>
 """, unsafe_allow_html=True)
 SCHOOL_NAME = "서라벌여자중학교"
@@ -44,63 +45,480 @@ GITHUB_FONT_RAW_BASE = "https://raw.githubusercontent.com/pse915/Timetable/main"
 GITHUB_FONT_FAMILY = "Pse Noto Sans KR"
 HAKYO_FONT_FAMILY = "Hakgyoansim Wooju R"
 UI_FONT_OPTIONS = {
-    "시스템 기본 (Apple / Windows)": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif',
-    "Pretendard": '"Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif',
+    "시스템 기본 (Apple / Windows)": '"SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif',
+    "Pretendard": '"Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "Segoe UI", sans-serif',
     "Noto Sans KR": '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif',
     "Noto Sans KR · GitHub (Light + Bold)": f'"{GITHUB_FONT_FAMILY}", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif',
     "학교안심 우주체 · GitHub": f'"{HAKYO_FONT_FAMILY}", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif',
     "Inter": '"Inter", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif',
 }
 UI_FONT_DEFAULT = "시스템 기본 (Apple / Windows)"
+
+UI_THEME_OPTIONS = {
+    "Apple Light": "light",
+    "Black": "black",
+}
+UI_THEME_DEFAULT = "Apple Light"
+
 def render_font_runtime_css(selected_font: str):
+    """선택 글꼴을 실제로 로드하고 Streamlit/AG Grid/HTML에 일관되게 적용한다.
+
+    기존 구현은 Pretendard/Noto/Inter를 'font-family'만 지정해 두었기 때문에
+    학교 PC에 폰트가 설치되어 있지 않으면 선택해도 실제 글꼴이 바뀌지 않았다.
+    또한 GitHub Noto는 300/700만 선언되어 400 일반체가 브라우저 합성에 의존했다.
+    여기서는 선택된 외부 폰트만 로드하고, 일반체/중간체/볼드체를 명시한다.
+    """
     selected_font = selected_font if selected_font in UI_FONT_OPTIONS else UI_FONT_DEFAULT
-    if selected_font == "Noto Sans KR · GitHub (Light + Bold)":
+
+    family = UI_FONT_OPTIONS[selected_font]
+    font_loader = ""
+
+    if selected_font == "Pretendard":
+        font_loader = """
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<style>
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css");
+</style>
+"""
+    elif selected_font == "Noto Sans KR":
+        font_loader = """
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap");
+</style>
+"""
+    elif selected_font == "Inter":
+        font_loader = """
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+</style>
+"""
+    elif selected_font == "Noto Sans KR · GitHub (Light + Bold)":
         light_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Light.ttf"
+        regular_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Regular.ttf"
         bold_url = f"{GITHUB_FONT_BASE}/NotoSansKR-Bold.ttf"
         light_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Light.ttf"
+        regular_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Regular.ttf"
         bold_raw = f"{GITHUB_FONT_RAW_BASE}/NotoSansKR-Bold.ttf"
-        st.markdown(
-            f"""
-<style id="github-noto-sans-kr-runtime-font">
-@font-face {{ font-family: '{GITHUB_FONT_FAMILY}'; font-style: normal; font-weight: 300; font-display: swap;
-  src: url('{light_url}') format('truetype'), url('{light_raw}') format('truetype'); }}
-@font-face {{ font-family: '{GITHUB_FONT_FAMILY}'; font-style: normal; font-weight: 700; font-display: swap;
-  src: url('{bold_url}') format('truetype'), url('{bold_raw}') format('truetype'); }}
-:root {{ --app-font: '{GITHUB_FONT_FAMILY}', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }}
-p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-baseweb="select"],[data-baseweb="input"] input,[data-baseweb="textarea"] textarea {{ font-family: var(--app-font) !important; }}
-[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] * {{ --gdg-font-family: var(--app-font) !important; font-family: var(--app-font) !important; }}
-table,thead,tbody,tfoot,tr,th,td,caption {{ font-family: var(--app-font) !important; }}
+        font_loader = f"""
+<style>
+@font-face {{
+  font-family: '{GITHUB_FONT_FAMILY}';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('{light_url}') format('truetype'), url('{light_raw}') format('truetype');
+}}
+@font-face {{
+  font-family: '{GITHUB_FONT_FAMILY}';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('{regular_url}') format('truetype'), url('{regular_raw}') format('truetype');
+}}
+@font-face {{
+  font-family: '{GITHUB_FONT_FAMILY}';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('{bold_url}') format('truetype'), url('{bold_raw}') format('truetype');
+}}
 </style>
-""",
-            unsafe_allow_html=True,
-        )
-        return
-    if selected_font == "학교안심 우주체 · GitHub":
+"""
+    elif selected_font == "학교안심 우주체 · GitHub":
         hakyo_url = f"{GITHUB_FONT_BASE}/HakgyoansimWoojuR.ttf"
         hakyo_raw = f"{GITHUB_FONT_RAW_BASE}/HakgyoansimWoojuR.ttf"
-        st.markdown(
-            f"""
-<style id="github-hakgyoansim-wooju-runtime-font">
-@font-face {{ font-family: '{HAKYO_FONT_FAMILY}'; font-style: normal; font-weight: 400; font-display: swap;
-  src: url('{hakyo_url}') format('truetype'), url('{hakyo_raw}') format('truetype'); }}
-:root {{ --app-font: '{HAKYO_FONT_FAMILY}', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif; }}
-p,label,h1,h2,h3,h4,h5,h6,button,input,textarea,select,[data-testid="stWidgetLabel"],[data-testid="stCaptionContainer"],.stMarkdown,.stCaption,[role="radio"],[role="tab"],[data-baseweb="select"],[data-baseweb="input"] input,[data-baseweb="textarea"] textarea {{ font-family: var(--app-font) !important; }}
-[data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"] * {{ --gdg-font-family: var(--app-font) !important; font-family: var(--app-font) !important; }}
-table,thead,tbody,tfoot,tr,th,td,caption {{ font-family: var(--app-font) !important; }}
+        font_loader = f"""
+<style>
+@font-face {{
+  font-family: '{HAKYO_FONT_FAMILY}';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('{hakyo_url}') format('truetype'), url('{hakyo_raw}') format('truetype');
+}}
+</style>
+"""
+
+    st.markdown(
+        f"""
+{font_loader}
+<style id="runtime-app-font-global">
+:root {{ --app-font: {family}; }}
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] * {{
+    font-family: var(--app-font) !important;
+}}
+[data-testid="stDataFrame"],
+[data-testid="stDataEditor"],
+[data-testid="stDataFrame"] *,
+[data-testid="stDataEditor"] * {{
+    --gdg-font-family: var(--app-font) !important;
+    font-family: var(--app-font) !important;
+}}
+table, thead, tbody, tfoot, tr, th, td, caption {{
+    font-family: var(--app-font) !important;
+}}
+/* 아이콘 폰트는 전역 폰트보다 우선해야 아이콘이 사각형/문자로 깨지지 않는다. */
+[class*="material-symbols"],
+[data-testid="stIconMaterial"],
+[data-testid="stIconMaterial"] * {{
+    font-family: "Material Symbols Rounded", "Material Symbols Outlined", sans-serif !important;
+}}
 </style>
 """,
-            unsafe_allow_html=True,
-        )
-        return
-    st.markdown(
-        f"""<style id="runtime-app-font-global">
-:root {{ --app-font: {UI_FONT_OPTIONS[selected_font]}; }}
-html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{{font-family:var(--app-font)!important}}
-body table,body table *,[data-testid="stDataFrame"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"],[data-testid="stDataEditor"] *{{font-family:var(--app-font)!important;--gdg-font-family:var(--app-font)!important}}
-[class*="material-symbols"],[data-testid="stIconMaterial"],[data-testid="stIconMaterial"] *{{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important}}
-</style>""",
         unsafe_allow_html=True,
     )
+
+def render_theme_runtime_css(selected_theme: str):
+    """앱 전체에 하나의 명시적 테마 토큰을 적용한다.
+
+    Streamlit의 OS 자동 다크모드와 앱 테마가 서로 덮어쓰지 않도록
+    color-scheme까지 명시하고, 페이지/컨테이너/컨트롤/표/팝오버/다이얼로그를
+    같은 토큰으로 칠한다. 특히 Black에서는 흰색 배경과 검은 글자가 남지 않도록
+    하드코딩된 Streamlit 기본 스타일보다 높은 우선순위를 사용한다.
+    """
+    theme = selected_theme if selected_theme in {"light", "black"} else "light"
+
+    if theme == "black":
+        css = r"""
+:root {
+  color-scheme: dark;
+  --ui-bg:#000000; --ui-surface:#1d1d1f; --ui-surface-2:#1d1d1f;
+  --ui-soft:#2c2c2e; --ui-soft-2:#161617;
+  --ui-text:#f5f5f7; --ui-text-2:#e5e5e7; --ui-muted:#a1a1a6; --ui-muted-2:#86868b;
+  --ui-line:#424245; --ui-line-soft:#2c2c2e;
+  --ui-accent:#2997ff; --ui-accent-hover:#0071e3; --ui-focus:rgba(41,151,255,.30);
+}
+html, body, .stApp,
+[data-testid="stApp"], [data-testid="stAppViewContainer"],
+[data-testid="stMain"], [data-testid="stMainBlockContainer"],
+[data-testid="stAppViewContainer"] > section,
+[data-testid="stMain"] > div, section.main, .main {
+  background:var(--ui-bg)!important;
+  color:var(--ui-text)!important;
+}
+[data-testid="stMainBlockContainer"], [data-testid="stMain"] [data-testid="stVerticalBlock"] {
+  background:transparent!important;
+}
+[data-testid="stHeader"] {
+  background:rgba(8,9,11,.92)!important;
+  color:var(--ui-text)!important;
+  border-bottom:1px solid var(--ui-line-soft)!important;
+}
+[data-testid="stToolbar"], [data-testid="stDecoration"] { background:transparent!important; }
+[data-testid="stSidebar"], [data-testid="stPopover"],
+[data-testid="stDialog"], [data-baseweb="popover"] {
+  color:var(--ui-text)!important;
+}
+[data-testid="stSidebar"] { background:var(--ui-surface)!important; }
+
+/* 모든 일반 텍스트가 기본 검정색으로 되돌아가지 않도록 한다. */
+html body .stApp :where(p, label, small, li, dt, dd, caption, legend,
+  [data-testid="stMarkdownContainer"], [data-testid="stCaptionContainer"],
+  .stCaption) { color:var(--ui-text)!important; }
+html body .stApp :where(h1,h2,h3,h4,h5,h6) { color:var(--ui-text)!important; }
+html body .stApp :where(.app-identity,.work-page-head p,.work-page-meta,
+  .work-section-note,.matrix-subtitle,.matrix-legend,.changed-teacher-status,
+  [data-testid="stCaptionContainer"],.stCaption) { color:var(--ui-muted)!important; }
+
+/* 카드/패널/확장영역 */
+[data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stExpander"], [data-testid="stExpander"] details,
+[data-testid="stDialog"] > div > div, .ui-kpi,
+.apple-note, .work-note, .swap-result-summary,
+.changed-teacher-chip, .swap-group-count {
+  background:var(--ui-surface)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+[data-testid="stExpander"] summary:hover { background:var(--ui-soft)!important; }
+
+/* 버튼: Streamlit 버전에 따라 kind/data-testid가 달라도 동일하게 처리 */
+html body .stApp button,
+html body .stApp [role="button"] {
+  color:var(--ui-text)!important;
+}
+html body .stApp .stButton > button,
+html body .stApp .stDownloadButton > button,
+html body .stApp .stFormSubmitButton > button,
+html body .stApp button[data-testid^="stBaseButton"],
+html body .stApp [data-testid^="st-key-"] button,
+html body .stApp [class*="st-key-top_quick_"] button {
+  background:var(--ui-surface-2)!important;
+  color:var(--ui-text)!important;
+  border:1px solid var(--ui-line)!important;
+}
+html body .stApp .stButton > button:hover,
+html body .stApp .stDownloadButton > button:hover,
+html body .stApp .stFormSubmitButton > button:hover,
+html body .stApp button[data-testid^="stBaseButton"]:hover {
+  background:var(--ui-soft)!important;
+  color:#fff!important;
+  border-color:#3d444f!important;
+}
+html body .stApp .stButton > button[kind="primary"],
+html body .stApp .stFormSubmitButton > button[kind="primary"],
+html body .stApp button[data-testid^="stBaseButton-primary"],
+html body .stApp [data-testid^="st-key-"] button[kind="primary"],
+html body .stApp [class*="st-key-top_quick_save"] button {
+  background:var(--ui-accent)!important;
+  color:#fff!important;
+  border-color:var(--ui-accent)!important;
+}
+html body .stApp .stButton > button[kind="primary"]:hover,
+html body .stApp button[data-testid^="stBaseButton-primary"]:hover {
+  background:var(--ui-accent-hover)!important;
+  color:#fff!important;
+}
+
+/* 입력 컨트롤 */
+html body .stApp [data-baseweb="input"],
+html body .stApp [data-baseweb="textarea"],
+html body .stApp [data-baseweb="select"] > div,
+html body .stApp [data-testid="stDateInput"] > div > div,
+html body .stApp input, html body .stApp textarea, html body .stApp select {
+  background:var(--ui-surface-2)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp [data-baseweb="input"] input,
+html body .stApp [data-baseweb="textarea"] textarea,
+html body .stApp [data-baseweb="select"] input,
+html body .stApp input, html body .stApp textarea {
+  color:var(--ui-text)!important;
+  -webkit-text-fill-color:var(--ui-text)!important;
+  background:transparent!important;
+}
+html body .stApp input::placeholder,
+html body .stApp textarea::placeholder { color:var(--ui-muted-2)!important; opacity:1!important; }
+
+/* 라디오/탭/셀렉트 */
+.app-topbar [data-testid="stRadio"] [role="radiogroup"] {
+  background:var(--ui-surface)!important; border-color:var(--ui-line)!important;
+}
+.app-topbar [data-testid="stRadio"] [role="radio"] { color:var(--ui-muted)!important; }
+.app-topbar [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
+  background:#252a32!important; color:#fff!important; box-shadow:none!important;
+}
+html body .stApp [data-testid="stRadio"] [role="radio"] {
+  background:var(--ui-surface-2)!important; color:var(--ui-text-2)!important; border-color:var(--ui-line)!important;
+}
+html body .stApp [data-testid="stRadio"] [role="radio"][aria-checked="true"] {
+  background:#252a32!important; color:#fff!important; border-color:#3d444f!important;
+}
+[data-baseweb="tab-list"] { background:transparent!important; border-color:var(--ui-line-soft)!important; }
+[data-baseweb="tab"] { color:var(--ui-muted)!important; }
+[data-baseweb="tab"][aria-selected="true"] { color:var(--ui-text)!important; }
+
+/* 데이터프레임 / 시간표 */
+html body .stApp [data-testid="stDataFrame"],
+html body .stApp [data-testid="stDataEditor"] {
+  background:var(--ui-surface)!important; border-color:var(--ui-line)!important;
+}
+html body .stApp [data-testid="stDataFrame"] [role="columnheader"],
+html body .stApp [data-testid="stDataEditor"] [role="columnheader"] {
+  background:var(--ui-soft)!important; color:var(--ui-text-2)!important; border-color:var(--ui-line-soft)!important;
+}
+html body .stApp [data-testid="stDataFrame"] [role="gridcell"],
+html body .stApp [data-testid="stDataEditor"] [role="gridcell"] {
+  background:var(--ui-surface)!important; color:var(--ui-text)!important; border-color:var(--ui-line-soft)!important;
+}
+
+/* Dialog / Popover / Alert */
+html body .stApp [data-testid="stDialog"] > div > div,
+html body .stApp [data-testid="stDialog"] [data-testid="stVerticalBlockBorderWrapper"] {
+  background:var(--ui-surface)!important; color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp [data-testid="stAlert"] {
+  background:var(--ui-surface-2)!important; color:var(--ui-text)!important; border-color:var(--ui-line)!important;
+}
+html body .stApp [data-baseweb="popover"],
+html body .stApp [data-baseweb="menu"],
+html body .stApp [role="listbox"],
+html body .stApp [role="menu"] {
+  background:var(--ui-surface)!important; color:var(--ui-text)!important; border-color:var(--ui-line)!important;
+}
+html body .stApp [role="option"], html body .stApp [role="menuitem"] { color:var(--ui-text)!important; }
+html body .stApp [role="option"]:hover, html body .stApp [role="menuitem"]:hover { background:var(--ui-soft)!important; }
+
+a { color:#70a7ff!important; }
+hr, [data-testid="stDivider"] { border-color:var(--ui-line-soft)!important; }
+.app-topbar { border-bottom-color:var(--ui-line-soft)!important; }
+"""
+    else:
+        css = r"""
+:root {
+  color-scheme: light;
+  --ui-bg:#ffffff; --ui-surface:#ffffff; --ui-surface-2:#ffffff;
+  --ui-soft:#f5f5f7; --ui-soft-2:#fafafc;
+  --ui-text:#1d1d1f; --ui-text-2:#3a3a3c; --ui-muted:#6e6e73; --ui-muted-2:#86868b;
+  --ui-line:#d2d2d7; --ui-line-soft:#e5e5ea; --ui-accent:#0066cc; --ui-accent-hover:#0071e3;
+}
+html,body,.stApp,[data-testid="stApp"],[data-testid="stAppViewContainer"],[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],[data-testid="stAppViewContainer"] > section,section.main,.main {
+  background:var(--ui-bg)!important;color:var(--ui-text)!important;
+}
+[data-testid="stHeader"] { background:rgba(255,255,255,.94)!important;border-bottom:1px solid var(--ui-line-soft)!important; }
+html body .stApp button { color:var(--ui-text)!important; }
+html body .stApp .stButton>button,html body .stApp .stDownloadButton>button,html body .stApp .stFormSubmitButton>button,html body .stApp button[data-testid^="stBaseButton"],html body .stApp [data-testid^="st-key-"] button { background:var(--ui-surface)!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
+html body .stApp button[data-testid^="stBaseButton-primary"],html body .stApp .stButton>button[kind="primary"],html body .stApp [class*="st-key-top_quick_save"] button { background:#1d1d1f!important;color:#fff!important;border-color:#1d1d1f!important; }
+html body .stApp [data-baseweb="input"],html body .stApp [data-baseweb="textarea"],html body .stApp [data-baseweb="select"]>div,html body .stApp [data-testid="stDateInput"]>div>div { background:#fff!important;color:var(--ui-text)!important;border-color:var(--ui-line)!important; }
+html body .stApp input,html body .stApp textarea { color:var(--ui-text)!important;-webkit-text-fill-color:var(--ui-text)!important;background:transparent!important; }
+html body .stApp [data-testid="stDataFrame"],html body .stApp [data-testid="stDataEditor"] { background:#fff!important;border-color:var(--ui-line)!important; }
+"""
+    # Streamlit 버전별 내부 래퍼와 이후 컴포넌트 CSS까지 마지막 우선순위로 통일한다.
+    final_override = r"""
+/* ===== FINAL THEME OVERRIDE: 전체 viewport + 후속 컴포넌트까지 일원화 ===== */
+html, body, #root, body > div,
+html body .stApp,
+html body [data-testid="stAppViewContainer"],
+html body [data-testid="stAppViewContainer"] > .main,
+html body [data-testid="stMain"],
+html body [data-testid="stMainBlockContainer"],
+html body [data-testid="stMainBlockContainer"] > div,
+html body section.main,
+html body section.main > div {
+  background:var(--ui-bg)!important;
+  color:var(--ui-text)!important;
+}
+/* Streamlit의 테마 변수를 사용하지 않고 앱 토큰만 사용한다. */
+html body .stApp,
+html body .stApp > div,
+html body .stAppViewContainer,
+html body .stAppViewContainer > div,
+html body .stMain,
+html body .stMain > div,
+html body .stMainBlockContainer,
+html body .stMainBlockContainer > div,
+html body .block-container,
+html body .block-container > div {
+  background-color:var(--ui-bg)!important;
+  color:var(--ui-text)!important;
+}
+/* 앱 내부에서 생성되는 모든 key-button도 동일한 테마 토큰을 따른다. */
+html body .stApp [data-testid^="st-key-"] button {
+  background-color:var(--ui-surface)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+/* 선택/활성 버튼은 단일 accent가 아니라 현재 테마의 의미색을 따른다. */
+html body .stApp [data-testid^="st-key-"] button[kind="primary"] {
+  background-color:var(--ui-accent)!important;
+  color:#fff!important;
+  border-color:var(--ui-accent)!important;
+}
+/* 달력/주간 선택 UI */
+html body .stApp [data-testid^="st-key-"][data-testid*="_cell_"] button,
+html body .stApp [data-testid^="st-key-"][data-testid*="_week_"] button {
+  background-color:var(--ui-surface)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp [data-testid^="st-key-"][data-testid*="_cell_"] button:hover,
+html body .stApp [data-testid^="st-key-"][data-testid*="_week_"] button:hover {
+  background-color:var(--ui-soft)!important;
+  color:var(--ui-text)!important;
+}
+html body .stApp [data-testid^="st-key-"][data-testid*="_cell_"] button[kind="primary"],
+html body .stApp [data-testid^="st-key-"][data-testid*="_week_"] button[kind="primary"] {
+  background-color:var(--ui-accent)!important;
+  color:#fff!important;
+  border-color:var(--ui-accent)!important;
+}
+/* 모든 일반 텍스트와 링크의 대비를 테마에서 결정 */
+html body .stApp :where(p,span,div,label,small,li,td,th,a,button) {
+  color:inherit;
+}
+html body .stApp a { color:var(--ui-accent)!important; }
+/* Streamlit이 주입하는 기본 color-scheme과 input 색상도 무시 */
+html body .stApp input,
+html body .stApp textarea,
+html body .stApp select {
+  color:var(--ui-text)!important;
+  -webkit-text-fill-color:var(--ui-text)!important;
+  background-color:var(--ui-surface)!important;
+}
+html body [data-testid="stAppViewContainer"] > .main > div,
+html body [data-testid="stMainBlockContainer"] > div:first-child {
+  background:transparent!important;
+}
+html body .block-container {
+  background:transparent!important;
+  color:var(--ui-text)!important;
+}
+html body [data-testid="stHeader"],
+html body [data-testid="stToolbar"],
+html body [data-testid="stDecoration"] {
+  color:var(--ui-text)!important;
+}
+html body .stApp .stButton > button,
+html body .stApp .stDownloadButton > button,
+html body .stApp .stFormSubmitButton > button,
+html body .stApp button[data-testid^="stBaseButton"],
+html body .stApp [data-testid^="st-key-"] button {
+  background:var(--ui-surface-2)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp .stButton > button:hover,
+html body .stApp .stDownloadButton > button:hover,
+html body .stApp button[data-testid^="stBaseButton"]:hover,
+html body .stApp [data-testid^="st-key-"] button:hover {
+  background:var(--ui-soft)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp .stButton > button[kind="primary"],
+html body .stApp .stFormSubmitButton > button[kind="primary"],
+html body .stApp button[data-testid^="stBaseButton-primary"],
+html body .stApp [data-testid^="st-key-"] button[kind="primary"] {
+  background:var(--ui-accent)!important;
+  color:#fff!important;
+  border-color:var(--ui-accent)!important;
+}
+html body .stApp [data-baseweb="input"],
+html body .stApp [data-baseweb="textarea"],
+html body .stApp [data-baseweb="select"] > div,
+html body .stApp [data-testid="stDateInput"] > div > div,
+html body .stApp [data-testid="stDataFrame"],
+html body .stApp [data-testid="stDataEditor"] {
+  background:var(--ui-surface-2)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp [data-testid="stVerticalBlockBorderWrapper"],
+html body .stApp [data-testid="stExpander"],
+html body .stApp [data-testid="stDialog"] > div > div,
+html body .stApp [data-testid="stPopover"],
+html body .stApp [data-baseweb="popover"],
+html body .stApp [role="dialog"] {
+  background:var(--ui-surface)!important;
+  color:var(--ui-text)!important;
+  border-color:var(--ui-line)!important;
+}
+html body .stApp [data-testid="stDataFrame"] [role="gridcell"],
+html body .stApp [data-testid="stDataEditor"] [role="gridcell"] {
+  background:var(--ui-surface)!important;
+  color:var(--ui-text)!important;
+}
+html body .stApp [data-testid="stDataFrame"] [role="columnheader"],
+html body .stApp [data-testid="stDataEditor"] [role="columnheader"] {
+  background:var(--ui-soft)!important;
+  color:var(--ui-text-2)!important;
+}
+"""
+    css = css + final_override
+    st.markdown(f'<style id="runtime-app-theme">{css}</style>', unsafe_allow_html=True)
+
+if "ui_theme" not in st.session_state or st.session_state.ui_theme not in {"light", "black"}:
+    st.session_state.ui_theme = UI_THEME_OPTIONS[UI_THEME_DEFAULT]
+render_theme_runtime_css(st.session_state.ui_theme)
 render_font_runtime_css(st.session_state.get("ui_font", UI_FONT_DEFAULT))
 DAYS = ["월", "화", "수", "목", "금"]
 PERIODS_PER_DAY = {"월": 6, "화": 7, "수": 7, "목": 7, "금": 6}
@@ -109,6 +527,367 @@ WEEKDAY_KR = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "�
 SCHOOL_WEEKDAYS = (0, 1, 2, 3, 4)
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 KST = ZoneInfo("Asia/Seoul")
+
+# ─────────────────────────────────────────────────────────────
+# NEIS 학사일정 연동
+# - 사용자는 NEIS Open API 인증키만 입력하면 됩니다.
+# - 학교명으로 NEIS 학교기본정보를 자동 검색하여 교육청/학교코드를 찾습니다.
+# - 학사일정은 SchoolSchedule API의 AA_YMD/EVENT_NM/SBTR_DD_SC_NM을 기준으로
+#   수업이 없는 날을 판정합니다. (NEIS 공식 명세의 입력/출력 필드와 일치)
+# ─────────────────────────────────────────────────────────────
+NEIS_API_BASE = "https://open.neis.go.kr/hub"
+NEIS_SCHOOL_INFO_ENDPOINT = f"{NEIS_API_BASE}/schoolInfo"
+NEIS_SCHEDULE_ENDPOINT = f"{NEIS_API_BASE}/SchoolSchedule"
+NEIS_EDU_OFFICE_CODES = (
+    "B10", "C10", "D10", "E10", "F10", "G10", "H10", "I10", "J10",
+    "K10", "M10", "N10", "P10", "Q10", "R10", "S10", "T10",
+)
+# 이 앱의 기본 학교(서라벌여자중학교)는 NEIS 표준 학교코드가 고정되어 있습니다.
+# 학교기본정보 API 검색이 일시적으로 누락되더라도 인증키만으로 학사일정 조회가 가능하도록
+# 공식 NEIS 코드(R10 / 8771121)를 fallback으로 사용합니다. 다른 학교로 바꾸면 자동 검색을 먼저 시도합니다.
+NEIS_SCHOOL_CODE_FALLBACKS = {
+    "서라벌여자중학교": {"ATPT_OFCDC_SC_CODE": "R10", "SD_SCHUL_CODE": "8771121"},
+}
+NEIS_NON_INSTRUCTIONAL_TYPES = (
+    "공휴일", "휴업일", "휴일", "방학", "재량휴업일", "임시휴업일", "학교장재량휴업일",
+    "개교기념일", "대체공휴일", "대체휴일", "토요휴업일", "일요일", "토요일", "선거일",
+    "임시공휴일", "근로자의날",
+)
+NEIS_SCHEDULE_CACHE_TTL = 900
+NEIS_SCHOOL_CACHE_TTL = 86400
+
+def _neis_secret_key() -> str:
+    """NEIS API 키는 Streamlit Secrets에서만 읽습니다."""
+    try:
+        return str(st.secrets.get("NEIS_API_KEY", "") or "").strip()
+    except Exception:
+        return ""
+
+def _neis_api_get(endpoint: str, params: dict, timeout: int = 12):
+    response = requests.get(endpoint, params=params, timeout=timeout)
+    response.raise_for_status()
+    data = response.json()
+    # INFO-200은 호출부(neis_fetch_schedule)에서 '정상적인 빈 결과'로
+    # 구분하여 날짜별 fallback을 수행합니다. 그 밖의 오류는 예외로 유지합니다.
+    if isinstance(data, dict) and "RESULT" in data:
+        result = data.get("RESULT") or {}
+        code = str(result.get("CODE", "")).strip()
+        if code and code != "INFO-000":
+            raise RuntimeError(f"NEIS API {code}: {result.get('MESSAGE', '')}")
+    return data
+
+def _neis_rows(data, root_key: str):
+    if not isinstance(data, dict):
+        return []
+    blocks = data.get(root_key, [])
+    if not isinstance(blocks, list):
+        return []
+    for block in blocks:
+        if isinstance(block, dict) and isinstance(block.get("row"), list):
+            return block["row"]
+    return []
+
+def _normalize_school_name_for_neis(name: str) -> str:
+    return re.sub(r"\s+", "", str(name or "").strip())
+
+@st.cache_data(show_spinner=False, ttl=NEIS_SCHOOL_CACHE_TTL)
+def neis_find_school(api_key: str, school_name: str):
+    api_key = str(api_key or "").strip()
+    target = _normalize_school_name_for_neis(school_name)
+    if not api_key or not target:
+        return None
+    # 기본 학교는 코드가 확정되어 있으므로 매번 17개 교육청을 순차 조회하지 않습니다.
+    # 다른 학교명에 대해서만 학교기본정보 API 자동검색을 수행합니다.
+    fallback = NEIS_SCHOOL_CODE_FALLBACKS.get(str(school_name).strip())
+    if fallback:
+        return {
+            "ATPT_OFCDC_SC_CODE": fallback["ATPT_OFCDC_SC_CODE"],
+            "SD_SCHUL_CODE": fallback["SD_SCHUL_CODE"],
+            "SCHUL_NM": str(school_name).strip(),
+            "ATPT_OFCDC_SC_NM": "경상북도교육청",
+        }
+    exact = []
+    for office_code in NEIS_EDU_OFFICE_CODES:
+        try:
+            data = _neis_api_get(NEIS_SCHOOL_INFO_ENDPOINT, {
+                "KEY": api_key, "Type": "json", "pIndex": 1, "pSize": 100,
+                "ATPT_OFCDC_SC_CODE": office_code, "SCHUL_NM": school_name,
+            })
+            rows = _neis_rows(data, "schoolInfo")
+            for row in rows:
+                nm = str(row.get("SCHUL_NM", "")).strip()
+                if _normalize_school_name_for_neis(nm) == target:
+                    exact.append(row)
+        except Exception:
+            continue
+    if not exact:
+        fallback = NEIS_SCHOOL_CODE_FALLBACKS.get(str(school_name).strip())
+        if fallback:
+            return {
+                "ATPT_OFCDC_SC_CODE": fallback["ATPT_OFCDC_SC_CODE"],
+                "SD_SCHUL_CODE": fallback["SD_SCHUL_CODE"],
+                "SCHUL_NM": str(school_name).strip(),
+                "ATPT_OFCDC_SC_NM": "경상북도교육청",
+            }
+        return None
+    # 같은 학교명이 여러 교육청에 있을 경우 현재 코드의 주소/학교명과 가장 잘 맞는 첫 결과를 사용.
+    row = exact[0]
+    return {
+        "ATPT_OFCDC_SC_CODE": str(row.get("ATPT_OFCDC_SC_CODE", "")).strip(),
+        "SD_SCHUL_CODE": str(row.get("SD_SCHUL_CODE", "")).strip(),
+        "SCHUL_NM": str(row.get("SCHUL_NM", school_name)).strip(),
+        "ATPT_OFCDC_SC_NM": str(row.get("ATPT_OFCDC_SC_NM", "")).strip(),
+    }
+
+def _neis_schedule_row_is_non_instructional(row: dict) -> bool:
+    if not isinstance(row, dict):
+        return False
+    sbtr = str(row.get("SBTR_DD_SC_NM", "") or "").strip()
+    event = str(row.get("EVENT_NM", "") or "").strip()
+    content = str(row.get("EVENT_CNTNT", "") or "").strip()
+    combined = " ".join(x for x in (sbtr, event, content) if x)
+    if any(token in combined for token in NEIS_NON_INSTRUCTIONAL_TYPES):
+        return True
+    # 수업공제일 구분명이 휴업/휴일/방학 계열이면 행사명과 관계없이 등교하지 않는 날로 판정.
+    if any(token in sbtr for token in ("공휴일", "휴업", "휴일", "방학")):
+        return True
+    return False
+
+def _neis_event_label(row: dict) -> str:
+    sbtr = str(row.get("SBTR_DD_SC_NM", "") or "").strip()
+    event = str(row.get("EVENT_NM", "") or "").strip()
+    content = str(row.get("EVENT_CNTNT", "") or "").strip()
+    if event and sbtr and sbtr not in event:
+        return f"{event} · {sbtr}"
+    return event or sbtr or content or "학사일정"
+
+def _neis_schedule_empty_df():
+    return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
+
+
+def _neis_schedule_rows_to_df(raw_rows):
+    rows = []
+    for raw in raw_rows or []:
+        if not isinstance(raw, dict):
+            continue
+        ds = normalize_date_str(raw.get("AA_YMD", ""))
+        if not ds:
+            continue
+        rows.append({
+            "일자": ds,
+            "명칭": _neis_event_label(raw),
+            "구분": str(raw.get("SBTR_DD_SC_NM", "") or "").strip(),
+            "내용": str(raw.get("EVENT_CNTNT", "") or "").strip(),
+            "비수업일": bool(_neis_schedule_row_is_non_instructional(raw)),
+        })
+    if not rows:
+        return _neis_schedule_empty_df()
+    df = pd.DataFrame(rows).drop_duplicates(
+        subset=["일자", "명칭", "구분", "내용"]
+    ).sort_values(["일자", "명칭"])
+    # 같은 날짜에 여러 학사행사가 있어도 하나라도 비수업일이면 그 날짜 전체를 비수업일로 판정.
+    df["비수업일"] = df.groupby("일자")["비수업일"].transform("any")
+    return df.reset_index(drop=True)
+
+
+def _neis_is_info_200(exc) -> bool:
+    """NEIS의 '해당하는 데이터가 없습니다' 응답만 정상적인 빈 결과로 식별."""
+    return "INFO-200" in str(exc or "").upper()
+
+
+def _neis_schedule_request(api_key, school, *, ymd=None, from_ymd=None, to_ymd=None):
+    params = {
+        "KEY": api_key,
+        "Type": "json",
+        "pIndex": 1,
+        "pSize": 100,
+        "ATPT_OFCDC_SC_CODE": school["ATPT_OFCDC_SC_CODE"],
+        "SD_SCHUL_CODE": school["SD_SCHUL_CODE"],
+    }
+    if ymd:
+        # SchoolSchedule API의 공식 기간 조회 필드를 사용해 단일 날짜를
+        # AA_FROM_YMD=AA_TO_YMD로 조회합니다. AA_YMD는 일부 환경에서
+        # INFO-200을 유발할 수 있어 fallback에서도 동일한 공식 필드를 사용합니다.
+        params["AA_FROM_YMD"] = ymd
+        params["AA_TO_YMD"] = ymd
+    else:
+        params["AA_FROM_YMD"] = from_ymd
+        params["AA_TO_YMD"] = to_ymd
+    return _neis_api_get(NEIS_SCHEDULE_ENDPOINT, params)
+
+
+@st.cache_data(show_spinner=False, ttl=NEIS_SCHEDULE_CACHE_TTL)
+def neis_fetch_schedule(api_key: str, school_name: str, from_ymd: str, to_ymd: str):
+    """NEIS 학사일정 조회.
+
+    주간 범위 조회가 INFO-200을 반환하는 경우를 API 장애로 취급하지 않고,
+    월~금 각 날짜를 개별 조회하여 실제 학사일정을 다시 확인한다.
+    인증 실패/HTTP 오류/네트워크 오류 등 INFO-200이 아닌 예외는 그대로 전파한다.
+    """
+    api_key = str(api_key or "").strip()
+    start = normalize_date_str(from_ymd).replace("-", "")
+    end = normalize_date_str(to_ymd).replace("-", "")
+    if not api_key or not start or not end or start > end:
+        return _neis_schedule_empty_df()
+
+    school = neis_find_school(api_key, school_name)
+    if not school or not school.get("ATPT_OFCDC_SC_CODE") or not school.get("SD_SCHUL_CODE"):
+        return _neis_schedule_empty_df()
+
+    # 1차: 기존처럼 한 번에 범위를 조회한다.
+    try:
+        data = _neis_schedule_request(
+            api_key, school, from_ymd=start, to_ymd=end
+        )
+        return _neis_schedule_rows_to_df(_neis_rows(data, "SchoolSchedule"))
+    except Exception as exc:
+        # INFO-200은 '해당 범위에 결과가 없다'는 의미일 수 있으므로
+        # 각 날짜를 다시 조회한다. 그 외 오류는 실제 조회 실패이므로 숨기지 않는다.
+        if not _neis_is_info_200(exc):
+            raise
+
+    # 2차 fallback: 범위 조회가 INFO-200이면 날짜별로 재조회.
+    start_date = date.fromisoformat(f"{start[:4]}-{start[4:6]}-{start[6:8]}")
+    end_date = date.fromisoformat(f"{end[:4]}-{end[4:6]}-{end[6:8]}")
+    all_rows = []
+    cur = start_date
+    while cur <= end_date:
+        ymd = cur.strftime("%Y%m%d")
+        try:
+            data = _neis_schedule_request(api_key, school, ymd=ymd)
+            all_rows.extend(_neis_rows(data, "SchoolSchedule"))
+        except Exception as exc:
+            if _neis_is_info_200(exc):
+                # 해당 날짜에 등록된 학사일정이 없다는 정상적인 빈 결과.
+                pass
+            else:
+                raise
+        cur += timedelta(days=1)
+
+    return _neis_schedule_rows_to_df(all_rows)
+
+def get_neis_api_key() -> str:
+    return str(st.session_state.get("neis_api_key", "") or _neis_secret_key()).strip()
+
+def get_neis_cache_token() -> str:
+    """NEIS API 원문 키를 노출하지 않고 캐시 무효화에 사용하는 해시 토큰."""
+    key = get_neis_api_key()
+    return hashlib.sha256(key.encode("utf-8")).hexdigest() if key else "no-neis-key"
+
+def get_neis_schedule_for_range(start_date: date, end_date: date) -> pd.DataFrame:
+    key = get_neis_api_key()
+    if not key:
+        return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
+    try:
+        return neis_fetch_schedule(key, SCHOOL_NAME, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
+    except Exception as exc:
+        st.session_state["_neis_last_error"] = str(exc)
+        return pd.DataFrame(columns=["일자", "명칭", "구분", "내용", "비수업일"])
+
+def ensure_neis_week_loaded(ref_date: date, force_refresh: bool = False) -> pd.DataFrame:
+    """선택한 주의 NEIS 학사일정을 매트릭스 생성보다 먼저 확보합니다.
+
+    주간표는 반드시 이 함수를 먼저 호출한 뒤 매트릭스를 생성해야 합니다.
+    session_state에 저장된 주간 데이터는 같은 rerun 안에서 재사용하되,
+    API 키/주간 범위가 달라지면 다시 조회합니다.
+    """
+    key = get_neis_api_key()
+    if not key:
+        raise RuntimeError("Streamlit Secrets에 NEIS_API_KEY가 없습니다.")
+    monday = ref_date - timedelta(days=ref_date.weekday())
+    friday = monday + timedelta(days=4)
+    cache_token = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    cache_id = f"{cache_token}:{monday.isoformat()}:{friday.isoformat()}"
+    state_key = "_neis_week_schedule"
+    existing = st.session_state.get(state_key)
+    if (not force_refresh and isinstance(existing, dict) and
+            existing.get("cache_id") == cache_id and isinstance(existing.get("data"), pd.DataFrame)):
+        return existing["data"].copy(deep=True)
+    try:
+        df = neis_fetch_schedule(key, SCHOOL_NAME, monday.strftime("%Y-%m-%d"), friday.strftime("%Y-%m-%d"))
+    except Exception as exc:
+        st.session_state["_neis_last_error"] = str(exc)
+        raise RuntimeError(f"NEIS 학사일정 조회 실패: {exc}") from exc
+    # API가 빈 결과를 반환해도 정상적인 '학사일정 없음'과 조회 실패를 구분할 수 있도록
+    # 성공적으로 응답한 결과 자체를 저장합니다.
+    st.session_state[state_key] = {
+        "cache_id": cache_id,
+        "start_date": monday.isoformat(),
+        "end_date": friday.isoformat(),
+        "data": df.copy(deep=True),
+        "loaded_at": datetime.now(KST).isoformat(),
+    }
+    st.session_state["_neis_last_error"] = ""
+    return df.copy(deep=True)
+
+def require_neis_week(ref_date: date) -> pd.DataFrame:
+    """주간표 렌더링 전에 NEIS 데이터 확보를 강제합니다."""
+    return ensure_neis_week_loaded(ref_date, force_refresh=False)
+
+def get_neis_non_instructional_days(start_date: date, end_date: date):
+    # 주간표에서 ensure_neis_week_loaded()가 먼저 호출된 경우에는
+    # 요청 범위가 그 주간 범위 안에 있으면 저장된 NEIS 결과를 직접 사용합니다.
+    # 특히 get_effective_timetable_for_date(하루 단위 호출)도 이 캐시를 사용해야
+    # NEIS 확인 전에 만들어진 원본 시간표가 다시 살아나는 일이 없습니다.
+    cached = st.session_state.get("_neis_week_schedule")
+    df = None
+    if isinstance(cached, dict) and isinstance(cached.get("data"), pd.DataFrame):
+        try:
+            c_start = date.fromisoformat(str(cached.get("start_date")))
+            c_end = date.fromisoformat(str(cached.get("end_date")))
+            if c_start <= start_date and end_date <= c_end:
+                df = cached["data"].copy(deep=True)
+                if not df.empty:
+                    df = df[(df["일자"] >= start_date.isoformat()) & (df["일자"] <= end_date.isoformat())]
+        except Exception:
+            df = None
+    if df is None:
+        df = get_neis_schedule_for_range(start_date, end_date)
+    if df.empty:
+        return {}
+    return {
+        str(day): str(group.iloc[0]["명칭"] or "학사일정")
+        for day, group in df[df["비수업일"]].groupby("일자", sort=False)
+    }
+
+def is_neis_non_instructional_date(on_date) -> bool:
+    try:
+        d = date.fromisoformat(normalize_date_str(on_date)) if not isinstance(on_date, date) else on_date
+    except Exception:
+        return False
+    return str(d) in get_neis_non_instructional_days(d, d)
+
+def neis_holiday_label(on_date, fallback="학사일정") -> str:
+    try:
+        d = date.fromisoformat(normalize_date_str(on_date)) if not isinstance(on_date, date) else on_date
+    except Exception:
+        return fallback
+    labels = get_neis_non_instructional_days(d, d)
+    return labels.get(d.isoformat(), fallback)
+
+def apply_neis_non_instructional_display(matrix: pd.DataFrame, ref_date: date, row_label: str) -> pd.DataFrame:
+    if matrix is None or matrix.empty:
+        return matrix
+    monday = ref_date - timedelta(days=ref_date.weekday())
+    end = monday + timedelta(days=4)
+    labels = get_neis_non_instructional_days(monday, end)
+    if not labels:
+        return matrix
+    out = matrix.copy(deep=True)
+    for i, day in enumerate(DAYS):
+        ds = (monday + timedelta(days=i)).isoformat()
+        label = labels.get(ds)
+        if not label:
+            continue
+        # NEIS에서 등교하지 않는 날로 확인되면 그 날은 "수업 없음"으로 처리합니다.
+        # 주간표 상단에는 학사일정 명칭을 표시하지만, 개별 교시 셀에는
+        # 기존 수업이나 대체 텍스트를 남기지 않아 실제 수업이 있는 것처럼
+        # 보이지 않도록 합니다.
+        for p in range(1, PERIODS_PER_DAY.get(day, MAX_PERIOD) + 1):
+            col = f"{day}{p}"
+            if col in out.columns:
+                out[col] = ""
+    return out
 _GSHEET_NETWORK_SEMAPHORE = threading.BoundedSemaphore(2)
 def _today_kst() -> date:
     return datetime.now(KST).date()
@@ -262,6 +1041,21 @@ def grade_of(class_name: str) -> str:
     if isinstance(class_name, str) and "-" in class_name:
         return class_name.split("-", 1)[0]
     return ""
+
+def normalized_grade(class_name: str):
+    """학급 문자열에서 1/2/3학년을 안정적으로 추출한다."""
+    text = str(class_name or "").strip()
+    m = re.match(r"^\s*([1-3])\s*[-_./ ]", text)
+    if m:
+        return m.group(1)
+    g = grade_of(text)
+    return g if g in {"1", "2", "3"} else ""
+
+def is_grade12_thursday_7_forbidden(class_name: str, day: str, period: int) -> bool:
+    return str(day or "").strip() == "목" and safe_int(period) == 7 and normalized_grade(class_name) in {"1", "2"}
+
+def slot_allowed_for_class(class_name: str, day: str, period: int) -> bool:
+    return not is_grade12_thursday_7_forbidden(class_name, day, period)
 def format_periods(periods):
     normalized = [safe_int(p) for p in periods]
     periods = sorted({p for p in normalized if p >= 0})
@@ -364,11 +1158,11 @@ def calendar_picker(label, value=None, key="calendar", help_text=None, rerun_sco
     grid_end = last + timedelta(days=6 - last.weekday())
     style_id = re.sub(r"[^A-Za-z0-9_-]", "_", str(key))
     st.markdown(f"""<style id="calendar-grid-{style_id}">
-[data-testid^="st-key-{key}_cell_"] button{{min-height:34px!important;height:34px!important;padding:3px 6px!important;border:1px solid #e5e5ea!important;border-radius:7px!important;background:#fff!important;color:#1d1d1f!important;font-size:12px!important;font-weight:500!important;box-shadow:none!important}}
-[data-testid^="st-key-{key}_cell_"] button:hover{{background:#f5f5f7!important;border-color:#d2d2d7!important}}
-[data-testid^="st-key-{key}_cell_"] button[kind="primary"]{{background:#f5f5f7!important;border-color:#d2d2d7!important;color:#1d1d1f!important;font-weight:700!important}}
+[data-testid^="st-key-{key}_cell_"] button{{min-height:34px!important;height:34px!important;padding:3px 6px!important;border:1px solid var(--ui-line)!important;border-radius:7px!important;background:var(--ui-surface)!important;color:var(--ui-text)!important;font-size:12px!important;font-weight:500!important;box-shadow:none!important}}
+[data-testid^="st-key-{key}_cell_"] button:hover{{background:var(--ui-soft)!important;border-color:var(--ui-line)!important}}
+[data-testid^="st-key-{key}_cell_"] button[kind="primary"]{{background:var(--ui-soft)!important;border-color:var(--ui-line)!important;color:#1d1d1f!important;font-weight:700!important}}
 [data-testid^="st-key-{key}_blank_"] button{{visibility:hidden!important;height:34px!important;min-height:34px!important;padding:0!important;border:0!important;background:transparent!important;pointer-events:none!important}}
-.calendar-weekday-{style_id}{{text-align:center;font-size:11px;font-weight:600;color:#6e6e73;padding:2px 0 6px}}
+.calendar-weekday-{style_id}{{text-align:center;font-size:11px;font-weight:600;color:var(--ui-muted);padding:2px 0 6px}}
 </style>""", unsafe_allow_html=True)
     header_cols = st.columns(5)
     for i, wd in enumerate(weekdays):
@@ -397,6 +1191,104 @@ def calendar_picker(label, value=None, key="calendar", help_text=None, rerun_sco
     if help_text:
         st.caption(help_text)
     return st.session_state[selected_key]
+def week_picker(label, value=None, key="week_picker", help_text=None, include_saturday=True):
+    """주간 화면용 컴팩트 선택기.
+
+    개별 날짜 달력 대신 해당 월에 포함되는 주간 버튼만 렌더링한다.
+    반환값은 언제나 해당 주의 월요일이며, 기존 주간 매트릭스 API와 호환된다.
+    표시 범위는 기본 월~토(예: 19일~24일)로 하되 실제 시간표는 기존처럼 평일만 사용한다.
+    """
+    value = value or _today_kst()
+    if value.weekday() >= 5:
+        value = value - timedelta(days=value.weekday() - 4)
+    monday = value - timedelta(days=value.weekday())
+    month_key = f"_{key}_month"
+    selected_key = f"_{key}_monday"
+    if month_key not in st.session_state:
+        st.session_state[month_key] = monday.replace(day=1)
+    if selected_key not in st.session_state:
+        st.session_state[selected_key] = monday
+
+    def _set_week(state_key, picked_monday):
+        st.session_state[state_key] = picked_monday
+
+    def _prev_week_month(month_state_key, selected_state_key):
+        m = st.session_state[month_state_key]
+        prev = (m.replace(day=1) - timedelta(days=1)).replace(day=1)
+        st.session_state[month_state_key] = prev
+        candidate = prev - timedelta(days=prev.weekday())
+        st.session_state[selected_state_key] = candidate
+
+    def _next_week_month(month_state_key, selected_state_key):
+        m = st.session_state[month_state_key]
+        nxt = (m.replace(day=28) + timedelta(days=4)).replace(day=1)
+        st.session_state[month_state_key] = nxt
+        st.session_state[selected_state_key] = nxt - timedelta(days=nxt.weekday())
+
+    month_anchor = st.session_state[month_key].replace(day=1)
+    first_monday = month_anchor - timedelta(days=month_anchor.weekday())
+    last_day = (month_anchor.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    last_monday = last_day - timedelta(days=last_day.weekday())
+    weeks = []
+    cur = first_monday
+    while cur <= last_monday:
+        weeks.append(cur)
+        cur += timedelta(days=7)
+
+    st.markdown(f"**{label}**")
+    nav1, nav2, nav3 = st.columns([1, 5, 1])
+    with nav1:
+        st.button("◀", key=f"{key}_prev_month", width="stretch",
+                  on_click=_prev_week_month, args=(month_key, selected_key))
+    with nav2:
+        st.markdown(
+            f"<div style='text-align:center;font-weight:700;font-size:1.02rem'>"
+            f"{month_anchor.year}년 {month_anchor.month}월 · 주차 선택</div>",
+            unsafe_allow_html=True,
+        )
+    with nav3:
+        st.button("▶", key=f"{key}_next_month", width="stretch",
+                  on_click=_next_week_month, args=(month_key, selected_key))
+
+    selected = st.session_state[selected_key]
+    style_id = re.sub(r"[^A-Za-z0-9_-]", "_", str(key))
+    st.markdown(f"""
+    <style id="week-picker-{style_id}">
+      [data-testid^="st-key-{key}_week_"] button{{min-height:38px!important;height:38px!important;padding:5px 8px!important;border:1px solid #e5e5ea!important;border-radius:9px!important;background:#fff!important;color:#1d1d1f!important;font-size:12px!important;font-weight:600!important;box-shadow:none!important;white-space:nowrap!important}}
+      [data-testid^="st-key-{key}_week_"] button:hover{{background:var(--ui-soft)!important;border-color:var(--ui-line)!important}}
+      [data-testid^="st-key-{key}_week_"] button[kind="primary"]{{background:var(--ui-text)!important;border-color:var(--ui-text)!important;color:var(--ui-bg)!important}}
+      .week-picker-note-{style_id}{{font-size:11px;color:var(--ui-muted);margin:7px 2px 9px}}
+    </style>
+    """, unsafe_allow_html=True)
+
+    # 한 줄에 최대 3개만 배치하여 모바일/좁은 화면에서도 안정적으로 유지한다.
+    for start in range(0, len(weeks), 3):
+        row = weeks[start:start + 3]
+        cols = st.columns(3)
+        for col, week_monday in zip(cols, row):
+            week_end = week_monday + timedelta(days=5 if include_saturday else 4)
+            active = week_monday == selected
+            # 월 경계 주도 실제 날짜 범위를 보여 주되, 주차의 기준은 월요일로 고정한다.
+            label_text = f"✓ {week_monday.day:02d}일~{week_end.day:02d}일" if active else f"{week_monday.day:02d}일~{week_end.day:02d}일"
+            with col:
+                st.button(
+                    label_text,
+                    key=f"{key}_week_{week_monday:%Y%m%d}",
+                    width="stretch",
+                    type="primary" if active else "secondary",
+                    on_click=_set_week,
+                    args=(selected_key, week_monday),
+                )
+    selected = st.session_state[selected_key]
+    selected_end = selected + timedelta(days=5 if include_saturday else 4)
+    st.markdown(
+        f"<div class='week-picker-note-{style_id}'>선택: <strong>{selected:%Y-%m-%d} ~ {selected_end:%Y-%m-%d}</strong> · 주간표는 평일(월~금) 기준</div>",
+        unsafe_allow_html=True,
+    )
+    if help_text:
+        st.caption(help_text)
+    return selected
+
 def calendar_range_picker(start_value=None, end_value=None, key="calendar_range", help_text=None):
     start_value = start_value or _today_kst()
     end_value = end_value or start_value
@@ -963,12 +1855,12 @@ def redo():
     return True
 def _invalidate_all_caches():
     st.session_state._data_version = st.session_state.get("_data_version", 0) + 1
+    st.session_state.pop("_effective_day_cache", None)
+    st.session_state.pop("_effective_week_cache", None)
     get_effective_timetable_for_date.clear()
     get_single_lesson_1to1_candidates.clear()
     get_single_lesson_linked_cycles.clear()
-    effective_teacher_matrix.clear()
     teacher_matrix.clear()
-    class_matrix.clear()
     cumulative_sub_count.clear()
     weekly_load.clear()
     _duty_slot_index.clear()
@@ -1287,8 +2179,16 @@ def validate_swap(a, b, date_a, date_b, *, is_test=False):
     pa, pb = safe_int(a.get("교시", 0)), safe_int(b.get("교시", 0))
     if not da or not db or not ta or not tb or pa <= 0 or pb <= 0:
         return False, "교사·일자·교시 정보가 올바르지 않습니다."
+    day_a = WEEKDAY_KR[datetime.strptime(da, "%Y-%m-%d").weekday()]
+    day_b = WEEKDAY_KR[datetime.strptime(db, "%Y-%m-%d").weekday()]
+    if is_grade12_thursday_7_forbidden(str(a.get("학급", "")), day_b, pb):
+        return False, "1·2학년 수업은 목요일 7교시에 배치할 수 없습니다."
+    if is_grade12_thursday_7_forbidden(str(b.get("학급", "")), day_a, pa):
+        return False, "1·2학년 수업은 목요일 7교시에 배치할 수 없습니다."
     if ta == tb and da == db and pa == pb:
         return False, "동일한 교사·일자·교시는 교환할 수 없습니다."
+    if is_neis_non_instructional_date(da) or is_neis_non_instructional_date(db):
+        return False, "NEIS 학사일정상 공휴일·휴업일 등 수업이 없는 날은 맞교환할 수 없습니다."
     ver = st.session_state.get("_data_version", 0)
     e_a = get_effective_timetable_for_date(da, ver, use_test=is_test)
     e_b = get_effective_timetable_for_date(db, ver, use_test=is_test)
@@ -1494,13 +2394,17 @@ def _effective_sub_origin_info(teacher: str, on_date: str, period: int) -> str:
     if memo:
         parts.append(f"비고: {memo}")
     return " / ".join(parts)
-@st.cache_data(show_spinner=False, ttl=180)
-def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: bool = False) -> pd.DataFrame:
+def _build_effective_timetable_for_date(on_date: str, version: int = 0, use_test: bool = False) -> pd.DataFrame:
+    # 이 함수는 NEIS 학사일정(st.session_state/st.secrets)에 의존하므로
+    # Streamlit 전역 data cache를 사용하지 않습니다. 캐시된 원본 시간표가
+    # NEIS 비수업일 판정을 덮어쓰는 것을 방지하기 위한 의도적인 설계입니다.
     norm = normalize_date_str(on_date)
     columns = ["교사명","요일","교시","과목","학급","과목군","원본교사","원본일자","원본교시","변경유형","변경출처","변경ID","변경상세"]
     if not norm:
         base = st.session_state.timetable.copy()
         return base.assign(**{c: "" for c in columns if c not in base.columns})
+    if is_neis_non_instructional_date(norm):
+        return pd.DataFrame(columns=columns)
     try:
         day = WEEKDAY_KR[datetime.strptime(norm, "%Y-%m-%d").weekday()]
     except Exception:
@@ -1595,6 +2499,61 @@ def get_effective_timetable_for_date(on_date: str, version: int = 0, use_test: b
     for c in columns:
         if c not in df.columns: df[c] = ""
     return df[columns].reset_index(drop=True)
+def _get_effective_timetable_cached(norm: str, version: int, use_test: bool, neis_cache_key: str) -> pd.DataFrame:
+    """세션 로컬 날짜 캐시.
+
+    유효 시간표는 st.session_state의 swaps/subs/part_time에 의존한다.
+    st.cache_data는 세션 간 공유될 수 있으므로 이 데이터에는 사용하지 않는다.
+    대신 주간 캐시와 동일한 세션 로컬 dict를 사용해 중복 계산만 제거한다.
+    """
+    cache = st.session_state.setdefault("_effective_day_cache", {})
+    cache_id = f"{norm}:{int(version or 0)}:{int(bool(use_test))}:{neis_cache_key}"
+    item = cache.get(cache_id)
+    if isinstance(item, pd.DataFrame):
+        return item
+    result = _build_effective_timetable_for_date(norm, version, use_test)
+    # 과도한 메모리 증가를 막기 위해 최근 20개 날짜 계산만 유지한다.
+    cache[cache_id] = result
+    if len(cache) > 20:
+        for key in list(cache.keys())[:-20]:
+            cache.pop(key, None)
+    return result
+
+def get_effective_timetable_for_date(
+    on_date: str, version: int = 0, use_test: bool = False, neis_cache_key: str = ""
+) -> pd.DataFrame:
+    norm = normalize_date_str(on_date)
+    if not norm:
+        return _build_effective_timetable_for_date(norm, version, use_test)
+    token = neis_cache_key or get_neis_cache_token()
+    return _get_effective_timetable_cached(norm, int(version or 0), bool(use_test), str(token))
+
+# 기존 코드의 invalidate 호출과 호환되도록 clear를 공개 함수에 연결한다.
+def _clear_effective_timetable_cache():
+    st.session_state.pop("_effective_day_cache", None)
+    st.session_state.pop("_effective_week_cache", None)
+get_effective_timetable_for_date.clear = _clear_effective_timetable_cache
+
+def get_effective_week(
+    ref_date: date, version: int = 0, use_test: bool = False, neis_cache_key: str = ""
+):
+    """월~금 유효 시간표를 한 번만 준비해 교사/학급 매트릭스가 공유한다."""
+    ref_date = ref_date or _today_kst()
+    monday = ref_date - timedelta(days=ref_date.weekday())
+    token = neis_cache_key or get_neis_cache_token()
+    cache_id = f"{monday.isoformat()}:{int(version or 0)}:{int(bool(use_test))}:{token}"
+    state = st.session_state.get("_effective_week_cache")
+    if isinstance(state, dict) and state.get("cache_id") == cache_id:
+        return state["data"]
+    # NEIS는 주간 매트릭스 계산보다 먼저 한 번만 확보한다.
+    ensure_neis_week_loaded(monday, force_refresh=False)
+    data = {}
+    for i, day in enumerate(DAYS):
+        ds = (monday + timedelta(days=i)).isoformat()
+        data[day] = get_effective_timetable_for_date(ds, version, use_test=use_test, neis_cache_key=token)
+    st.session_state["_effective_week_cache"] = {"cache_id": cache_id, "data": data}
+    return data
+
 def get_swap_origin_info(teacher: str, on_date: str, period: int) -> str:
     norm_date = normalize_date_str(on_date)
     if not norm_date:
@@ -1637,9 +2596,11 @@ def has_duty(teacher: str, on_date: str, period: int = None) -> bool:
         return any(day == norm for day, _ in slots)
     p = safe_int(period)
     return (norm, 0) in slots or (norm, p) in slots
-def is_free(teacher: str, day: str, period: int, on_date: str = None, e_tt=None) -> bool:
+def is_free(teacher: str, day: str, period: int, on_date: str = None, e_tt=None, class_name: str = None) -> bool:
     p = safe_int(period)
     norm = normalize_date_str(on_date)
+    if class_name is not None and not slot_allowed_for_class(class_name, day, p):
+        return False
     if has_duty(teacher, norm, p):
         return False
     if e_tt is None:
@@ -1860,7 +2821,7 @@ def do_swap(a, b, date_a, date_b, is_part_time_purpose=False, is_test=False):
     }
     if is_test:
         st.session_state.test_swaps = pd.concat([st.session_state.get("test_swaps", pd.DataFrame()), pd.DataFrame([rec])], ignore_index=True)
-        get_effective_timetable_for_date.clear(); effective_teacher_matrix.clear(); get_single_lesson_1to1_candidates.clear(); get_single_lesson_linked_cycles.clear(); get_test_affected_slots.clear(); find_cycle_linked_swaps.clear(); get_target_time_recommendations.clear()
+        get_effective_timetable_for_date.clear(); get_single_lesson_1to1_candidates.clear(); get_single_lesson_linked_cycles.clear(); get_test_affected_slots.clear(); find_cycle_linked_swaps.clear(); get_target_time_recommendations.clear()
         return True
     before = st.session_state.swaps.copy(deep=True)
     st.session_state.swaps = pd.concat([before, pd.DataFrame([rec])], ignore_index=True)
@@ -1877,7 +2838,11 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
     norm_a=normalize_date_str(date_a)
     norm_b=normalize_date_str(date_b)
     day_a=WEEKDAY_KR[datetime.strptime(norm_a, "%Y-%m-%d").weekday()] if norm_a else ""
+    if is_neis_non_instructional_date(norm_a) or is_neis_non_instructional_date(norm_b):
+        return False
     if not is_free(teacher_b, day_b, period_b, norm_b, e_b):
+        return False
+    if not slot_allowed_for_class(str(a.get("학급", "")), day_b, period_b):
         return False
     if not is_test and _actual_direct_slot_is_affected(norm_b, teacher_b, period_b):
         return False
@@ -1897,7 +2862,7 @@ def do_linked_swap(a, teacher_b, date_a, date_b, day_b, period_b, is_part_time_p
     }
     if is_test:
         st.session_state.test_swaps = pd.concat([st.session_state.get("test_swaps", pd.DataFrame()), pd.DataFrame([rec])], ignore_index=True)
-        get_effective_timetable_for_date.clear(); effective_teacher_matrix.clear(); get_single_lesson_1to1_candidates.clear(); get_single_lesson_linked_cycles.clear(); get_test_affected_slots.clear(); find_cycle_linked_swaps.clear(); get_target_time_recommendations.clear()
+        get_effective_timetable_for_date.clear(); get_single_lesson_1to1_candidates.clear(); get_single_lesson_linked_cycles.clear(); get_test_affected_slots.clear(); find_cycle_linked_swaps.clear(); get_target_time_recommendations.clear()
         return True
     before = st.session_state.swaps.copy(deep=True)
     st.session_state.swaps = pd.concat([before, pd.DataFrame([rec])], ignore_index=True)
@@ -1934,7 +2899,6 @@ def apply_cycle_swaps(moves, is_test=False):
             st.session_state.test_swaps = before
             st.session_state["test_has_cycle"] = before_has_cycle
             get_effective_timetable_for_date.clear()
-            effective_teacher_matrix.clear()
             get_single_lesson_1to1_candidates.clear()
             get_single_lesson_linked_cycles.clear()
             get_test_affected_slots.clear()
@@ -2038,6 +3002,8 @@ def get_target_time_recommendations(teacher_a, date_a_str, period_a, class_a, su
     ti=st.session_state.get("teachers",pd.DataFrame()); e_a=get_effective_timetable_for_date(norm_a,ver,use_test=use_test); e_b=get_effective_timetable_for_date(norm_b,ver,use_test=use_test)
     if ti.empty or e_a.empty or e_b.empty: return pd.DataFrame(),[],""
     p_a,p_b=safe_int(period_a),safe_int(period_b); day_a=WEEKDAY_KR[date.fromisoformat(norm_a).weekday()]; day_b=WEEKDAY_KR[date.fromisoformat(norm_b).weekday()]
+    if is_neis_non_instructional_date(norm_a) or is_neis_non_instructional_date(norm_b): return pd.DataFrame(),[] ,"NEIS 학사일정상 수업이 없는 날입니다."
+    if is_grade12_thursday_7_forbidden(class_a, day_a, p_a) or is_grade12_thursday_7_forbidden(class_a, day_b, p_b): return pd.DataFrame(),[] ,"1·2학년 수업은 목요일 7교시에 배치할 수 없습니다."
     my_class=str(class_a).strip(); my_grade=grade_of(my_class); my_group=subject_group(subject_a); cum=cumulative_sub_count(version=ver)
     avail=get_teacher_availability_index(ver); duties=_duty_slot_index(ver)
     def avail_ok(t,d,p):
@@ -2085,6 +3051,8 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
     search_dates = sorted(set(search_dates))
     for d_str in week_dates:
         day_kr = WEEKDAY_KR[datetime.strptime(d_str, "%Y-%m-%d").weekday()]
+        if is_neis_non_instructional_date(d_str):
+            continue
         e_tt = get_effective_timetable_for_date(d_str, ver)
         if e_tt.empty:
             continue
@@ -2099,6 +3067,8 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                 if td_str == d_str:
                     continue
                 tday = WEEKDAY_KR[datetime.strptime(td_str, "%Y-%m-%d").weekday()]
+                if is_neis_non_instructional_date(td_str):
+                    continue
                 e_b = get_effective_timetable_for_date(td_str, ver)
                 if e_b.empty:
                     continue
@@ -2122,6 +3092,8 @@ def get_weekly_1to1_swap_table(teacher: str, ref_date: date, future_days: int = 
                     if not same_class:
                         continue
                     other_grade = grade_of(other_class)
+                    if is_grade12_thursday_7_forbidden(my_class, tday, p) or is_grade12_thursday_7_forbidden(other_class, day_kr, p):
+                        continue
                     same_grade  = (other_grade == my_grade)
                     score = 200
                     if subject_group(str(o["과목"])) == my_group: score += 40
@@ -2174,6 +3146,8 @@ def get_single_lesson_1to1_candidates(
         search_dates=[source_date+timedelta(days=i) for i in range((end-source_date).days+1) if (source_date+timedelta(days=i)).weekday()<5]
     ver=version or st.session_state.get("_data_version",0); source_day=WEEKDAY_KR[source_date.weekday()]; source_tt=get_effective_timetable_for_date(source_str,ver,use_test=use_test)
     if source_tt is None or source_tt.empty: return pd.DataFrame(columns=cols)
+    if is_grade12_thursday_7_forbidden(source_class, source_day, source_period):
+        return pd.DataFrame(columns=cols)
     source_rows=[r for r in source_tt.itertuples(index=False) if str(getattr(r,"교사명","")).strip()==teacher and safe_int(getattr(r,"교시",0))==source_period and str(getattr(r,"학급","")).strip()==source_class and str(getattr(r,"과목","")).strip()==source_subject]
     if not source_rows: return pd.DataFrame(columns=cols)
     avail=get_teacher_availability_index(ver); duties=_duty_slot_index(ver); test_affected=get_test_affected_slots(ver) if use_test else set(); actual_affected=get_actual_direct_swap_affected_slots(ver)
@@ -2185,12 +3159,15 @@ def get_single_lesson_1to1_candidates(
     results=[]; seen=set()
     for td in search_dates:
         if td.weekday()>=5: continue
-        target_str=td.isoformat(); target_day=WEEKDAY_KR[td.weekday()]; target_tt=get_effective_timetable_for_date(target_str,ver,use_test=use_test)
+        target_str=td.isoformat(); target_day=WEEKDAY_KR[td.weekday()]
+        if is_neis_non_instructional_date(target_str): continue
+        target_tt=get_effective_timetable_for_date(target_str,ver,use_test=use_test)
         if target_tt is None or target_tt.empty: continue
         tp=safe_int(target_period) if target_date is not None and target_period is not None else None
         rows=[r for r in target_tt.itertuples(index=False) if tp is None or safe_int(getattr(r,"교시",0))==tp]
         periods=[tp] if tp is not None and 1<=tp<=PERIODS_PER_DAY.get(target_day,MAX_PERIOD) else sorted({safe_int(getattr(r,"교시",0)) for r in rows if 1<=safe_int(getattr(r,"교시",0))<=PERIODS_PER_DAY.get(target_day,MAX_PERIOD)}) if tp is None else []
         for target_p in periods:
+            if is_grade12_thursday_7_forbidden(source_class, target_day, target_p): continue
             if target_str==source_str and target_p==source_period: continue
             if not available(teacher,target_day,target_p) or duty_blocked(teacher,target_str,target_p): continue
             for r in rows:
@@ -2233,6 +3210,7 @@ def get_single_lesson_linked_cycles(
             if (teacher,p) in occupied or (target_str,0) in ds or (target_str,p) in ds: continue
             if item is not None and item[0] and (day,p) not in item[1]: continue
             if use_test and (target_str,current_t,p) in test_affected: continue
+            if is_grade12_thursday_7_forbidden(orig_class, day, p): continue
             priority=(0 if p==source_period else 1,abs((d-source_date).days),0 if subject_group(str(getattr(r,"과목","")))==subject_group(orig_subject) else 1)
             target_slots.append((priority,target_str,p))
     if not target_slots: return [], "연계 순환을 시작할 수 있는 빈 시간대가 없습니다."
@@ -2258,78 +3236,74 @@ def teacher_matrix(version=0):
             for p in range(1, PERIODS_PER_DAY.get(d,7)+1): row[f"{d}{p}"]=idx.get((t,d,p),"")
         rows.append(row)
     return pd.DataFrame(rows)
-@st.cache_data(show_spinner=False, ttl=180)
-def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = False) -> pd.DataFrame:
-    monday = ref_date - timedelta(days=ref_date.weekday())
-    daily_timetables={}; teacher_names=set()
-    base_tt=st.session_state.get("timetable",pd.DataFrame())
-    if not base_tt.empty: teacher_names.update(base_tt["교사명"].dropna().astype(str).str.strip())
-    for i,d in enumerate(DAYS):
-        day_date=monday+timedelta(days=i); ds=day_date.strftime("%Y-%m-%d")
-        day_tt=get_effective_timetable_for_date(ds,version,use_test=use_test); daily_timetables[d]=(ds,day_tt)
-        if not day_tt.empty: teacher_names.update(day_tt["교사명"].dropna().astype(str).str.strip())
+def effective_teacher_matrix(ref_date: date, version: int = 0, use_test: bool = False, neis_cache_key: str = "") -> pd.DataFrame:
+    token = neis_cache_key or get_neis_cache_token()
+    weekly = get_effective_week(ref_date, version, use_test, token)
+    teacher_names = set()
+    base_tt = st.session_state.get("timetable", pd.DataFrame())
+    if not base_tt.empty and "교사명" in base_tt.columns:
+        teacher_names.update(base_tt["교사명"].dropna().astype(str).str.strip())
     daily_indexes = {}
-    for d, (_, day_tt) in daily_timetables.items():
-        daily_indexes[d] = (
-            {(str(r.교사명).strip(), safe_int(r.교시)): r for r in day_tt.itertuples(index=False)}
-            if not day_tt.empty else {}
-        )
-    rows=[]
-    for t in sorted(x for x in teacher_names if x):
-        row={"교사명":t}
+    for d in DAYS:
+        day_tt = weekly.get(d, pd.DataFrame())
+        if not day_tt.empty and "교사명" in day_tt.columns:
+            teacher_names.update(day_tt["교사명"].dropna().astype(str).str.strip())
+            daily_indexes[d] = {(str(r.교사명).strip(), safe_int(r.교시)): r for r in day_tt.itertuples(index=False)}
+        else:
+            daily_indexes[d] = {}
+    rows = []
+    for teacher in sorted(x for x in teacher_names if x):
+        row = {"교사명": teacher}
         for d in DAYS:
             idx = daily_indexes[d]
-            for p in range(1,PERIODS_PER_DAY.get(d,7)+1):
-                r=idx.get((t,p))
-                if r is None: row[f"{d}{p}"]=""; continue
-                cell=f"{r.학급} {r.과목}".strip(); typ=str(getattr(r,"변경유형", "원본")).strip()
-                if typ=="교환": cell += " 🔄 교환"
-                elif typ=="테스트교환": cell += " 🧪 테스트교환"
-                elif typ=="보강": cell += " 🟢 보강"
-                elif typ=="시간강사": cell += f" 🟡 {r.원본교사}→시간강사"
-                row[f"{d}{p}"]=cell
+            for p in range(1, PERIODS_PER_DAY.get(d, 7) + 1):
+                r = idx.get((teacher, p))
+                if r is None:
+                    row[f"{d}{p}"] = ""
+                    continue
+                cell = f"{r.학급} {r.과목}".strip()
+                typ = str(getattr(r, "변경유형", "원본")).strip()
+                if typ == "교환": cell += " 🔄 교환"
+                elif typ == "테스트교환": cell += " 🧪 테스트교환"
+                elif typ == "보강": cell += " 🟢 보강"
+                elif typ == "시간강사": cell += f" 🟡 {r.원본교사}→시간강사"
+                row[f"{d}{p}"] = cell
         rows.append(row)
-    return pd.DataFrame(rows)
-@st.cache_data(show_spinner=False)
-def class_matrix(version=0, ref_date=None, use_test=False):
-    ref=ref_date or _today_kst(); monday=ref-timedelta(days=ref.weekday())
-    daily={}
-    classes=set()
-    for i,d in enumerate(DAYS):
-        ds=(monday+timedelta(days=i)).strftime("%Y-%m-%d")
-        e=get_effective_timetable_for_date(ds,version,use_test=use_test); daily[d]=e
-        if not e.empty: classes.update(e["학급"].dropna().astype(str).str.strip())
+    return apply_neis_non_instructional_display(pd.DataFrame(rows), ref_date, "교사명")
+
+def class_matrix(version=0, ref_date=None, use_test=False, neis_cache_key: str = ""):
+    ref = ref_date or _today_kst()
+    token = neis_cache_key or get_neis_cache_token()
+    weekly = get_effective_week(ref, version, use_test, token)
+    classes = set()
     daily_indexes = {}
-    for d, e in daily.items():
+    for d in DAYS:
+        e = weekly.get(d, pd.DataFrame())
         idx = {}
         if not e.empty:
             for r in e.itertuples(index=False):
                 cls = str(getattr(r, "학급", "")).strip()
-                if not cls:
-                    continue
-                idx[(cls, safe_int(getattr(r, "교시", 0)))] = r
+                if cls:
+                    classes.add(cls)
+                    idx[(cls, safe_int(getattr(r, "교시", 0)))] = r
         daily_indexes[d] = idx
-    rows=[]
-    for c in sorted(x for x in classes if x):
-        row={"학급":c}
+    rows = []
+    for cls in sorted(classes):
+        row = {"학급": cls}
         for d in DAYS:
             idx = daily_indexes[d]
-            for p in range(1,PERIODS_PER_DAY.get(d,7)+1):
-                r=idx.get((c,p))
-                if r is not None:
-                    cell = str(getattr(r, "과목", "")).strip()
-                    typ = str(getattr(r, "변경유형", "원본")).strip()
-                    marker = {
-                        "교환": "🔄",
-                        "테스트교환": "🧪",
-                        "보강": "🟢",
-                        "시간강사": "🟡",
-                    }.get(typ, "")
-                    row[f"{d}{p}"] = f"{cell} {marker}".strip()
-                else:
-                    row[f"{d}{p}"]=""
+            for p in range(1, PERIODS_PER_DAY.get(d, 7) + 1):
+                r = idx.get((cls, p))
+                if r is None:
+                    row[f"{d}{p}"] = ""
+                    continue
+                subject = str(getattr(r, "과목", "")).strip()
+                typ = str(getattr(r, "변경유형", "원본")).strip()
+                marker = {"교환":"🔄", "테스트교환":"🧪", "보강":"🟢", "시간강사":"🟡"}.get(typ, "")
+                row[f"{d}{p}"] = f"{subject} {marker}".strip()
         rows.append(row)
-    return pd.DataFrame(rows)
+    return apply_neis_non_instructional_display(pd.DataFrame(rows), ref, "학급")
+
 def _weekly_cell_parts(value):
     text = "" if value is None else str(value).strip()
     if not text:
@@ -2361,6 +3335,8 @@ def _resolve_weekly_selection(selection, ref_date, use_test=False):
     monday = ref_date - timedelta(days=ref_date.weekday())
     picked_date = monday + timedelta(days=selection["day_index"])
     ds = picked_date.strftime("%Y-%m-%d")
+    if is_neis_non_instructional_date(ds):
+        return None
     ver = st.session_state.get("_data_version", 0)
     e = get_effective_timetable_for_date(ds, ver, use_test=use_test)
     if e.empty:
@@ -2408,7 +3384,9 @@ def _register_absence_from_weekly(lesson, reason, detail=""):
 def _weekly_display_matrix(matrix: pd.DataFrame) -> pd.DataFrame:
     if matrix is None or matrix.empty:
         return matrix.copy(deep=True) if isinstance(matrix, pd.DataFrame) else pd.DataFrame()
-    out = matrix.copy(deep=True)
+    out = matrix.copy(deep=False)
+    # 이후 컬럼 대입 시 pandas가 필요한 컬럼만 copy-on-write 하므로
+    # 대형 교사 매트릭스의 불필요한 deep copy 비용을 줄인다.
     for col in out.columns:
         if str(col) in ("교사명", "학급", "교시"):
             continue
@@ -3125,8 +4103,17 @@ def render_weekly_matrix(matrix: pd.DataFrame, ref_date: date, *, row_label="교
         st.markdown(f"<div style='font-size:.86rem;font-weight:600;color:#6b7280;margin:0 0 .12rem .1rem'>{html_lib.escape(str(title))}</div>", unsafe_allow_html=True)
     if show_week_dates:
         dates = [monday + timedelta(days=i) for i in range(5)]
-        st.markdown("<div class='compact-nav'>" + "　".join(f"{DAYS[i]} {dates[i]:%m.%d}" for i in range(5)) + "</div>", unsafe_allow_html=True)
-    visible_matrix = _hide_past_week_slots(matrix, ref_date, hide_past=True)
+        holiday_labels = get_neis_non_instructional_days(monday, monday + timedelta(days=4))
+        nav_parts = []
+        for i, d in enumerate(dates):
+            suffix = f" · {holiday_labels[d.isoformat()]}" if d.isoformat() in holiday_labels else ""
+            nav_parts.append(f"{DAYS[i]} {d:%m.%d}{suffix}")
+        st.markdown("<div class='compact-nav'>" + "　".join(nav_parts) + "</div>", unsafe_allow_html=True)
+    # 최종 렌더링 직전에도 NEIS 비수업일을 다시 적용합니다.
+    # 상위 매트릭스 캐시가 오래된 시간표를 반환하더라도 화면에는
+    # 등교하지 않는 날의 수업이 절대로 남지 않도록 하는 마지막 방어선입니다.
+    visible_matrix = apply_neis_non_instructional_display(matrix, ref_date, row_label)
+    visible_matrix = _hide_past_week_slots(visible_matrix, ref_date, hide_past=True)
     teacher_period_grid = row_label == "교시" and all(d in visible_matrix.columns for d in DAYS)
     display = _weekly_styled_matrix(visible_matrix, drop_teacher_name=teacher_period_grid)
     column_config = {}
@@ -4865,31 +5852,90 @@ if st.session_state.get("active_tab") in ALL_TABS and not init_state():
     st.stop()
 if "ui_font" not in st.session_state or st.session_state.ui_font not in UI_FONT_OPTIONS:
     st.session_state.ui_font = UI_FONT_DEFAULT
-st.markdown(
-    f"""<style id="dialog-font-state">
-:root {{ --app-font: {UI_FONT_OPTIONS[st.session_state.ui_font]}; }}
-html,body,[data-testid="stAppViewContainer"],[data-testid="stAppViewContainer"] *{{font-family:var(--app-font)!important}}
-body table,body table *,[data-testid="stDataFrame"],[data-testid="stDataFrame"] *,[data-testid="stDataEditor"],[data-testid="stDataEditor"] *{{font-family:var(--app-font)!important;--gdg-font-family:var(--app-font)!important}}
-[class*="material-symbols"],[data-testid="stIconMaterial"],[data-testid="stIconMaterial"] *{{font-family:"Material Symbols Rounded","Material Symbols Outlined",sans-serif!important}}
-</style>""",
-    unsafe_allow_html=True,
-)
+# 도구 다이얼로그의 글꼴 변경도 동일한 단일 런타임 함수로 처리한다.
+render_font_runtime_css(st.session_state.ui_font)
 st.markdown('<div class="streamlit-header-safe-space" aria-hidden="true"></div>', unsafe_allow_html=True)
+def _apply_ui_theme_from_dialog():
+    selected = st.session_state.get("ui_theme_selector", UI_THEME_DEFAULT)
+    # 레이블("Black", "Apple Light")을 코드("black", "light")로 매핑
+    theme_code = UI_THEME_OPTIONS.get(selected, selected)
+    if theme_code not in {"light", "black"}:
+        theme_code = "light"
+    st.session_state.ui_theme = theme_code
+    try:
+        st.rerun(scope="app")
+    except TypeError:
+        st.rerun()
+
+
+def _apply_ui_font_from_dialog():
+    selected = st.session_state.get("ui_font_selector", UI_FONT_DEFAULT)
+    if selected not in UI_FONT_OPTIONS:
+        selected = UI_FONT_DEFAULT
+    st.session_state.ui_font = selected
+    try:
+        st.rerun(scope="app")
+    except TypeError:
+        st.rerun()
+    except TypeError:
+        st.rerun()
+
+
+def _apply_ui_font_from_dialog():
+    selected = st.session_state.get("ui_font_selector", UI_FONT_DEFAULT)
+    if selected not in UI_FONT_OPTIONS:
+        selected = UI_FONT_DEFAULT
+    st.session_state.ui_font = selected
+    try:
+        st.rerun(scope="app")
+    except TypeError:
+        st.rerun()
+
+
+def _apply_ui_font_from_dialog():
+    """도구 다이얼로그의 글꼴 선택을 앱 전체에 즉시 반영한다.
+
+    st.dialog 내부는 fragment rerun으로 실행되므로 다이얼로그 안에서만 CSS를
+    주입하면 X로 닫는 순간 그 CSS가 DOM에서 사라져 원래 폰트처럼 보일 수 있다.
+    선택 변경 시 앱 전체를 rerun하여 메인 앱 상단의 전역 CSS가 새 글꼴로
+    다시 렌더링되게 한다.
+    """
+    selected = st.session_state.get("ui_font_selector", UI_FONT_DEFAULT)
+    if selected not in UI_FONT_OPTIONS:
+        selected = UI_FONT_DEFAULT
+    st.session_state.ui_font = selected
+    # dialog(fragment) 범위를 벗어나 전체 앱을 다시 렌더링해야 한다.
+    st.rerun(scope="app")
+
+
 @st.dialog("도구", width="small")
 def render_tools_dialog():
     if current_role() == ROLE_GUEST:
         st.caption("게스트 모드에서는 사용할 수 있는 도구가 없습니다.")
         return
     st.markdown('<div class="tool-section-title">화면</div>', unsafe_allow_html=True)
+    selected_theme = st.selectbox(
+        "디자인",
+        list(UI_THEME_OPTIONS.keys()),
+        index=list(UI_THEME_OPTIONS.keys()).index(next((k for k, v in UI_THEME_OPTIONS.items() if v == st.session_state.get("ui_theme", "light")), UI_THEME_DEFAULT)),
+        key="ui_theme_selector",
+        on_change=_apply_ui_theme_from_dialog,
+        help="Apple Light / Black 디자인을 앱 전체에 적용합니다.",
+    )
     selected_font = st.selectbox(
         "글꼴",
         list(UI_FONT_OPTIONS.keys()),
         index=list(UI_FONT_OPTIONS.keys()).index(st.session_state.get("ui_font", UI_FONT_DEFAULT)),
         key="ui_font_selector",
-        help="이 브라우저에서 사용할 수 있는 글꼴을 우선 적용합니다. 학교 PC에 해당 글꼴이 설치되어 있지 않으면 다음 대체 글꼴이 사용됩니다.",
+        on_change=_apply_ui_font_from_dialog,
+        help="글꼴을 선택하면 다이얼로그를 닫은 뒤에도 유지되도록 앱 전체에 즉시 적용합니다.",
     )
-    st.session_state.ui_font = selected_font
-    render_font_runtime_css(selected_font)
+    # 첫 렌더링 시에도 현재 선택값을 동기화한다. 변경 시에는 callback이
+    # 전체 앱 rerun을 수행하므로 이 fragment 안에서만 CSS를 주입하지 않는다.
+    if selected_font in UI_FONT_OPTIONS and st.session_state.get("ui_font") != selected_font:
+        st.session_state.ui_font = selected_font
+    render_theme_runtime_css(st.session_state.get("ui_theme", UI_THEME_OPTIONS[UI_THEME_DEFAULT]))
+    render_font_runtime_css(st.session_state.get("ui_font", UI_FONT_DEFAULT))
     if selected_font == "Noto Sans KR · GitHub (Light + Bold)":
         st.caption("GitHub의 NotoSansKR-Light.ttf(일반체)와 NotoSansKR-Bold.ttf(볼드체)를 사용합니다.")
         st.markdown(
@@ -5101,6 +6147,38 @@ PAGE_DESCRIPTIONS = {
     "📑 회원별 탭 권한 관리": "사용자별 업무 메뉴 접근 권한을 관리합니다.",
     "교무호봉획정": "기간제교원 호봉(재)획정과 조서 출력을 처리합니다.",
 }
+# NEIS API 키는 Streamlit Secrets에서만 읽습니다.
+# 홈페이지에는 API 키 입력창을 노출하지 않습니다.
+_neis_configured_key = _neis_secret_key()
+_previous_neis_runtime_key = str(st.session_state.get("_neis_runtime_key", "") or "")
+_neis_configured_token = hashlib.sha256(_neis_configured_key.encode("utf-8")).hexdigest() if _neis_configured_key else ""
+if _neis_configured_key:
+    st.session_state.neis_api_key = _neis_configured_key
+    # NEIS Secrets가 처음 주입되거나 변경된 경우,
+    # API 키가 없던 시점에 캐시된 "원본 시간표"를 즉시 폐기합니다.
+    if _previous_neis_runtime_key != _neis_configured_token:
+        try:
+            st.session_state.pop("_neis_week_schedule", None)
+            # 매트릭스 함수는 현재 session_state/NEIS 데이터에 의존하므로
+            # 캐시를 사용하지 않으며, NEIS API 데이터 캐시는 키가 바뀌면 무효화합니다.
+            try:
+                neis_find_school.clear()
+                neis_fetch_schedule.clear()
+            except Exception:
+                pass
+        except Exception:
+            pass
+    st.session_state["_neis_runtime_key"] = _neis_configured_token
+else:
+    st.session_state.pop("neis_api_key", None)
+    st.session_state.pop("_neis_week_schedule", None)
+    st.session_state["_neis_runtime_key"] = ""
+
+if _neis_configured_key:
+    _neis_err = str(st.session_state.get("_neis_last_error", "") or "").strip()
+    if _neis_err:
+        st.warning("NEIS 학사일정 연결 오류가 있습니다. 주간 시간표는 NEIS 확인 후 표시됩니다.")
+
 st.markdown(
     f'<div class="work-page-head"><div>'
     f'<div style="font-size:11px;color:#86868b;margin-bottom:6px;letter-spacing:.01em">{SCHOOL_NAME} · {SCHOOL_YEAR}</div>'
@@ -5127,22 +6205,37 @@ if "시간표 조회" in tab_map:
                         details.append({"교사":r["교사명"],"교시":sel["교시"],"학급":r["학급"],"과목":r["과목"],"변경유형":r.get("변경유형","원본"),"변경상세":r.get("변경상세","")})
                 st.dataframe(pd.DataFrame(details),width="stretch",hide_index=True)
         elif view == "교사별 주간":
-            ref=calendar_picker("주간 기준일",_today_kst(),key="view_week_ref")
+            ref=week_picker("주간 선택",_today_kst(),key="view_week_ref")
+            try:
+                require_neis_week(ref)
+            except Exception as exc:
+                st.error(f"NEIS 학사일정을 불러오지 못했습니다. 시간표를 표시하지 않습니다.\n\n{exc}")
+                st.stop()
             st.markdown('<div class="matrix-legend"><span>↻ 교환</span><span>+ 보강</span><span>• 시간강사</span></div>', unsafe_allow_html=True)
-            render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False, open_dialog=False)
+            render_standard_weekly_matrix(effective_teacher_matrix(ref,ver,use_test=False,neis_cache_key=get_neis_cache_token()), ref, row_label='교사명', key='view_teacher_week_matrix', title='교사별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체교사_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_teacher')
         elif view == "학급별 주간":
-            ref=calendar_picker("주간 기준일",_today_kst(),key="view_class_ref")
+            ref=week_picker("주간 선택",_today_kst(),key="view_class_ref")
+            try:
+                require_neis_week(ref)
+            except Exception as exc:
+                st.error(f"NEIS 학사일정을 불러오지 못했습니다. 시간표를 표시하지 않습니다.\n\n{exc}")
+                st.stop()
             st.markdown('<div class="matrix-legend"><span>과목명 기준 · 조회 전용</span><span>↻ 교환</span><span>+ 보강</span></div>', unsafe_allow_html=True)
-            render_standard_weekly_matrix(class_matrix(ver, ref_date=ref), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False, open_dialog=False)
+            render_standard_weekly_matrix(class_matrix(ver, ref_date=ref, neis_cache_key=get_neis_cache_token()), ref, row_label='학급', key='view_class_week_matrix', title='학급별 주간 시간표', use_test=False, open_dialog=False)
             xlsx = build_weekly_class_schedule_excel_bytes(ref, use_test=False)
             st.download_button('📥 이 주간표 Excel 다운로드', xlsx, file_name=f'전체학급_주간시간표_{ref:%Y%m%d}.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='weekly_xlsx_class')
         else:
             tlist=get_all_teacher_names()
             t=st.selectbox("교사 선택",tlist,key="view_t")
-            ref=calendar_picker("주간 기준일",_today_kst(),key="view_ref")
-            teacher_week = effective_teacher_matrix(ref, ver, use_test=False)
+            ref=week_picker("주간 선택",_today_kst(),key="view_ref")
+            try:
+                require_neis_week(ref)
+            except Exception as exc:
+                st.error(f"NEIS 학사일정을 불러오지 못했습니다. 시간표를 표시하지 않습니다.\n\n{exc}")
+                st.stop()
+            teacher_week = effective_teacher_matrix(ref, ver, use_test=False, neis_cache_key=get_neis_cache_token())
             if not teacher_week.empty and t:
                 teacher_week = teacher_week[teacher_week["교사명"].astype(str).str.strip() == str(t).strip()].reset_index(drop=True)
             render_standard_weekly_matrix(teacher_week, ref, row_label="교사명", key="view_single_teacher_week_matrix", title=f"{t} 주간 시간표", use_test=False, open_dialog=False)
@@ -5347,13 +6440,13 @@ if "결강·보강" in tab_map:
                                         st.rerun()
 if "시간표 맞교환 & 변경 추천" in tab_map:
     with tab_map["시간표 맞교환 & 변경 추천"]:
-        week_anchor = calendar_picker(
-            "교환 검색 기준 주", _today_kst(),
+        week_anchor = week_picker(
+            "교환 검색 주차", _today_kst(),
             key="exchange_week_anchor",
-            help_text="선택한 날짜가 포함된 평일 주간 시간표를 표시합니다. 토·일은 표시하지 않습니다."
+            help_text="주차 버튼을 선택하면 해당 주의 월요일을 기준으로 주간 시간표를 표시합니다."
         )
         ver = st.session_state.get("_data_version", 0)
-        lesson_matrix = effective_teacher_matrix(week_anchor, ver, use_test=False)
+        lesson_matrix = effective_teacher_matrix(week_anchor, ver, use_test=False, neis_cache_key=get_neis_cache_token())
         render_standard_weekly_matrix(
             lesson_matrix, week_anchor, row_label="교사명",
             key="exchange_weekly_matrix",
@@ -5394,16 +6487,20 @@ if "시간표 변경 테스트용" in tab_map:
             st.session_state.test_swaps = pd.DataFrame()
             st.session_state["test_has_cycle"] = False
             get_effective_timetable_for_date.clear()
-            effective_teacher_matrix.clear()
             get_single_lesson_1to1_candidates.clear()
             get_single_lesson_linked_cycles.clear()
             st.success("테스트 상태가 초기화되었습니다.")
             st.rerun()
         st.markdown("#### 수업 선택 — **현재 적용 + 테스트 변경 결과**에서 수업 셀 하나를 클릭")
         st.caption("실제 변경과 현재까지의 테스트 변경을 모두 반영합니다. 선택한 현재 상태를 기준으로 다음 1:1 가능 위치를 계산합니다.")
-        test_week_anchor = calendar_picker("테스트 검색 기준 주", _today_kst(), key="test_week_anchor", help_text="선택한 날짜가 포함된 주간 시간표를 테스트 기준으로 사용합니다.")
+        test_week_anchor = week_picker("테스트 검색 주차", _today_kst(), key="test_week_anchor", help_text="주차 버튼을 선택하면 해당 주를 테스트 기준으로 사용합니다.")
         ver = st.session_state.get("_data_version", 0)
-        test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True)
+        try:
+            require_neis_week(test_week_anchor)
+        except Exception as exc:
+            st.error(f"NEIS 학사일정을 불러오지 못했습니다. 테스트 주간표를 표시하지 않습니다.\n\n{exc}")
+            st.stop()
+        test_matrix = effective_teacher_matrix(test_week_anchor, ver, use_test=True, neis_cache_key=get_neis_cache_token())
         st.caption("표시 기준: 🔄 교환 변경 이력 · 🟢/ [보강] 보강 처리 이력 · 테스트 변경도 함께 반영")
         render_standard_weekly_matrix(
             test_matrix, test_week_anchor, row_label="교사명",
@@ -5432,7 +6529,6 @@ if "시간표 변경 테스트용" in tab_map:
                     st.session_state.test_swaps = pd.DataFrame()
                     st.session_state["test_has_cycle"] = False
                     get_effective_timetable_for_date.clear()
-                    effective_teacher_matrix.clear()
                     get_single_lesson_1to1_candidates.clear()
                     get_single_lesson_linked_cycles.clear()
                     st.success("테스트 중인 맞교환 목록이 전체 삭제되었습니다.")
@@ -5441,7 +6537,7 @@ if "변경된 교사 주간표" in tab_map:
     with tab_map["변경된 교사 주간표"]:
         st.markdown("### 변경된 교사 주간표")
         st.caption("원본 교사별 주간표 형식을 기준으로 전체 교사를 한 번에 표시합니다. 변경 이력이 있는 교사는 이름과 상태에 표시됩니다.")
-        ref = calendar_picker("주간 기준일", _today_kst(), key="chg_ref")
+        ref = week_picker("주간 선택", _today_kst(), key="chg_ref")
         changed = set(str(x).strip() for x in get_changed_teachers_for_week(ref) if str(x).strip())
         teacher_names = []
         teachers_df = st.session_state.get("teachers", pd.DataFrame())
@@ -5962,3 +7058,12 @@ if "📑 회원별 탭 권한 관리" in tab_map:
 if "교무호봉획정" in tab_map:
     with tab_map["교무호봉획정"]:
         render_salary_tab()
+
+
+# ─────────────────────────────────────────────────────────────
+# 결정적 테마 최종 패스
+# - Streamlit 자체 Light/Dark 설정, OS 다크모드, 브라우저 색상과 무관하게
+#   이 앱이 선택한 테마 토큰을 최종 렌더링 결과로 사용한다.
+# - 반드시 모든 앱 콘텐츠를 렌더링한 뒤 마지막에 주입한다.
+# ─────────────────────────────────────────────────────────────
+render_theme_runtime_css(st.session_state.get("ui_theme", UI_THEME_OPTIONS[UI_THEME_DEFAULT]))
